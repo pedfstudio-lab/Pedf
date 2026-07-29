@@ -1,0 +1,156 @@
+# DesiPDF — Project Progress
+
+> Living checklist of the full build plan (Phases 0–6) with completed items ticked.
+> Full design detail lives in the approved plan; this file tracks **status**.
+
+**Last updated:** 2026-07-26
+**Current position:** Phase 0 in progress — scaffold + load/render done; export seam + harness remaining.
+
+---
+
+## Legend
+- [x] done & verified
+- [ ] not started / in progress
+
+---
+
+## Product in one line
+Open any PDF in the browser; tap to edit text, manipulate images, widen table columns,
+translate to Indian languages, or discuss the document by voice — layout never shifts;
+download a clean PDF.
+
+## Locked decisions
+- [x] Language: **TypeScript** (strict)
+- [x] Scope: full plan, all 7 phases
+- [x] Sample PDF: user-provided (`public/samples/sample-basic.pdf` — Firgun travel itinerary, 6 pages)
+- [x] Stack final: Vite + React + PDF.js + pdf-lib + Tailwind (no substitutions)
+
+## The one architectural idea (the export seam)
+UI produces `Edit` objects → export path consumes them through a compile-time-checked handler
+registry. Edit geometry stored in **PDF points** (bottom-left, y-up, unrotated) so storage is
+zoom/dpr-independent. Edit union stays small all through v1: `text | cover | image`.
+
+---
+
+## Phase 0 — Scaffold, load/render, lossless round-trip, harness  ⏳ IN PROGRESS
+
+### Scaffold & tooling
+- [x] `package.json` + `npm install` (clean, exit 0)
+- [x] Pin exact `pdfjs-dist@4.10.38`; Vite 6.4, Tailwind 4.3, React 18.3
+- [x] `tsconfig.json` / `tsconfig.node.json` (strict, `noUncheckedIndexedAccess`, `@/*` alias)
+- [x] `vite.config.ts` (react + tailwind plugins, `base:'./'`, `worker.format:'es'`)
+- [x] `eslint.config.js`, `.gitattributes` (LF + binary rules), `.editorconfig`, `.gitignore`
+- [x] `index.html`, `src/main.tsx`, `src/index.css` (Tailwind v4 `@import`)
+- [x] Typecheck passes (app + node projects)
+- [x] `git init` on `main` (identity present)
+- [x] `.claude/launch.json` (dev server config)
+
+### Load & render
+- [x] `lib/pdf/worker.ts` — PDF.js worker via `?url` import (Windows-safe)
+- [x] `lib/pdf/loadDocument.ts` — pristine `originalBytes` clone; pdf.js gets a throwaway copy
+- [x] `lib/pdf/types.ts` — `PageGeometry` (unrotated points, rotation, boxOffset)
+- [x] `lib/pdf/renderPage.ts` — locked canvas per page, `renderScale = zoom·dpr`, `willReadFrequently`
+- [x] `components/` — `Toolbar`, `PdfViewer`, `PageCanvas`, `App`
+- [x] Verified: app boots, auto-loads sample, renders all 6 pages (~492k ink pixels page 1)
+- [x] Noted env quirk: hidden Browser pane pauses rAF → harness will shim `rAF→setTimeout`
+
+### The export seam (STABLE — never rewritten by features)
+- [ ] `lib/export/types.ts` — `Edit` union (`text|cover|image`) + `EditDocument`
+- [ ] `lib/export/coordinates.ts` — screen↔viewport↔PDF-point transforms + branded types
+- [ ] `lib/export/registry.ts` — mapped-type `{ [K in Edit['kind']]: Handler }` (compile-time exhaustiveness)
+- [ ] `lib/export/context.ts` — `PageExportContext` factory
+- [ ] `lib/export/exportPdf.ts` — orchestrator (load pristine bytes → dispatch → save)
+- [ ] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (image = not-implemented stub)
+- [ ] `lib/export/englishFont.ts`, `pathA.ts`, `scriptRouting.ts`, `colorSample.ts` (structurally present)
+- [ ] `lib/fonts/notoFonts.ts` — `ensureIndicFonts()` (FontFace, await `document.fonts.ready`)
+- [ ] `lib/providers/types.ts` — `LanguageProvider` interface stub
+- [ ] Unit tests (Vitest): coordinate closed-form vs `convertToPdfPoint`, all 4 rotations
+
+### Verification harness (dev-only `/verify`, tree-shaken from prod)
+- [ ] `harness/roundTrip.ts` — zero-edit scenario
+- [ ] `harness/runScenario.ts` — build EditDocument → real `exportPdf` → re-render → pixel-diff
+- [ ] `harness/pixelDiff.ts` — pixelmatch, force dpr=1, `rAF→setTimeout` shim
+- [ ] `harness/VerifyPage.tsx` — red/green grid; `window.__HARNESS_RESULT__`
+- [ ] `routes.tsx` — `/verify` behind `import.meta.env.DEV` + lazy import
+
+### Acceptance
+- [ ] Round-trip: re-render original vs export, pixelmatch ratio **< 0.001**
+- [ ] Structural: pdf-lib reopen → equal page count, per-page size & rotation unchanged
+- [ ] Validity: export re-opens in pdf.js clean
+- [ ] **Commit `Phase 0 ✓`**
+
+---
+
+## Phase 1 — Text edit (feature 1)  ⬜ NOT STARTED
+- [ ] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
+- [ ] `components/TextEditOverlay.tsx` — contenteditable over glyphs; A−/A+ size; width-drag
+- [ ] Commit produces `CoverEdit{sampleBackground}` + `TextEdit`
+- [ ] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
+- [ ] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
+- [ ] Export `warnings[]` shown as toast
+- [ ] `components/TapPopover.tsx` — shell + **Edit** + **Search Google** (`meaning of <selection>`); Translate/Meaning disabled
+- [ ] `components/HoldToPeek.tsx` — hide overlays to reveal original
+- [ ] Harness: single English line-edit scenario
+- [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
+- [ ] **Commit `Phase 1 ✓`**
+
+## Phase 2 — Indic pipeline (Path A) + harness green  ⬜ NOT STARTED
+- [ ] Bundle Noto Sans Devanagari + Tamil (Regular/Bold woff2) + OFL.txt in `public/fonts/`
+- [ ] `pathA.ts` full: offscreen canvas 3×, HarfBuzz shaping, `embedPng`, drawImage at P-rect
+- [ ] `scriptRouting.ts` wired: U+0900–097F / U+0B80–0BFF → Path A; never `drawText`
+- [ ] `harness/renderReference.ts` — native canvas render of a string
+- [ ] Indic scenarios pixel-compare patch region (tolerance < 0.02–0.03)
+- [ ] Acceptance: `किताब क्षमा हिन्दी श्रद्धा தமிழ்` renders in Android Reader; harness green
+- [ ] **Commit `Phase 2 ✓`**
+
+## Phase 3 — Images + table column resize (features 2, 3)  ⬜ NOT STARTED
+- [ ] `lib/pdf/images.ts` — `getOperatorList()` image rects, else user-drawn region
+- [ ] Image move/resize/delete (cover + re-embed from locked raster); insert PNG/JPG
+- [ ] `handlers/image.ts` — `embedPng` + drawImage
+- [ ] `components/ImageOverlay.tsx` — drag, corner resize, delete, insert
+- [ ] `components/TableTool.tsx` — draw region, place vertical guides, drag guide
+- [ ] Guide drag: shift runs (x > guide) as text+cover; redraw ruling lines as thin colored covers
+- [ ] Acceptance: swap an image + widen one table column; layout holds
+- [ ] **Commit `Phase 3 ✓`**
+
+## Phase 4 — Translate + Meaning popover + in-place translate (feature 4)  ⬜ NOT STARTED
+- [ ] `providers/` — `SarvamProvider.translate()` (Mayura, `api.sarvam.ai/translate`)
+- [ ] `AnthropicProvider.translate()/explain()` (fallback + Meaning)
+- [ ] `providers/index.ts` failover Sarvam → Anthropic → Browser (silent, logged)
+- [ ] `BhashiniProvider` stub (TODO, non-blocking)
+- [ ] `providers/keys.ts` + `SettingsPanel.tsx` — dev-only localStorage keys + "personal use only" warning
+- [ ] TapPopover: enable **Translate** + **Meaning**
+- [ ] In-place mode: translation → `TextEdit`(Indic→Path A) + `CoverEdit`
+- [ ] `prefsStore` — preferred language persisted
+- [ ] Acceptance: tap English para → Hindi in place → exports correctly
+- [ ] **Commit `Phase 4 ✓`**
+
+## Phase 5 — Voice discussion (feature 5) + PWA share-target  ⬜ NOT STARTED
+- [ ] `SarvamProvider.speak()` (Bulbul TTS), `.transcribe()` (Saarika ASR, Hinglish)
+- [ ] `AnthropicProvider.discuss()` — document-grounded; else "document mein nahin hai."
+- [ ] `BrowserProvider` — speechSynthesis TTS + Web Speech API ASR
+- [ ] `components/VoiceButton.tsx` — mic → transcribe → discuss → show + speak
+- [ ] PWA via `vite-plugin-pwa` (injectManifest): manifest + `share_target` (POST, multipart, application/pdf)
+- [ ] Custom service worker: intercept share POST → stash PDF → app loads it
+- [ ] Acceptance: share PDF from WhatsApp → ask by voice → grounded spoken answer
+- [ ] **Commit `Phase 5 ✓`**
+
+## Phase 6 — Deploy (Cloudflare Pages + Worker proxy)  ⬜ NOT STARTED
+- [ ] `wrangler` config for Cloudflare Pages
+- [ ] GitHub Action: auto-deploy on push to `main`
+- [ ] Cloudflare Worker proxy: Sarvam + Anthropic keys server-side, per-IP rate limiting
+- [ ] Provider base-URL switch: dev = direct+localStorage, prod = proxy (no client keys)
+- [ ] Acceptance: pages.dev installs as PWA; share-target works; **grep built bundle → no API key**
+- [ ] **Commit `Phase 6 ✓`**
+
+---
+
+## Discipline (enforced throughout)
+- [ ] Never modify the export path and a feature in the same commit
+- [ ] Never start a phase on a red harness (fix forward within the phase)
+- [ ] Commit after every green acceptance test with message `Phase N ✓`
+
+## Dependencies / open items
+- [x] Sample PDF provided (`public/samples/sample-basic.pdf`)
+- [ ] Sarvam + Anthropic API keys (needed from Phase 4)
+- [ ] Confirm Bulbul (TTS) / Saarika (ASR) request field shapes at docs.sarvam.ai (Phase 5)
