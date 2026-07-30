@@ -28,7 +28,7 @@ ESLint, `.gitattributes`/`.editorconfig`, `index.html`, `main.tsx`, git repo.
 
 ## Export seam & verification harness (closes the foundation)
 
-### Task 3 — Edit model & coordinate transform  🔲
+### Task 3 — Edit model & coordinate transform  ✅
 **Goal:** the immutable `Edit` contract and the single screen⇄viewport⇄PDF-point conversion module.
 **Deliverables:** `lib/export/types.ts` (`Edit = text|cover|image`, `PdfRect`, `EditDocument`);
 `lib/export/coordinates.ts` (transform + branded `ScreenPx`/`PdfPt` types); Vitest unit tests
@@ -129,7 +129,7 @@ type ScreenPt = Tagged<'screen'>; type ViewportPt = Tagged<'viewport'>; type Pdf
 **Commit strategy:** Phase-0 foundation, not a feature — no `Phase N ✓` commit yet; accumulates into
 the Phase 0 acceptance commit at Task 7 (an optional local WIP commit is fine).
 
-### Task 4 — Export engine (orchestrator + registry + handlers)  🔲
+### Task 4 — Export engine (orchestrator + registry + handlers)  ✅
 **Goal:** the stable export seam that patches the original bytes.
 **Deliverables:** `registry.ts` (mapped-type `HANDLERS`), `context.ts` (`PageExportContext`),
 `exportPdf.ts` (load pristine → group by page → dispatch → save), `handlers/{text,cover,image}.ts`
@@ -139,12 +139,245 @@ the Phase 0 acceptance commit at Task 7 (an optional local WIP commit is fine).
 **Done when:** a zero-edit `exportPdf` returns valid bytes; adding an `Edit` kind without a handler
 is a compile error.
 
+#### Workflow
+
+**What this task is (and isn't).** Builds the **stable export seam** — the dumb orchestrator + the
+compile-checked handler registry + the per-page context — on top of Task 3's `types.ts` /
+`coordinates.ts`. It ships exactly **one real handler (`cover`)**; `text` and `image` are guarded stubs
+whose real bodies belong to later tasks (English path → Task 10, Path A → Task 13, image embed →
+Task 16). No UI. This file set must never be reopened to add a feature.
+
+**Step 1 — Utilities → `src/lib/util/{assert,groupBy}.ts`**
+
+```ts
+// assert.ts
+export function assertNever(x: never, msg = 'unexpected variant'): never { throw new Error(`${msg}: ${JSON.stringify(x)}`); }
+export function invariant(cond: unknown, msg: string): asserts cond { if (!cond) throw new Error(`Invariant failed: ${msg}`); }
+export function notImplemented(feature: string): never { throw new Error(`Not implemented yet: ${feature}`); }
+
+// groupBy.ts
+export function groupBy<T, K>(items: readonly T[], key: (t: T) => K): Map<K, T[]> {
+  const map = new Map<K, T[]>();
+  for (const item of items) { const k = key(item); const a = map.get(k); a ? a.push(item) : map.set(k, [item]); }
+  return map;
+}
+```
+
+**Step 2 — Per-page context → `src/lib/export/context.ts`**
+
+Carries everything a handler is allowed to touch — and nothing else (no `save`, no DOM, no coordinate
+math beyond consuming an already-PDF-point `rect`).
+
+```ts
+export interface PageExportContext {
+  pdf: PDFDocument; page: PDFPage; geometry: PageGeometry; warnings: string[];
+  drawRect(rect: PdfRect, color: Rgb): void;         // → page.drawRectangle, Rgb 0..1 → rgb()
+  sampleBackground(rect: PdfRect): Rgb | undefined;  // delegates to doc.sampleBackground?
+}
+export function makePageContext(args: { pdf; page; geometry; doc; warnings }): PageExportContext { /* ... */ }
+```
+
+`PdfRect` is already absolute PDF user space (bottom-left) = pdf-lib's draw space, so `drawRect` is just
+`{ x, y, width: w, height: h }` — no offset math. Page `/Rotate` is applied by the viewer and glyph
+bboxes are axis-aligned in unrotated space, so cover rects need no rotation handling yet.
+
+**Step 3 — Handlers → `src/lib/export/handlers/{cover,text,image}.ts`**
+
+```ts
+// cover.ts — the one REAL handler (foundational primitive: text/table/translate/image-delete all use it)
+const WHITE: Rgb = { r: 1, g: 1, b: 1 };
+export const drawCover: EditHandler<CoverEdit> = (edit, ctx) => {
+  const color = edit.color ?? (edit.sampleBackground ? ctx.sampleBackground(edit.rect) : undefined) ?? WHITE;
+  ctx.drawRect(edit.rect, color);
+};
+
+// text.ts — routing seam, guarded stub
+export const drawText: EditHandler<TextEdit> = (edit) =>
+  notImplemented(isIndicRun(edit.text) ? 'Indic text export / Path A (Task 13)' : 'English text export (Task 10)');
+
+// image.ts — guarded stub
+export const drawImage: EditHandler<ImageEdit> = () => notImplemented('image export (Task 16)');
+```
+
+**Step 4 — Routing + helper stubs**
+
+```ts
+// scriptRouting.ts — REAL (trivial + correct)
+export const INDIC = /[ऀ-ॿ஀-௿]/;
+export const isIndicRun = (text: string): boolean => INDIC.test(text);
+```
+
+`englishFont.ts` (Task 10), `pathA.ts` (Task 13), `colorSample.ts` (Task 10) — minimal typed stubs with
+a TODO + `notImplemented`, so their owning tasks fill them in place without touching the seam.
+
+**Step 5 — Registry → `src/lib/export/registry.ts`** (the compile-time exhaustiveness gate)
+
+```ts
+export type EditHandler<E extends Edit = Edit> = (edit: E, ctx: PageExportContext) => void | Promise<void>;
+export const HANDLERS: { [K in Edit['kind']]: EditHandler<Extract<Edit, { kind: K }>> } = {
+  text: drawText, cover: drawCover, image: drawImage,
+};
+```
+
+**Step 6 — Orchestrator → `src/lib/export/exportPdf.ts`** (deliberately dumb + stable)
+
+```ts
+export interface ExportResult { bytes: Uint8Array; warnings: string[]; }
+export async function exportPdf(doc: EditDocument): Promise<ExportResult> {
+  const pdf = await PDFDocument.load(doc.originalBytes, { updateMetadata: false }); // pristine
+  const warnings: string[] = [];
+  for (const [pageIndex, edits] of groupBy(doc.edits, e => e.pageIndex)) {
+    const page = pdf.getPage(pageIndex);
+    const geometry = doc.pages[pageIndex];
+    invariant(geometry, `missing geometry for page ${pageIndex}`);
+    const ctx = makePageContext({ pdf, page, geometry, doc, warnings });
+    for (const e of [...edits].sort((a, b) => a.z - b.z)) await (HANDLERS[e.kind] as EditHandler)(e, ctx);
+  }
+  return { bytes: await pdf.save(), warnings };
+}
+```
+
+**Step 7 — Verification test → `src/lib/export/exportPdf.test.ts`** (Vitest, node, self-contained)
+
+Build the input with pdf-lib (2 pages), then assert:
+1. **zero edits** → output starts with `%PDF-`, reloads in pdf-lib, page count + per-page sizes unchanged.
+2. **one `CoverEdit`** → reloads valid, page count unchanged (dispatch + draw works end-to-end).
+3. **a `TextEdit`** → `exportPdf(...)` rejects with `/Not implemented/` (documents the stub boundary).
+
+Compile-time exhaustiveness needs no runtime test — the mapped type enforces it.
+
+**Step 8 — Verify**
+
+- `npm run test` — existing 16 coordinate tests still green + the new export tests pass.
+- `npm run typecheck` — compiles under strict + `noUncheckedIndexedAccess`; deleting a `HANDLERS` entry
+  must fail to compile (spot-check).
+- `npm run lint` — clean. No dev-server/visual check (no UI yet).
+
+**Key decisions**
+
+- **`cover` is the only real handler**; `text`/`image` are honest guarded stubs — keeps English-path
+  (Task 10), Path A (Task 13), and image (Task 16) out of this commit.
+- **`PdfRect` draws directly** into pdf-lib (same absolute user space) — no offset/rotation math here.
+- **`load(..., { updateMetadata: false })`** so pdf-lib doesn't inject ModDate/Producer before the
+  output is saved (cleaner round-trip; in pdf-lib 1.17 this is a load option, not a save option).
+
+**Commit strategy:** Phase-0 foundation, not a feature — no `Phase N ✓` commit yet; accumulates into the
+Phase 0 acceptance commit at Task 7 (optional local WIP commit).
+
 ### Task 5 — Font subsystem scaffolding  🔲
 **Goal:** the Noto FontFace loader (used fully in Task 13).
 **Deliverables:** `lib/fonts/notoFonts.ts` (`ensureIndicFonts()`, awaits `document.fonts.ready`);
 `lib/providers/types.ts` (`LanguageProvider` interface stub).
 **Depends on:** Task 1.
-**Done when:** fonts load without error when invoked (no visual use yet).
+**Done when:** `notoFonts.ts` + `providers/types.ts` compile and lint; `ensureIndicFonts()` is
+memoized/idempotent and safely no-ops outside a browser (unit-tested with a stubbed `FontFace`). Real
+font *files* (Task 12) and runtime shaping (Task 13) are out of scope.
+
+#### Workflow
+
+**What this task is (and isn't).** Pure scaffolding — two cross-cutting modules created early so later
+tasks fill bodies in place, never touching the seam. **No UI, no feature behaviour.** Note the font
+*files* (`.woff2`) are bundled in **Task 12** and the loader is first *called* in **Task 13** (Path A);
+so here we build the **loader function and the provider contract**, not a working end-to-end font render.
+
+**Step 1 — Noto FontFace loader → `src/lib/fonts/notoFonts.ts`**
+
+Establishes the family-name constants Path A will use in its canvas `font` string, and a memoized,
+browser-guarded loader that awaits font readiness before any offscreen shaping.
+
+```ts
+export const NOTO_DEVANAGARI = 'Noto Sans Devanagari';
+export const NOTO_TAMIL = 'Noto Sans Tamil';
+
+const FONT_DEFS = [
+  { family: NOTO_DEVANAGARI, weight: '400', file: 'NotoSansDevanagari-Regular.woff2' },
+  { family: NOTO_DEVANAGARI, weight: '700', file: 'NotoSansDevanagari-Bold.woff2' },
+  { family: NOTO_TAMIL,      weight: '400', file: 'NotoSansTamil-Regular.woff2' },
+  { family: NOTO_TAMIL,      weight: '700', file: 'NotoSansTamil-Bold.woff2' },
+] as const;
+
+let pending: Promise<void> | null = null;                       // memoize: load at most once
+
+export function ensureIndicFonts(): Promise<void> {
+  return (pending ??= loadAll());
+}
+
+async function loadAll(): Promise<void> {
+  if (typeof document === 'undefined' || typeof FontFace === 'undefined') return; // SSR/node guard
+  await Promise.all(FONT_DEFS.map(async (d) => {
+    const face = new FontFace(d.family, `url(${import.meta.env.BASE_URL}fonts/${d.file})`,
+      { weight: d.weight, style: 'normal', display: 'swap' });
+    await face.load();
+    document.fonts.add(face);
+  }));
+  await document.fonts.ready;                                   // MUST await before measure/fillText
+}
+```
+
+Why each choice: **memoized promise** (fonts load once even if Path A calls it per-run); **browser
+guard** (so importing the module in node/tests/SSR can't throw); **`import.meta.env.BASE_URL`** (survives
+a non-root deploy in Phase 6); **`await document.fonts.ready`** (skip it and the first offscreen render
+measures a fallback → tofu boxes).
+
+**Step 2 — Provider contract → `src/lib/providers/types.ts`**
+
+The single interface all AI I/O goes through (implemented across Tasks 18–25). Types + interface only,
+zero runtime.
+
+```ts
+export type LanguageCode = string;  // BCP-47 'xx-IN' (e.g. 'hi-IN', 'ta-IN', 'en-IN'); 'auto' allowed
+
+export interface TranslateInput  { text: string; to: LanguageCode; from?: LanguageCode; }
+export interface ExplainInput    { text: string; language: LanguageCode; }
+export interface SpeakInput      { text: string; language: LanguageCode; voice?: string; }
+export interface TranscribeInput { audio: Blob;  language?: LanguageCode; }
+export interface DiscussInput    { question: string; documentText: string; language?: LanguageCode; }
+
+export interface TextResult    { text: string; provider: string; }
+export interface SpeakResult   { audio: Blob;  provider: string; }
+export interface DiscussResult { answer: string; grounded: boolean; provider: string; }
+
+/** All AI passes through this one seam; concrete providers are added in later tasks. */
+export interface LanguageProvider {
+  readonly name: string;
+  translate(input: TranslateInput): Promise<TextResult>;
+  explain(input: ExplainInput): Promise<TextResult>;
+  speak(input: SpeakInput): Promise<SpeakResult>;
+  transcribe(input: TranscribeInput): Promise<TextResult>;
+  discuss(input: DiscussInput): Promise<DiscussResult>;
+}
+```
+
+Signatures may be lightly refined when the first concrete provider lands (Task 19), but the five-verb
+shape and the `grounded` flag on `discuss` (for the "document mein nahin hai" guarantee) are fixed now.
+
+**Step 3 — Unit test → `src/lib/fonts/notoFonts.test.ts`** (Vitest, node, stubbed globals)
+
+Node has no `FontFace`/`document.fonts`, so stub them with `vi.stubGlobal` + `vi.resetModules()` between
+cases and assert:
+1. **memoized** — two `ensureIndicFonts()` calls trigger exactly one load pass.
+2. **registers 4 faces** — Devanagari + Tamil × Regular + Bold, with correct family/weight and a
+   `fonts/…` URL.
+3. **awaits readiness** — `document.fonts.ready` is awaited before resolving.
+4. **non-browser no-op** — with globals unset, it resolves without throwing.
+
+`providers/types.ts` needs no runtime test — typecheck covers it.
+
+**Step 4 — Verify**
+
+- `npm run test` — existing 19 tests stay green + the 4 font-loader tests pass.
+- `npm run typecheck` — both modules compile under strict.
+- `npm run lint` — clean. `npm run build` — succeeds (loader tree-shakes; it's unused until Task 13).
+- No dev-server/visual check.
+
+**Key decisions & edge cases**
+
+- **Loader ≠ files.** The `.woff2` files land in Task 12; until then `ensureIndicFonts()` would reject at
+  runtime if actually invoked — which nothing does yet. Scaffolding by design.
+- **Family names are a contract** with Path A (Task 13): the strings here must match its canvas `font`.
+- **No test-only exports in prod code** — the loader's memo is reset in tests via `vi.resetModules()`.
+
+**Commit strategy:** Phase-0 foundation — no `Phase N ✓` commit; folds into the Task 7 acceptance commit.
 
 ### Task 6 — Verification harness (round-trip)  🔲
 **Goal:** dev-only red/green pixel-diff over the real export path.
@@ -172,10 +405,16 @@ bold/italic from font name), positioned via `coordinates.ts`.
 **Depends on:** Task 3, Task 7.
 
 ### Task 9 — Text edit overlay + controls  🔲
-**Goal:** tap a run → contenteditable exactly over the glyphs, with size and width controls.
-**Deliverables:** `components/TextEditOverlay.tsx` (A−/A+, width-drag); commit emits a
+**Goal:** tap a run → contenteditable exactly over the glyphs, with size, weight/style, and width controls.
+**Deliverables:** `components/TextEditOverlay.tsx` (A−/A+ size, **B / I toggles**, width-drag); commit emits a
 `CoverEdit{sampleBackground}` + a `TextEdit`; `components/HoldToPeek.tsx`.
 **Depends on:** Task 8.
+**Note (bold/italic):** The overlay's **B** and **I** buttons flip `style.bold` / `style.italic` on the
+emitted `TextEdit`. This is UI-only — the model (`TextStyle`) and both export paths already carry and
+render bold/italic (English → Helvetica/Times/Courier bold+oblique standard fonts in Task 10; Indic →
+Noto Bold + synthetic oblique in Task 13). A tapped run's original weight/style is detected and shown as
+the initial toggle state, so edits *preserve* it by default and can *change* it. (Text color is likewise
+already in `TextStyle` and can be added the same way if wanted later.)
 
 ### Task 10 — English export path (font map + cover)  🔲
 **Goal:** render English edits with standard fonts and hide the original.

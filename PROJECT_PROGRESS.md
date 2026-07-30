@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-07-26
-**Current position:** Phase 0 in progress — scaffold + load/render done; export seam + harness remaining.
+**Last updated:** 2026-07-29
+**Current position:** Phase 0 in progress — Task 4 export engine done; font scaffolding + harness remaining.
 
 ---
 
@@ -55,16 +55,16 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Noted env quirk: hidden Browser pane pauses rAF → harness will shim `rAF→setTimeout`
 
 ### The export seam (STABLE — never rewritten by features)
-- [ ] `lib/export/types.ts` — `Edit` union (`text|cover|image`) + `EditDocument`
-- [ ] `lib/export/coordinates.ts` — screen↔viewport↔PDF-point transforms + branded types
-- [ ] `lib/export/registry.ts` — mapped-type `{ [K in Edit['kind']]: Handler }` (compile-time exhaustiveness)
-- [ ] `lib/export/context.ts` — `PageExportContext` factory
-- [ ] `lib/export/exportPdf.ts` — orchestrator (load pristine bytes → dispatch → save)
-- [ ] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (image = not-implemented stub)
-- [ ] `lib/export/englishFont.ts`, `pathA.ts`, `scriptRouting.ts`, `colorSample.ts` (structurally present)
+- [x] `lib/export/types.ts` — `Edit` union (`text|cover|image`) + `EditDocument`
+- [x] `lib/export/coordinates.ts` — screen↔viewport↔PDF-point transforms + branded types
+- [x] `lib/export/registry.ts` — mapped-type `{ [K in Edit['kind']]: Handler }` (compile-time exhaustiveness)
+- [x] `lib/export/context.ts` — `PageExportContext` factory
+- [x] `lib/export/exportPdf.ts` — orchestrator (load pristine bytes → dispatch → save)
+- [x] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (image = not-implemented stub)
+- [x] `lib/export/englishFont.ts`, `pathA.ts`, `scriptRouting.ts`, `colorSample.ts` (structurally present)
 - [ ] `lib/fonts/notoFonts.ts` — `ensureIndicFonts()` (FontFace, await `document.fonts.ready`)
 - [ ] `lib/providers/types.ts` — `LanguageProvider` interface stub
-- [ ] Unit tests (Vitest): coordinate closed-form vs `convertToPdfPoint`, all 4 rotations
+- [x] Unit tests (Vitest): coordinate closed-form vs `convertToPdfPoint`, all 4 rotations
 
 ### Verification harness (dev-only `/verify`, tree-shaken from prod)
 - [ ] `harness/roundTrip.ts` — zero-edit scenario
@@ -83,7 +83,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ## Phase 1 — Text edit (feature 1)  ⬜ NOT STARTED
 - [ ] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
-- [ ] `components/TextEditOverlay.tsx` — contenteditable over glyphs; A−/A+ size; width-drag
+- [ ] `components/TextEditOverlay.tsx` — contenteditable over glyphs; A−/A+ size; B/I toggles; width-drag
 - [ ] Commit produces `CoverEdit{sampleBackground}` + `TextEdit`
 - [ ] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
 - [ ] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
