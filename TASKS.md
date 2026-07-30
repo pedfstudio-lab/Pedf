@@ -264,7 +264,7 @@ Compile-time exhaustiveness needs no runtime test — the mapped type enforces i
 **Commit strategy:** Phase-0 foundation, not a feature — no `Phase N ✓` commit yet; accumulates into the
 Phase 0 acceptance commit at Task 7 (optional local WIP commit).
 
-### Task 5 — Font subsystem scaffolding  🔲
+### Task 5 — Font subsystem scaffolding  ✅
 **Goal:** the Noto FontFace loader (used fully in Task 13).
 **Deliverables:** `lib/fonts/notoFonts.ts` (`ensureIndicFonts()`, awaits `document.fonts.ready`);
 `lib/providers/types.ts` (`LanguageProvider` interface stub).
@@ -386,6 +386,113 @@ cases and assert:
 `window.__HARNESS_RESULT__`.
 **Depends on:** Task 4.
 **Done when:** `/verify` renders a red/green grid and re-runs on demand.
+
+#### Workflow
+
+**What this task is (and isn't).** The first *visible* milestone and Phase 0's gate. A DEV-only `/verify`
+page runs scenarios through the **real `exportPdf`** (Task 4), re-renders with PDF.js, pixel-compares
+against an expected render, and shows a **red/green** grid. Not a unit test — it exercises the whole
+render→export→re-render pipeline. Single scenario now (zero-edit round-trip); Tasks 10/14 add more.
+
+**Step 1 — Hidden-pane render shim → `src/harness/env.ts`**
+```ts
+// DEV/harness only. PDF.js drives rendering with requestAnimationFrame, which browsers PAUSE when the
+// pane isn't compositing — so headless/hidden runs stall. Route rAF through setTimeout.
+export function installHiddenRenderShim(): void {
+  window.requestAnimationFrame = (cb) =>
+    window.setTimeout(() => cb(performance.now()), 0) as unknown as number;
+}
+```
+Imported only by the harness (dev, lazy) — never by the app or prod.
+
+**Step 2 — Deterministic PDF→pixels → `src/harness/renderPdf.ts`**
+Render bytes with the shared pdf.js (`@/lib/pdf/worker`) at a fixed scale with **dpr forced to 1** (so
+diffs reproduce across machines), one `ImageData` per page.
+```ts
+export async function renderPdfToImageData(bytes: Uint8Array, scale = 1.5): Promise<ImageData[]> {
+  // getDocument({ data: bytes.slice() }) → per page: size a canvas to the scale-`scale` viewport,
+  // render, ctx.getImageData(0,0,w,h). No devicePixelRatio.
+}
+```
+
+**Step 3 — Pixel compare → `src/harness/pixelDiff.ts`** (pixelmatch v6, default import)
+```ts
+import pixelmatch from 'pixelmatch';
+export interface DiffResult { ratio: number; diff: ImageData; }
+export function diffImageData(expected: ImageData, actual: ImageData): DiffResult {
+  if (expected.width !== actual.width || expected.height !== actual.height) return { ratio: 1, diff: expected };
+  const { width, height } = expected;
+  const diff = new ImageData(width, height);
+  const mismatched = pixelmatch(expected.data, actual.data, diff.data, width, height, { threshold: 0.1 });
+  return { ratio: mismatched / (width * height), diff };
+}
+```
+Optional Vitest test (node): call `pixelmatch` on raw `Uint8ClampedArray`s (identical → 0 mismatches; one
+flipped pixel → >0). Node has no `ImageData`, so test at the pixelmatch level, not `diffImageData`.
+
+**Step 4 — Scenario pipeline → `src/harness/runScenario.ts`**
+```ts
+export interface Scenario { name: string; tolerance: number; setup(): Promise<{ doc: EditDocument; expectedBytes: Uint8Array }>; }
+export interface PageResult { pageIndex: number; ratio: number; expected: ImageData; actual: ImageData; diff: ImageData; }
+export interface ScenarioResult { name: string; tolerance: number; ratio: number; pass: boolean; pages: PageResult[]; error?: string; }
+export async function runScenario(s: Scenario): Promise<ScenarioResult> {
+  // try: setup() → exportPdf(doc) → render expectedBytes + result.bytes → per-page diffImageData
+  //      → ratio = max page ratio → pass = ratio <= tolerance ; catch → red card with error text
+}
+```
+
+**Step 5 — Round-trip scenario → `src/harness/roundTrip.ts` (+ `scenarios.ts` registry)**
+```ts
+export const roundTripScenario: Scenario = {
+  name: 'Round-trip (zero edits)',
+  tolerance: 0.001,
+  async setup() {
+    const res = await fetch(`${import.meta.env.BASE_URL}samples/sample-basic.pdf`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const { originalBytes, pages } = await loadDocument(bytes);   // reuse Task 2 loader
+    return { doc: { originalBytes, edits: [], pages }, expectedBytes: originalBytes.slice() };
+  },
+};
+// scenarios.ts → export const SCENARIOS: Scenario[] = [roundTripScenario];  (Tasks 10/14 push more)
+```
+
+**Step 6 — Red/green UI → `src/harness/VerifyPage.tsx`**
+- On mount: `installHiddenRenderShim()`, run every `SCENARIOS` entry, render one card each — name, numeric
+  `ratio` vs `tolerance`, a green/red **PASS/FAIL** badge, and `expected | actual | diff` canvases
+  side-by-side. A **Run all** button re-runs.
+- Publish for headless/CI: `window.__HARNESS_RESULT__ = results.map(r => ({ name, ratio, pass }))`, typed
+  via `declare global { interface Window { __HARNESS_RESULT__?: {name:string;ratio:number;pass:boolean}[] } }`.
+
+**Step 7 — DEV-only route → `src/routes.tsx` + one-line `main.tsx` change**
+```tsx
+const VerifyPage = import.meta.env.DEV ? lazy(() => import('./harness/VerifyPage')) : null;
+const isVerify = () =>
+  location.pathname.replace(/\/+$/, '') === '/verify' || location.hash.replace(/^#\/?/, '') === 'verify';
+export function Root() {
+  if (import.meta.env.DEV && VerifyPage && isVerify())
+    return <Suspense fallback={<div className="p-6 text-neutral-500">Loading harness…</div>}><VerifyPage /></Suspense>;
+  return <App />;
+}
+```
+`main.tsx` renders `<Root/>` instead of `<App/>`. The `import.meta.env.DEV` guard + `lazy(() => import())`
+makes Vite drop the entire harness chunk (and pixelmatch) from the production build.
+
+**Step 8 — Verify**
+- `npm run test` — 23 existing green (+ optional pixelDiff test). `npm run typecheck` / `npm run lint` — clean.
+- **`npm run build`, then grep `dist/` for `pixelmatch` / `__HARNESS_RESULT__` / `VerifyPage`** → must be
+  **absent** (proves the harness is tree-shaken from prod).
+- **Runtime (the visible check):** `preview_start` → navigate to `http://localhost:5173/verify` → read
+  `window.__HARNESS_RESULT__` → round-trip is **pass:true, ratio < 0.001**; screenshot the green card if the
+  pane is shown. (The rAF shim makes this complete even though the pane is hidden.)
+
+**Key decisions & edge cases**
+- Both sides render through the **same pdf.js at the same scale + dpr=1**, so anti-aliasing is identical →
+  a true zero-edit export diffs to ~0. pdf-lib re-serialization changes bytes but not rendered pixels
+  (content streams copied verbatim) → we assert **visual, not byte, identity**.
+- Reuses `loadDocument` (Task 2) and `exportPdf` (Task 4) unchanged — the harness calls the *real* path.
+- Missing sample PDF → a red error card, never a crash.
+
+**Commit strategy:** Phase-0 foundation; folds into the Task 7 acceptance commit (`Phase 0 ✓`).
 
 ### Task 7 — Phase-0 acceptance + commit  🔲
 **Goal:** prove the round-trip is lossless.

@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-07-29
-**Current position:** Phase 0 in progress — Task 4 export engine done; font scaffolding + harness remaining.
+**Last updated:** 2026-07-30
+**Current position:** Phase 0 in progress — Task 5 font/provider scaffolding done; verification harness remaining.
 
 ---
 
@@ -62,8 +62,8 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] `lib/export/exportPdf.ts` — orchestrator (load pristine bytes → dispatch → save)
 - [x] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (image = not-implemented stub)
 - [x] `lib/export/englishFont.ts`, `pathA.ts`, `scriptRouting.ts`, `colorSample.ts` (structurally present)
-- [ ] `lib/fonts/notoFonts.ts` — `ensureIndicFonts()` (FontFace, await `document.fonts.ready`)
-- [ ] `lib/providers/types.ts` — `LanguageProvider` interface stub
+- [x] `lib/fonts/notoFonts.ts` — `ensureIndicFonts()` (FontFace, await `document.fonts.ready`)
+- [x] `lib/providers/types.ts` — `LanguageProvider` interface stub
 - [x] Unit tests (Vitest): coordinate closed-form vs `convertToPdfPoint`, all 4 rotations
 
 ### Verification harness (dev-only `/verify`, tree-shaken from prod)

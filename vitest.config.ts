@@ -6,7 +6,7 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   test: {
-    // Coordinate-transform tests are pure math — no DOM needed.
+    // The test suites are Node-compatible and stub browser globals when needed.
     environment: 'node',
     include: ['src/**/*.{test,spec}.ts'],
   },
