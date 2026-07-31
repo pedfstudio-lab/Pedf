@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-07-30
-**Current position:** Phase 0 in progress — Task 5 font/provider scaffolding done; verification harness remaining.
+**Last updated:** 2026-07-31
+**Current position:** Phase 0 complete — acceptance green; Phase 1 unblocked.
 
 ---
 
@@ -32,7 +32,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ---
 
-## Phase 0 — Scaffold, load/render, lossless round-trip, harness  ⏳ IN PROGRESS
+## Phase 0 — Scaffold, load/render, lossless round-trip, harness  ✅ COMPLETE
 
 ### Scaffold & tooling
 - [x] `package.json` + `npm install` (clean, exit 0)
@@ -67,17 +67,17 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Unit tests (Vitest): coordinate closed-form vs `convertToPdfPoint`, all 4 rotations
 
 ### Verification harness (dev-only `/verify`, tree-shaken from prod)
-- [ ] `harness/roundTrip.ts` — zero-edit scenario
-- [ ] `harness/runScenario.ts` — build EditDocument → real `exportPdf` → re-render → pixel-diff
-- [ ] `harness/pixelDiff.ts` — pixelmatch, force dpr=1, `rAF→setTimeout` shim
-- [ ] `harness/VerifyPage.tsx` — red/green grid; `window.__HARNESS_RESULT__`
-- [ ] `routes.tsx` — `/verify` behind `import.meta.env.DEV` + lazy import
+- [x] `harness/roundTrip.ts` — zero-edit scenario
+- [x] `harness/runScenario.ts` — build EditDocument → real `exportPdf` → re-render → pixel-diff
+- [x] `harness/pixelDiff.ts` — pixelmatch, force dpr=1, `rAF→setTimeout` shim
+- [x] `harness/VerifyPage.tsx` — red/green grid; `window.__HARNESS_RESULT__`
+- [x] `routes.tsx` — `/verify` behind `import.meta.env.DEV` + lazy import
 
 ### Acceptance
-- [ ] Round-trip: re-render original vs export, pixelmatch ratio **< 0.001**
-- [ ] Structural: pdf-lib reopen → equal page count, per-page size & rotation unchanged
-- [ ] Validity: export re-opens in pdf.js clean
-- [ ] **Commit `Phase 0 ✓`**
+- [x] Round-trip: re-render original vs export, pixelmatch ratio **< 0.001**
+- [x] Structural: pdf-lib reopen → equal page count, per-page size & rotation unchanged
+- [x] Validity: export re-opens in pdf.js clean
+- [x] **Commit `Phase 0 ✓`**
 
 ---
 
@@ -88,7 +88,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [ ] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
 - [ ] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
 - [ ] Export `warnings[]` shown as toast
-- [ ] `components/TapPopover.tsx` — shell + **Edit** + **Search Google** (`meaning of <selection>`); Translate/Meaning disabled
+- [ ] `components/TapPopover.tsx` — shell + **Edit** + **Search Google** (`meaning of <selection>`) + **Open in Maps** (place names); Translate/Meaning disabled
 - [ ] `components/HoldToPeek.tsx` — hide overlays to reveal original
 - [ ] Harness: single English line-edit scenario
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
@@ -142,6 +142,18 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [ ] Provider base-URL switch: dev = direct+localStorage, prod = proxy (no client keys)
 - [ ] Acceptance: pages.dev installs as PWA; share-target works; **grep built bundle → no API key**
 - [ ] **Commit `Phase 6 ✓`**
+
+---
+
+## Feature 6 — Smart dates → calendar & places → maps  (reader-layer add-on; NEW)  ⬜ NOT STARTED
+> Reads the document and offers an action; emits **no `Edit`**, never touches the export seam. Fully
+> client-side. Slots **after Phase 1** (needs text extraction) and ships **before/with the Phase 6 deploy**.
+> Decisions: "Set Reminder" = calendar event with an alarm; calendar = **Add to Google Calendar**.
+- [ ] Places → Maps: **Open in Maps** folded into `TapPopover` (Phase 1) — `google.com/maps/search`
+- [ ] Task 31 — `lib/smart/dateDetect.ts`: detect dates/times + positions from `getTextContent()` (DD/MM default)
+- [ ] Task 32 — `components/SmartSpanLayer.tsx` + `DateActionPopover.tsx`: tappable date highlights + confirm (title + DD/MM toggle)
+- [ ] Task 33 — `lib/smart/calendarLink.ts`: **Add to Google Calendar** (`render?action=TEMPLATE`); **Set Reminder** = event + Google default alarm; optional `.ics`+`VALARM` fallback
+- [ ] Acceptance: tap a date in the sample PDF → confirm → Google Calendar opens pre-filled
 
 ---
 

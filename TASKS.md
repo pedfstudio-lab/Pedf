@@ -379,7 +379,7 @@ cases and assert:
 
 **Commit strategy:** Phase-0 foundation — no `Phase N ✓` commit; folds into the Task 7 acceptance commit.
 
-### Task 6 — Verification harness (round-trip)  🔲
+### Task 6 — Verification harness (round-trip)  ✅
 **Goal:** dev-only red/green pixel-diff over the real export path.
 **Deliverables:** `harness/{roundTrip,runScenario,pixelDiff,VerifyPage}.ts(x)`, `/verify` route behind
 `import.meta.env.DEV` + lazy import, `requestAnimationFrame→setTimeout` shim for hidden-pane rendering,
@@ -494,12 +494,62 @@ makes Vite drop the entire harness chunk (and pixelmatch) from the production bu
 
 **Commit strategy:** Phase-0 foundation; folds into the Task 7 acceptance commit (`Phase 0 ✓`).
 
-### Task 7 — Phase-0 acceptance + commit  🔲
+### Task 7 — Phase-0 acceptance + commit  ✅
 **Goal:** prove the round-trip is lossless.
 **Deliverables:** round-trip ratio < 0.001; structural check (page count/size/rotation unchanged);
 export re-opens in pdf.js clean.
 **Depends on:** Task 6.
 **Done when:** harness green → commit `Phase 0 ✓`.
+
+#### Workflow
+
+**What this task is (and isn't).** Not new features — the **acceptance gate + the first commit**. Confirm
+Phase 0's three acceptance criteria are green, then make the `Phase 0 ✓` commit. Most of the proof already
+exists (the Task 6 `/verify` harness + the Task 4 export test); Task 7 formalizes it, optionally hardens it
+into a repeatable node test, and commits. It is the discipline gate: **no Phase 1 work starts until this
+commit exists.**
+
+**Step 1 — Confirm the three acceptance criteria (all already green):**
+- **(a) Visual identity** — `/verify` round-trip ratio **< 0.001** (currently **0**), read from
+  `window.__HARNESS_RESULT__`.
+- **(b) Structural** — pdf-lib reopen → equal page count + per-page size + rotation (already asserted in
+  `src/lib/export/exportPdf.test.ts`).
+- **(c) Validity** — exported bytes re-open in pdf.js without error (the harness re-renders them to produce
+  "actual").
+
+**Step 2 — (Recommended) harden into a repeatable node test → `src/lib/export/acceptance.test.ts`**
+Read the **real** `public/samples/sample-basic.pdf` from disk (Node `fs` — node has no `fetch`/DOM), run
+`exportPdf` with zero edits, and assert on the *actual document*: output starts with `%PDF-`, reopens in
+pdf-lib, page count unchanged, and each page's size + rotation unchanged. This moves the structural/validity
+half of the acceptance into `npm run test` on the real file; the **visual** half stays in the browser
+harness (pixel rendering needs a browser).
+
+**Step 3 — Full green sweep (nothing red before committing):**
+- `npm run test` (25+), `npm run typecheck`, `npm run lint`, `npm run build`.
+- **Prod bundle grep** — `dist/` contains no `pixelmatch` / harness symbols.
+- **`/verify`** — round-trip **PASS**, ratio < 0.001.
+
+**Step 4 — Commit `Phase 0 ✓`:**
+- `git add -A` (respects `.gitignore` — `node_modules` / `dist` excluded).
+- `git commit -m "Phase 0 ✓"` on `main` — per the project's phase-commit discipline (Phase 6 auto-deploys
+  from `main`). This is the repo's **first commit** (git was init'd but nothing committed through Tasks 1–6).
+  No remote / no push yet — the remote is set up in Phase 6. Message ends with the standard `Co-Authored-By`
+  trailer.
+
+**Step 5 — Tick the docs:**
+- `PROJECT_PROGRESS.md` → Phase 0 **Acceptance** section: all boxes + `Phase 0 ✓` checked; header set to
+  "Phase 0 complete".
+- `TASKS.md` → Task 7 marked ✅.
+
+**Key decisions & notes**
+- Acceptance = **visual + structural identity, NOT byte identity.** pdf-lib re-serializes the file (bytes
+  differ) but copies content streams verbatim → identical render. Byte-equality is impossible and is never
+  asserted.
+- Commit lands on **`main`** (the project commits `Phase N ✓` to main). No push until Phase 6.
+- **Gate:** Phase 1 (Tasks 8–9, first editing UI) must not start until this commit exists — never build
+  features on an uncommitted / red foundation.
+
+**Done when:** all checks green → `Phase 0 ✓` committed → Phase 0 closed, Phase 1 unblocked.
 
 ---
 
@@ -531,11 +581,16 @@ from the locked raster), export `warnings[]` surfaced as a toast; harness Englis
 **Depends on:** Task 9. *(Export-path work — separate commit from Task 9.)*
 **Done when:** edit one line of a real PDF; layout holds when opened in Adobe Reader on Android.
 
-### Task 11 — Tap popover shell + Search Google  🔲
+### Task 11 — Tap popover shell + Search Google / Maps  🔲
 **Goal:** the shared popover, with the no-AI actions live.
 **Deliverables:** `components/TapPopover.tsx` — **Edit** + **Search Google** (`meaning of <selection>`,
-new tab, only the selected snippet in the URL); Translate/Meaning slots present but disabled.
+new tab, only the selected snippet in the URL) + **Open in Maps**
+(`google.com/maps/search/?api=1&query=<selection>`, for place/state names); Translate/Meaning slots
+present but disabled.
 **Depends on:** Task 8.
+**Note (Feature A — "what is this place?"):** This popover *is* Feature A. "Open in Maps" is the only new
+piece; **Search Google** (here) and **Meaning** (Task 21, AI `explain()` → "X is a state in…") cover the
+rest. No AI needed for Search/Maps; only the tapped snippet leaves the device.
 
 ---
 
@@ -671,3 +726,50 @@ endpoints; provider base-URL switch (dev = direct+localStorage, prod = proxy).
 key present**.
 **Depends on:** Task 28, Task 29.
 **Done when:** all three pass → commit `Phase 6 ✓`.
+
+---
+
+## Feature 6 — Smart dates → calendar & places → maps  (reader-layer add-on)
+
+> **Not an edit feature.** Like Translate/Voice, these *read* the document and offer an action — they emit
+> **no `Edit`** and **never touch the export seam**, so "layout never shifts" is unaffected and nothing is
+> added to the exported PDF. Fully client-side.
+>
+> **Places → Maps** is already folded into **Task 11** above (Feature A). The new work below is **dates →
+> calendar** (Tasks 31–33).
+>
+> **Scheduling:** depends only on **Task 8** (text extraction) + the **Task 11** popover pattern — it's
+> independent of the Indic/image/translate/voice work. Build it **after Phase 1**, ship it **before/with
+> the Phase 6 deploy**. (Numbered 31–33 to avoid renumbering; order is by dependency, not by number.)
+>
+> **Decisions locked:** "Set Reminder" = **calendar event with an alarm** (the web can't set a native OS
+> alarm). Calendar mechanism = **Add to Google Calendar** link (with an optional `.ics` fallback).
+
+### Task 31 — Date/time detection over document text  🔲
+**Goal:** find date/time strings and their positions in the page text.
+**Deliverables:** `lib/smart/dateDetect.ts` — scan `getTextContent()` runs for common formats
+(`23 Aug 2026`, `12/08/2026`, `15–23 Aug`, `3pm`, ranges) → `{ raw, start, end?, allDay, pageIndex, rect }[]`.
+Ambiguous `DD/MM` defaults to **day-month** (Indian convention). Regex-based (optionally `chrono-node`).
+**Depends on:** Task 8.
+**Done when:** unit tests parse the sample itinerary's dates — including the `12 Aug – 23 Aug` range — correctly.
+
+### Task 32 — Smart-date span overlay + confirm popover  🔲
+**Goal:** make detected dates tappable and confirmable before acting (parsing can misread — never auto-create).
+**Deliverables:** `components/SmartSpanLayer.tsx` — tappable highlights positioned via `coordinates.ts`;
+`components/DateActionPopover.tsx` — shows the parsed date + an **editable title** (defaulted from nearby
+text, e.g. "Travel: 12–23 Aug") + a **day-month / month-day toggle** for ambiguous dates.
+**Depends on:** Task 31, Task 3.
+
+### Task 33 — Calendar action (Google Calendar + alarm)  🔲
+**Goal:** turn a confirmed date into a calendar event / reminder.
+**Deliverables:** `lib/smart/calendarLink.ts` —
+- **Add to Google Calendar** → open
+  `https://calendar.google.com/calendar/render?action=TEMPLATE&text=<title>&dates=<START>/<END>&details=<snippet>&location=`
+  in a new tab (timed `…THHMMSSZ` or all-day `YYYYMMDD` ranges).
+- **Set Reminder** → the same event; the alarm is Google Calendar's **default notification** (= the agreed
+  "calendar event with an alarm").
+- *Optional secondary:* a downloadable **`.ics`** (`VEVENT` + `VALARM`) for a precise "N days before" alarm,
+  offline use, or non-Google calendars.
+**Depends on:** Task 32.
+**Done when:** tapping a date in the sample PDF → confirm → **Google Calendar opens pre-filled** with the
+correct date + title.
