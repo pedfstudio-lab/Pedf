@@ -555,11 +555,86 @@ harness (pixel rendering needs a browser).
 
 ## Text editing
 
-### Task 8 — Text run extraction & hit-testing  🔲
+### Task 8 — Text run extraction & hit-testing  ✅
 **Goal:** locate tappable text runs and their PDF-point rects.
 **Deliverables:** `lib/pdf/textContent.ts` (`getTextContent()` → runs, font size from transform,
 bold/italic from font name), positioned via `coordinates.ts`.
 **Depends on:** Task 3, Task 7.
+**Done when:** `extractTextRuns(page, i)` returns runs with correct text + PDF-point `rect` + `style`
+(unit-tested on a synthetic PDF), and `hitTestRun` resolves a tap to the right run.
+
+#### Workflow
+
+**What this task is (and isn't).** Pure **read-side plumbing** — no visible UI, no export change. It
+teaches the app *which* text sits *where*: for a page, produce each tappable **text run** with its
+**PDF-point rect** + inferred **style**, plus a hit-test helper. **Task 9 consumes this** to draw the
+tap-to-edit overlays. Reuses `coordinates.ts` (Task 3) and the page `viewport`; touches **no export path**.
+
+**Step 1 — Types + font classifier → `src/lib/pdf/textContent.ts`**
+```ts
+export interface TextRun {
+  pageIndex: number;
+  text: string;
+  rect: PdfRect;      // PDF points (bottom-left, unrotated) — same space as edits
+  style: TextStyle;   // fontName, fontSizePt, bold, italic, color
+}
+
+// Pure, table-testable. Embedded PDF font names encode weight/style in the name.
+export function classifyFontStyle(fontName: string): { bold: boolean; italic: boolean } {
+  return {
+    bold: /bold|black|heavy|semibold|[6-9]00/i.test(fontName),
+    italic: /italic|oblique/i.test(fontName),
+  };
+}
+```
+
+**Step 2 — Extract runs from a page → `extractTextRuns(page, pageIndex)`**
+```ts
+const content = await page.getTextContent();
+const base = page.getViewport({ scale: 1, rotation: 0 });   // our coordinate baseline
+for (const item of content.items) {                          // TextItem: str, transform, width, height, fontName
+  if (!('str' in item) || item.str.trim() === '' || item.width === 0) continue;   // skip empty/EOL/zero-width
+  const m = pdfjs.Util.transform(base.transform, item.transform);                 // local → device (scale 1)
+  const apply = (lx, ly) => ({ x: m[0]*lx + m[2]*ly + m[4], y: m[1]*lx + m[3]*ly + m[5] });
+  const corners = [[0,0],[item.width,0],[0,item.height],[item.width,item.height]]
+    .map(([lx,ly]) => viewportToPdf(base, apply(lx, ly)));                          // device → PDF points (reuses Task 3)
+  const rect = boundingBox(corners);                                               // min/max → rotation-robust PdfRect
+  const family = content.styles[item.fontName]?.fontFamily ?? item.fontName;
+  runs.push({ pageIndex, text: item.str, rect, style: {
+    fontName: family,
+    fontSizePt: Math.hypot(m[2], m[3]),                                            // vertical scale = font size in pt
+    ...classifyFontStyle(family),
+    color: { r: 0, g: 0, b: 0 },                                                   // see limitation below
+  }});
+}
+```
+A "run" = one `getTextContent` item (a word/line chunk, as the PDF provides). Rect + font-size come out in
+**PDF points** by pushing the item's four corners through `viewportToPdf` — no new coordinate math.
+
+**Step 3 — Hit-test helper**
+```ts
+// Resolve a tap (already converted to a PDF point via coordinates.ts) to the topmost/smallest run under it.
+export function hitTestRun(runs: TextRun[], point: PdfPt): TextRun | undefined { /* point-in-rect, min area on ties */ }
+```
+
+**Step 4 — Tests → `src/lib/pdf/textContent.test.ts`** (Vitest, node + pdfjs legacy)
+1. `classifyFontStyle` table: `Helvetica`→{}, `Arial-BoldMT`→bold, `Times-Italic`→italic, `Helvetica-BoldOblique`→both.
+2. **Integration:** build a pdf-lib PDF with a known string (e.g. `Hello` at x≈100, y≈700, size 24) → load via
+   pdfjs → `extractTextRuns` → assert one run: `text==='Hello'`, `fontSizePt≈24`, `rect` near the expected
+   PDF coords, not bold/italic.
+3. `hitTestRun`: a point inside the run's rect returns it; outside returns `undefined`.
+
+**Step 5 — Verify**
+- `npm run test` (26 → ~29), `npm run typecheck`, `npm run lint` — clean. No dev-server/visual check (plumbing).
+
+**Key decisions & edge cases**
+- **Reuses `coordinates.ts`** (`viewportToPdf`) — rects land in PDF points; rotation handled by the min/max box.
+- **Color is defaulted to black.** `getTextContent()` does not reliably expose glyph color; precise color can
+  be sampled from the locked raster in a later refinement. Documented limitation.
+- **Run granularity** = whatever `getTextContent` emits (word/line). Merging adjacent runs is a future nicety.
+- Extraction is **lazy per page** (Task 9 extracts the visible/tapped page on demand, not all pages eagerly).
+- **Touches no export path** → commits on the *feature* side, separate from any export-path commit (Task 10).
+  No `Phase N ✓` yet; accumulates toward the Phase 1 acceptance.
 
 ### Task 9 — Text edit overlay + controls  🔲
 **Goal:** tap a run → contenteditable exactly over the glyphs, with size, weight/style, and width controls.

@@ -4,7 +4,7 @@
 > Full design detail lives in the approved plan; this file tracks **status**.
 
 **Last updated:** 2026-07-31
-**Current position:** Phase 0 complete — acceptance green; Phase 1 unblocked.
+**Current position:** Phase 1 in progress — Task 8 text extraction and hit-testing done; Task 9 overlay next.
 
 ---
 
@@ -81,8 +81,8 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ---
 
-## Phase 1 — Text edit (feature 1)  ⬜ NOT STARTED
-- [ ] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
+## Phase 1 — Text edit (feature 1)  ⏳ IN PROGRESS
+- [x] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
 - [ ] `components/TextEditOverlay.tsx` — contenteditable over glyphs; A−/A+ size; B/I toggles; width-drag
 - [ ] Commit produces `CoverEdit{sampleBackground}` + `TextEdit`
 - [ ] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
