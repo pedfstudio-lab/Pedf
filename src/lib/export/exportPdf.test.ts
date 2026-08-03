@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { degrees, PDFDocument } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
 import type { CoverEdit, EditDocument, PdfRect, TextEdit } from './types';
@@ -75,7 +76,7 @@ describe('exportPdf', () => {
     expect(reopened.getPage(1).getRotation().angle).toBe(90);
   });
 
-  it('rejects text edits at the guarded Task 10 boundary', async () => {
+  it('writes English replacement text that reopens cleanly in PDF.js', async () => {
     const doc = await makeTwoPageDocument();
     const text: TextEdit = {
       id: 'text-1',
@@ -83,7 +84,7 @@ describe('exportPdf', () => {
       pageIndex: 0,
       rect: { x: 20, y: 300, w: 180, h: 18 },
       z: 20,
-      text: 'Not implemented yet',
+      text: 'Edited in DesiPDF',
       style: {
         fontName: 'Helvetica',
         fontSizePt: 12,
@@ -94,6 +95,39 @@ describe('exportPdf', () => {
     };
     doc.edits = [text];
 
-    await expect(exportPdf(doc)).rejects.toThrow(/Not implemented yet: English text export/);
+    const result = await exportPdf(doc);
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      expect(reopened.numPages).toBe(2);
+      const content = await (await reopened.getPage(1)).getTextContent();
+      const extracted = content.items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str)
+        .join(' ');
+      expect(extracted).toContain('Edited in DesiPDF');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('still rejects Indic text at the guarded Task 13 boundary', async () => {
+    const doc = await makeTwoPageDocument();
+    doc.edits = [{
+      id: 'indic-text-1',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 20, y: 300, w: 180, h: 18 },
+      z: 20,
+      text: 'हिन्दी',
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    }];
+
+    await expect(exportPdf(doc)).rejects.toThrow(/Not implemented yet: Indic text export/);
   });
 });

@@ -11,6 +11,8 @@ export interface ScenarioSetup {
 export interface Scenario {
   readonly name: string;
   readonly tolerance: number;
+  /** Pages scored for pass/fail; omitted means every page. */
+  readonly comparePageIndexes?: readonly number[];
   setup(): Promise<ScenarioSetup>;
 }
 
@@ -20,6 +22,7 @@ export interface PageResult {
   readonly expected: ImageData;
   readonly actual: ImageData;
   readonly diff: ImageData;
+  readonly scored: boolean;
 }
 
 export interface ScenarioResult {
@@ -46,13 +49,26 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       );
     }
 
+    const scoredPages = scenario.comparePageIndexes
+      ? new Set(scenario.comparePageIndexes)
+      : null;
     const pages = expectedPages.map((expected, pageIndex): PageResult => {
       const actual = actualPages[pageIndex];
       if (!actual) throw new Error(`missing rendered output for page ${pageIndex + 1}`);
       const { ratio, diff } = diffImageData(expected, actual);
-      return { pageIndex, ratio, expected, actual, diff };
+      return {
+        pageIndex,
+        ratio,
+        expected,
+        actual,
+        diff,
+        scored: scoredPages?.has(pageIndex) ?? true,
+      };
     });
-    const ratio = pages.reduce((maximum, page) => Math.max(maximum, page.ratio), 0);
+    const ratio = pages.reduce(
+      (maximum, page) => page.scored ? Math.max(maximum, page.ratio) : maximum,
+      0,
+    );
 
     return {
       name: scenario.name,

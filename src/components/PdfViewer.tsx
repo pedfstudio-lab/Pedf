@@ -5,9 +5,11 @@ import { PageCanvas } from './PageCanvas';
 interface PdfViewerProps {
   doc: PDFDocumentProxy;
   zoom: number;
+  editMode: boolean;
+  peek: boolean;
 }
 
-export function PdfViewer({ doc, zoom }: PdfViewerProps) {
+export function PdfViewer({ doc, zoom, editMode, peek }: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
 
   useEffect(() => {
@@ -30,7 +32,14 @@ export function PdfViewer({ doc, zoom }: PdfViewerProps) {
   return (
     <div className="flex flex-col items-center gap-4 py-4">
       {pages.map((page) => (
-        <PageCanvas key={page.pageNumber} page={page} zoom={zoom} />
+        <PageCanvas
+          key={page.pageNumber}
+          page={page}
+          pageIndex={page.pageNumber - 1}
+          zoom={zoom}
+          editMode={editMode}
+          peek={peek}
+        />
       ))}
     </div>
   );

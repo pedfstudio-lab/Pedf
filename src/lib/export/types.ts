@@ -42,6 +42,10 @@ export interface TextEdit extends BaseEdit {
   readonly kind: 'text';
   readonly text: string;
   readonly style: TextStyle;
+  /** Unwrapped textarea value retained so changing width on re-edit recomputes soft wraps. */
+  readonly boxText?: string;
+  /** Manual editor-box height in PDF points; repeated on wrapped line edits for re-editing. */
+  readonly boxHeight?: number;
 }
 
 export interface CoverEdit extends BaseEdit {

@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-07-31
-**Current position:** Phase 1 in progress — Task 8 text extraction and hit-testing done; Task 9 overlay next.
+**Last updated:** 2026-08-02
+**Current position:** Phase 1 in progress — Tasks 9–10E complete; Task 11 tap popover next. Real-device PDF acceptance remains pending.
 
 ---
 
@@ -83,14 +83,20 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ## Phase 1 — Text edit (feature 1)  ⏳ IN PROGRESS
 - [x] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
-- [ ] `components/TextEditOverlay.tsx` — contenteditable over glyphs; A−/A+ size; B/I toggles; width-drag
-- [ ] Commit produces `CoverEdit{sampleBackground}` + `TextEdit`
-- [ ] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
-- [ ] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
-- [ ] Export `warnings[]` shown as toast
+- [x] `components/TextEditOverlay.tsx` — one native textarea per paragraph/block; A−/A+ size; B/I toggles; font picker; move + width drag
+- [x] Commit produces per-line `CoverEdit{sampleBackground}` objects + wrapped `TextEdit` lines
+- [x] Task 10C shrink-to-fit implementation completed, then superseded by Task 10D's user-controlled box decision
+- [x] Task 10D manual-height/overflow-warning implementation completed, then superseded by Task 10E
+- [x] Task 10E final layout — manual width and font size with content-driven auto-height; no warning or hidden text
+- [x] Whitespace-safe layout preserves repeated spaces, explicit blank lines, and the unwrapped textarea value on re-edit
+- [x] Edited visible overlays are tappable to reopen; standalone numeric/short fields remain separate blocks
+- [x] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
+- [x] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
+- [x] Export `warnings[]` shown as toast
 - [ ] `components/TapPopover.tsx` — shell + **Edit** + **Search Google** (`meaning of <selection>`) + **Open in Maps** (place names); Translate/Meaning disabled
-- [ ] `components/HoldToPeek.tsx` — hide overlays to reveal original
-- [ ] Harness: single English line-edit scenario
+- [x] `components/HoldToPeek.tsx` — hide overlays to reveal original
+- [x] Harness: single English line-edit scenario
+- [x] Browser verification: auto-height shows every line; width collapses wraps upward; no warning; A+/A−, whitespace, re-edit, and PDF export hold
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 

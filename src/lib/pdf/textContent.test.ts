@@ -5,8 +5,11 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import type { TextRun } from './textContent';
 import {
   classifyFontStyle,
+  classifyFontFamily,
   extractTextRuns,
+  groupRunsIntoBlocks,
   hitTestRun,
+  mergeRunsIntoLines,
 } from './textContent';
 
 const openDocuments: PDFDocumentProxy[] = [];
@@ -25,6 +28,18 @@ describe('classifyFontStyle', () => {
     ['Inter-700', true, false],
   ])('classifies %s', (fontName, bold, italic) => {
     expect(classifyFontStyle(fontName)).toEqual({ bold, italic });
+  });
+});
+
+describe('classifyFontFamily', () => {
+  it.each([
+    ['Times New Roman', 'serif'],
+    ['Georgia-Bold', 'serif'],
+    ['CourierNewPSMT', 'mono'],
+    ['Consolas', 'mono'],
+    ['Helvetica', 'sans'],
+  ] as const)('classifies %s as %s', (fontName, family) => {
+    expect(classifyFontFamily(fontName)).toBe(family);
   });
 });
 
@@ -93,5 +108,64 @@ describe('hitTestRun', () => {
   it('prefers the later run when equal-area runs overlap', () => {
     const topmost = { ...small, text: 'topmost' };
     expect(hitTestRun([small, topmost], { x: 35, y: 35 })).toBe(topmost);
+  });
+});
+
+describe('natural text blocks', () => {
+  const style = {
+    fontName: 'Helvetica',
+    fontSizePt: 10,
+    bold: false,
+    italic: false,
+    color: { r: 0, g: 0, b: 0 },
+  };
+  const run = (text: string, x: number, y: number, w: number): TextRun => ({
+    pageIndex: 0,
+    text,
+    rect: { x, y, w, h: 10 },
+    style,
+  });
+
+  it('rejoins touching fragments, spaces words, and splits distant columns', () => {
+    const lines = mergeRunsIntoLines([
+      run('pan', 10, 500, 15),
+      run('oramic', 25.2, 500.1, 30),
+      run('view', 60, 500, 20),
+      run('Other column', 130, 500, 55),
+    ]);
+
+    expect(lines.map((line) => line.text)).toEqual(['panoramic view', 'Other column']);
+  });
+
+  it('merges aligned paragraph lines but keeps short fields standalone', () => {
+    const blocks = groupRunsIntoBlocks([
+      run('This is the first descriptive line', 20, 500, 170),
+      run('This is the second descriptive line', 20, 486, 175),
+      run('This is the final descriptive line', 20, 472, 160),
+      run('Mr. Pratik', 260, 500, 50),
+      run('2 Adults', 260, 486, 45),
+    ]);
+
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]?.text).toBe(
+      'This is the first descriptive line\nThis is the second descriptive line\nThis is the final descriptive line',
+    );
+    expect(blocks.slice(1).map((block) => block.text)).toEqual(['Mr. Pratik', '2 Adults']);
+  });
+
+  it('keeps short numbers separate across columns and from nearby descriptive rows', () => {
+    const blocks = groupRunsIntoBlocks([
+      run('1', 20, 500, 5),
+      run('2', 31, 500, 5),
+      run('This descriptive row must not absorb the number above it', 20, 486, 220),
+      run('3', 20, 440, 5),
+    ]);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      '1',
+      '2',
+      'This descriptive row must not absorb the number above it',
+      '3',
+    ]);
   });
 });

@@ -1,9 +1,26 @@
+import { HoldToPeek } from './HoldToPeek';
+
 interface ToolbarProps {
   onOpen: (file: File) => void;
   fileName: string | null;
+  editMode: boolean;
+  hasEdits: boolean;
+  exporting: boolean;
+  onEditModeChange(enabled: boolean): void;
+  onPeekChange(peeking: boolean): void;
+  onExport(): void;
 }
 
-export function Toolbar({ onOpen, fileName }: ToolbarProps) {
+export function Toolbar({
+  onOpen,
+  fileName,
+  editMode,
+  hasEdits,
+  exporting,
+  onEditModeChange,
+  onPeekChange,
+  onExport,
+}: ToolbarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
       <span className="text-lg font-semibold tracking-tight text-neutral-900">DesiPDF</span>
@@ -12,7 +29,26 @@ export function Toolbar({ onOpen, fileName }: ToolbarProps) {
           {fileName}
         </span>
       )}
-      <label className="ml-auto cursor-pointer rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700">
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={editMode}
+          onClick={() => onEditModeChange(!editMode)}
+          disabled={!fileName}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${editMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
+        >
+          Edit text
+        </button>
+        <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={!fileName || exporting}
+          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-40"
+        >
+          {exporting ? 'Exporting…' : 'Export PDF'}
+        </button>
+      <label className="cursor-pointer rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700">
         Open PDF
         <input
           type="file"
@@ -25,6 +61,7 @@ export function Toolbar({ onOpen, fileName }: ToolbarProps) {
           }}
         />
       </label>
+      </div>
     </header>
   );
 }

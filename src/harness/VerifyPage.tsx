@@ -73,7 +73,9 @@ function ResultCard({ result }: { readonly result: ScenarioResult }) {
         <section key={page.pageIndex} className="mt-5 border-t border-current/20 pt-5">
           <div className="mb-3 flex items-center justify-between gap-3 text-sm">
             <h3 className="font-semibold">Page {page.pageIndex + 1}</h3>
-            <span className="font-mono">diff {page.ratio.toFixed(6)}</span>
+            <span className="font-mono">
+              diff {page.ratio.toFixed(6)}{page.scored ? '' : ' · edited page (validity only)'}
+            </span>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
             <ImageCanvas label="Expected" image={page.expected} />
