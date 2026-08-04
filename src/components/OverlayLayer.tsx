@@ -11,9 +11,12 @@ import {
 import { wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
-import type { TextBlock } from '@/lib/pdf/textContent';
+import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
+import { detectDates } from '@/lib/smart/dateDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
+import { SmartSpanLayer } from './SmartSpanLayer';
+import { TapPopover } from './TapPopover';
 import { TextEditOverlay } from './TextEditOverlay';
 
 interface OverlayLayerProps {
@@ -30,6 +33,14 @@ interface ExistingBlock {
   readonly covers: readonly CoverEdit[];
   readonly texts: readonly TextEdit[];
 }
+
+interface PopoverTarget {
+  readonly block: TextBlock;
+  readonly text: string;
+  readonly screenRect: ReturnType<typeof pdfRectToScreenRect>;
+}
+
+const WHITE_BACKGROUND: Rgb = { r: 1, g: 1, b: 1 };
 
 function sameRect(left: PdfRect, right: PdfRect): boolean {
   const epsilon = 0.01;
@@ -85,20 +96,27 @@ export function OverlayLayer({
   editMode,
   peek,
 }: OverlayLayerProps) {
+  const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
+  const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
   const { edits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
 
   useEffect(() => {
     let cancelled = false;
-    void extractTextRuns(page, pageIndex).then((runs) => {
-      if (!cancelled) setBlocks(groupRunsIntoBlocks(runs));
+    void extractTextRuns(page, pageIndex).then((nextRuns) => {
+      if (!cancelled) {
+        setRuns(nextRuns);
+        setBlocks(groupRunsIntoBlocks(nextRuns));
+      }
     });
     return () => {
       cancelled = true;
     };
   }, [page, pageIndex]);
+
+  const detectedDates = useMemo(() => detectDates(runs), [runs]);
 
   const pageTextEdits = useMemo(
     () => edits
@@ -115,7 +133,7 @@ export function OverlayLayer({
 
   const sampleBackground = useCallback((rect: PdfRect): Rgb => {
     const registration = getPageCanvas(pageIndex);
-    if (!registration) return { r: 1, g: 1, b: 1 };
+    if (!registration) return WHITE_BACKGROUND;
     const { canvas, viewport: canvasViewport } = registration;
     const first = pdfToViewport(canvasViewport, { x: rect.x, y: rect.y });
     const second = pdfToViewport(canvasViewport, { x: rect.x + rect.w, y: rect.y + rect.h });
@@ -124,10 +142,14 @@ export function OverlayLayer({
     const right = Math.min(canvas.width, Math.ceil(Math.max(first.x, second.x)));
     const bottom = Math.min(canvas.height, Math.ceil(Math.max(first.y, second.y)));
     const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return { r: 1, g: 1, b: 1 };
-    return sampleDominantColor(
-      context.getImageData(left, top, Math.max(1, right - left), Math.max(1, bottom - top)).data,
-    );
+    if (!context) return WHITE_BACKGROUND;
+    try {
+      return sampleDominantColor(
+        context.getImageData(left, top, Math.max(1, right - left), Math.max(1, bottom - top)).data,
+      );
+    } catch {
+      return WHITE_BACKGROUND;
+    }
   }, [getPageCanvas, pageIndex]);
 
   const findExisting = (block: TextBlock): ExistingBlock | undefined => {
@@ -193,16 +215,25 @@ export function OverlayLayer({
         );
       })}
 
+      <SmartSpanLayer dates={detectedDates} viewport={viewport} dpr={dpr} />
+
       {editMode && blocks.map((block, index) => {
         const rect = pdfRectToScreenRect(block.rect, viewport, dpr);
         const labelText = block.text.replace(/\s+/g, ' ').trim();
+        const existing = findExisting(block);
+        const actionText = existing && existing.texts.length > 0
+          ? sourceText(existing.texts)
+          : block.text;
         return (
           <button
             key={`${block.pageIndex}-${index}-${block.rect.x}-${block.rect.y}`}
             type="button"
-            aria-label={`Edit text: ${labelText}`}
+            aria-label={`Text actions: ${labelText}`}
             title={labelText}
-            onClick={() => setActiveBlock(block)}
+            onClick={() => {
+              setActiveBlock(null);
+              setPopoverTarget({ block, text: actionText, screenRect: rect });
+            }}
             className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
           />
@@ -221,13 +252,30 @@ export function OverlayLayer({
           <button
             key={`re-edit-${block.pageIndex}-${index}`}
             type="button"
-            aria-label={`Re-edit text: ${sourceText(existing.texts).replace(/\s+/g, ' ').trim()}`}
-            onClick={() => setActiveBlock(block)}
+            aria-label={`Text actions for edited text: ${sourceText(existing.texts).replace(/\s+/g, ' ').trim()}`}
+            onClick={() => {
+              setActiveBlock(null);
+              setPopoverTarget({ block, text: sourceText(existing.texts), screenRect: rect });
+            }}
             className="absolute z-[25] cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
           />
         );
       })}
+
+      {editMode && popoverTarget && (
+        <TapPopover
+          key={`${popoverTarget.block.pageIndex}:${popoverTarget.screenRect.left}:${popoverTarget.screenRect.top}:${popoverTarget.text}`}
+          text={popoverTarget.text}
+          screenRect={popoverTarget.screenRect}
+          pageWidth={viewport.width / dpr}
+          onEdit={() => {
+            setActiveBlock(popoverTarget.block);
+            setPopoverTarget(null);
+          }}
+          onClose={() => setPopoverTarget(null)}
+        />
+      )}
 
       {activeBlock && (() => {
         const existing = findExisting(activeBlock);
@@ -267,6 +315,7 @@ export function OverlayLayer({
               existing={existing?.texts}
               screenRect={screenRect}
               zoom={zoom}
+              backgroundColor={colorCss(sampleBackground(activeBlock.rect))}
               onCancel={() => setActiveBlock(null)}
               onDone={(next) => {
                 const canvas = window.document.createElement('canvas');

@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-02
-**Current position:** Phase 1 in progress — Tasks 9–10E complete; Task 11 tap popover next. Real-device PDF acceptance remains pending.
+**Last updated:** 2026-08-04
+**Current position:** Phase 1 implementation is green through Task 11A. Task 10F's manual opaque-box visual confirmation, real-device PDF acceptance, and the `Phase 1 ✓` commit remain pending.
 
 ---
 
@@ -88,15 +88,20 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Task 10C shrink-to-fit implementation completed, then superseded by Task 10D's user-controlled box decision
 - [x] Task 10D manual-height/overflow-warning implementation completed, then superseded by Task 10E
 - [x] Task 10E final layout — manual width and font size with content-driven auto-height; no warning or hidden text
+- [x] Task 10F implementation — the full live editor box uses the sampled page colour with a white fallback; toolbar and handles remain stacked above it
 - [x] Whitespace-safe layout preserves repeated spaces, explicit blank lines, and the unwrapped textarea value on re-edit
 - [x] Edited visible overlays are tappable to reopen; standalone numeric/short fields remain separate blocks
 - [x] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)
 - [x] `handlers/text.ts` (English drawText; Indic → Path A stub), `handlers/cover.ts` (mode-color sampling)
 - [x] Export `warnings[]` shown as toast
-- [ ] `components/TapPopover.tsx` — shell + **Edit** + **Search Google** (`meaning of <selection>`) + **Open in Maps** (place names); Translate/Meaning disabled
+- [x] `components/TapPopover.tsx` — block popover is **Edit-only**; Translate/Meaning remain disabled; whole-paragraph Search/Maps removed by Task 11A
+- [x] `lib/smart/dateDetect.ts` — named/numeric dates, ranges, and clock times mapped back to precise PDF-run geometry; DD/MM default with ambiguity metadata
+- [x] `components/SmartSpanLayer.tsx` + `DateActionPopover.tsx` — reader-mode underlines, editable title, date-order confirmation, Calendar/Reminder/Search actions
+- [x] `lib/smart/calendarLink.ts` — pre-filled Google Calendar links with correct all-day exclusive end dates and timed UTC ranges
 - [x] `components/HoldToPeek.tsx` — hide overlays to reveal original
 - [x] Harness: single English line-edit scenario
 - [x] Browser verification: auto-height shows every line; width collapses wraps upward; no warning; A+/A−, whitespace, re-edit, and PDF export hold
+- [x] Browser verification: Task 11A finds the sample itinerary's date range/dates/times, renders dotted underlines, opens the correct confirmation menu and Calendar page, keeps block actions Edit-only, and logs no errors
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 
@@ -151,15 +156,13 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ---
 
-## Feature 6 — Smart dates → calendar & places → maps  (reader-layer add-on; NEW)  ⬜ NOT STARTED
+## Feature 6 — Smart dates → calendar & places → maps  (reader-layer add-on; NEW)  ⏳ IN PROGRESS
 > Reads the document and offers an action; emits **no `Edit`**, never touches the export seam. Fully
 > client-side. Slots **after Phase 1** (needs text extraction) and ships **before/with the Phase 6 deploy**.
 > Decisions: "Set Reminder" = calendar event with an alarm; calendar = **Add to Google Calendar**.
-- [ ] Places → Maps: **Open in Maps** folded into `TapPopover` (Phase 1) — `google.com/maps/search`
-- [ ] Task 31 — `lib/smart/dateDetect.ts`: detect dates/times + positions from `getTextContent()` (DD/MM default)
-- [ ] Task 32 — `components/SmartSpanLayer.tsx` + `DateActionPopover.tsx`: tappable date highlights + confirm (title + DD/MM toggle)
-- [ ] Task 33 — `lib/smart/calendarLink.ts`: **Add to Google Calendar** (`render?action=TEMPLATE`); **Set Reminder** = event + Google default alarm; optional `.ics`+`VALARM` fallback
-- [ ] Acceptance: tap a date in the sample PDF → confirm → Google Calendar opens pre-filled
+- [x] Task 11A (supersedes planned Tasks 31–33) — date/time detection, positioned smart spans, confirmation menu, Calendar/Reminder/Search links
+- [x] Acceptance: tap the sample's travel-date range → confirm → Google Calendar opens with the right title and dates
+- [ ] Task 21A (Phase 4) — AI-backed place/name/event spans with Search/Maps/Meaning
 
 ---
 

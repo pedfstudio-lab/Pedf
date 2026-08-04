@@ -1211,7 +1211,54 @@ widened — with the word always visible throughout.
 **Commit:** feature-side (editor + overlay + emission). Folds into the Phase 1 feature commit; no export-path
 (`handlers`) change.
 
-### Task 11 — Tap popover shell + Search Google / Maps  🔲
+### Task 10F — Text edit: opaque editing box (stop the paragraph below bleeding through)  🔲
+**Goal:** while editing a paragraph, the box is see-through, so the **next paragraph on the page shows
+through it** and collides with what you're typing — hard to edit (see screenshot: the Mt. Batur box overlaps
+"This adventure is ideal for…").
+**Depends on:** Task 10E.
+**Done when:** while an editor is open, its box is **fully opaque** (you only see the text you're editing,
+never the page underneath), regardless of how tall it grows or where it's moved; typing/re-edit/move still
+work; tests/typecheck/lint green.
+
+**Root cause (confirmed in code):** the `<textarea>` is `bg-transparent` and its container has **no
+background** (`TextEditOverlay.tsx` — the `absolute z-50` box + the textarea's `bg-transparent` class). The
+box auto-grows **taller than the original paragraph** (10E), so it now sits over the next paragraph; the
+per-line covers only hide the *original* block's lines, so the area the box grew into stays transparent →
+the paragraph below **bleeds through** while editing.
+
+#### Workflow
+
+**1 — Give the editing box an opaque background → `TextEditOverlay.tsx`**
+Fill the **whole box** (the `absolute z-50` container, which is `width × height` and already tracks
+move/resize) with an opaque colour behind the textarea. Add a `backgroundColor` prop and apply it to the box
+container (or a `absolute inset-0` backing div behind the textarea). Keep the textarea itself transparent so
+it sits on that backing. The toolbar and drag handles are positioned *outside* the box (`bottom-full` /
+`-left-3` / `-right-2`), so they're unaffected.
+
+**2 — Use the block's sampled background colour → `OverlayLayer.tsx`**
+`OverlayLayer` already computes `sampleBackground(rect)`. Sample the **active block's** background (white for
+the itinerary; the local colour for a coloured region) and pass it to `TextEditOverlay` as `backgroundColor`,
+falling back to white. This keeps the editing surface matching the page so it looks seamless, not a white
+patch on a coloured area.
+
+**Scope note.** This fixes the **editing** experience only (the bleed-through while the box is open). The
+*committed/exported* result still covers the original per-line; if the new paragraph is longer than the
+original it will overlap the next paragraph on the page — that's the accepted "overflow when longer"
+behaviour (no page reflow), separate from this task.
+
+**Tests & verify**
+- Unit: `TextEditOverlay` applies the `backgroundColor` to its box (light render/prop test) — or keep it a
+  browser check if jsdom isn't set up.
+- **Browser:** open the Mt. Batur paragraph editor → the box is solid (white), the "This adventure is ideal…"
+  paragraph no longer shows through; grow/move the box → it stays opaque everywhere; text stays readable.
+
+**Commit:** feature-side (editor + overlay). Folds into the Phase 1 feature commit; no export-path change.
+
+### Task 11 — Tap popover shell + Search Google / Maps  ✅
+**⚠ Correction (superseded by Task 11A):** block-level **Search Google / Open in Maps** search the *whole
+paragraph* — wrong granularity. Those actions move to **per-entity spans**: **dates/times now** (Task 11A,
+Phase 1), **places/names via AI** (Task 21A, Phase 4). The block popover keeps **`Edit`** only — remove
+Search/Maps from `TapPopover` when Task 11A lands.
 **Goal:** the shared popover, with the no-AI actions live.
 **Deliverables:** `components/TapPopover.tsx` — **Edit** + **Search Google** (`meaning of <selection>`,
 new tab, only the selected snippet in the URL) + **Open in Maps**
@@ -1221,6 +1268,205 @@ present but disabled.
 **Note (Feature A — "what is this place?"):** This popover *is* Feature A. "Open in Maps" is the only new
 piece; **Search Google** (here) and **Meaning** (Task 21, AI `explain()` → "X is a state in…") cover the
 rest. No AI needed for Search/Maps; only the tapped snippet leaves the device.
+**Done when:** tapping a text block opens a small popover (**Edit · Search Google · Open in Maps**, with
+Translate/Meaning shown disabled); **Edit** opens the existing editor, **Search Google** / **Open in Maps**
+open the right URL in a new tab with only the tapped snippet in it; Escape / click-away closes it;
+tests/typecheck/lint green. This is the **last Phase 1 task → `Phase 1 ✓` commit** after it.
+
+#### Workflow
+
+**What this changes.** Today, tapping a text block in edit mode jumps **straight into the editor**. Task 11
+inserts a **popover** between the tap and the editor: tap → popover → choose an action. It's the shared
+"tap menu" from the spec (Edit | Translate | Meaning | Search) — in Phase 1 only the **no-AI** actions are
+live (Edit, Search Google, Open in Maps); Translate/Meaning are visible but disabled until Phase 4 (Task 21).
+Feature-side only; **no export-path change.**
+
+**1 — Pure URL builders → `src/lib/actions/searchLinks.ts` (node-testable)**
+```ts
+function snippet(text: string): string {           // normalize + cap so URLs stay sane and private
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+export function googleSearchUrl(text: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent('meaning of ' + snippet(text))}`;
+}
+export function googleMapsUrl(text: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(snippet(text))}`;
+}
+```
+Only the tapped snippet ever goes into a URL — never surrounding or full-page text (privacy rule).
+
+**2 — The popover → `src/components/TapPopover.tsx`**
+- Props: the tapped block (for its text + screen rect) + callbacks `onEdit`, `onClose`.
+- A small floating menu positioned near the block (reuse the editor toolbar's above/below placement logic).
+- Buttons:
+  - **Edit** → `onEdit()` (opens the current `TextEditOverlay`).
+  - **Search Google** → `window.open(googleSearchUrl(block.text), '_blank', 'noopener,noreferrer')` then `onClose()`.
+  - **Open in Maps** → `window.open(googleMapsUrl(block.text), '_blank', 'noopener,noreferrer')` then `onClose()`.
+  - **Translate**, **Meaning** → rendered **disabled** with a title like "Available in the translation update"
+    (wired in Task 21).
+- Close on **Escape**, on **click-away** (backdrop), and after any action.
+
+**3 — Wire it into the tap flow → `src/components/OverlayLayer.tsx`**
+- Add `popoverBlock` state. Change the block tap target from `onClick={() => setActiveBlock(block)}` to
+  `onClick={() => setPopoverBlock(block)}`.
+- Render `<TapPopover block={popoverBlock} onEdit={() => { setActiveBlock(popoverBlock); setPopoverBlock(null); }}
+  onClose={() => setPopoverBlock(null)} />` when set. The editor now opens **only via the popover's Edit**.
+- The re-edit tap targets (over already-edited blocks) open the popover too (so you can Search/Maps/Re-edit an
+  edited block).
+
+**4 — Snippet scope note (place names vs paragraphs)**
+Search/Maps use the tapped block's text. Short fields/place names group as their own block → great for
+"what is this place?". For a long paragraph block the search is less useful (the user would pick Edit); the
+200-char cap keeps the URL sane. *(Word-level selection within a block is a future nicety, not this task.)*
+
+**Tests & verify**
+- Unit: `googleSearchUrl` / `googleMapsUrl` — correct host + encoding, "meaning of" prefix, whitespace
+  normalized, capped at 200 chars, snippet-only.
+- **Browser:** tap a place/name block → popover appears with Edit · Search Google · Open in Maps (+ disabled
+  Translate/Meaning); Search opens Google for "meaning of <text>" in a new tab; Maps opens Google Maps; Edit
+  opens the editor; Escape/click-away closes.
+
+**Commit:** feature-side (popover + link builders + overlay wiring). This closes Phase 1 — run the Phase 1
+acceptance (edit a line of a real PDF → export → layout holds in Reader), then land the **`Phase 1 ✓`**
+commit, keeping the Task 10 export-path change in its own commit per the discipline.
+
+### Task 11A — Smart date/time spans (Search + Calendar) + block-popover cleanup  ✅
+**Goal:** fix Task 11's whole-paragraph Search/Maps. (a) **Remove Search Google / Open in Maps from the block
+popover** — it keeps **Edit** only. (b) Detect **dates & times** (reliable, no AI), **underline** them, and
+tap → a small menu: **Add to Calendar / Set Reminder** (+ Search). Places/names come later in Phase 4
+(Task 21A, needs AI).
+**Depends on:** Task 8 (run positions), Task 3 (coordinates), Task 11 (popover). *(Dates/times reader spans,
+built now in Phase 1; the AI places/names half is **Task 21A**, in Phase 4.)*
+**Done when:** dates/times in the sample PDF are underlined; tapping one opens a confirm menu that adds the
+event to Google Calendar with the right date + title; the block popover no longer shows Search/Maps (Edit
+only); tests/typecheck/lint green.
+
+#### Workflow
+
+**1 — Date/time detection → `src/lib/smart/dateDetect.ts`** (pure, node-testable)
+Scan the Task 8 text runs for common formats and return each hit with its **position**:
+```ts
+export interface DetectedDate {
+  raw: string; startISO: string; endISO?: string; allDay: boolean;
+  pageIndex: number; rect: PdfRect;              // union of the run(s) the match spans
+}
+export function detectDates(runs: TextRun[]): DetectedDate[];
+```
+Handle: `23 Aug 2026`, `12 Aug 2026 - 23 Aug 2026` (ranges), `12/08/2026`, `15 Aug`, clock times `3pm` /
+`14:30`. Ambiguous `DD/MM` → **day-month** (Indian convention). Regex-based (optionally `chrono-node`).
+Map the match back to run rects so the span can be underlined. *(Durations like "90 Mins" / "11 Nights" are
+out — not calendar-able.)*
+
+**2 — Underline layer → `src/components/SmartSpanLayer.tsx`**
+Render a subtle **underline** over each detected span (positioned via `pdfRectToScreenRect`), tappable, shown
+in normal viewing (independent of "Edit text" mode — these are *reader* actions, not editing). Tap → open the
+date menu for that span. This is the **shared** span layer Phase-4 places/names (Task 21A) will also use.
+
+**3 — Date menu → `src/components/DateActionPopover.tsx`**
+Shows the parsed date (human-readable) + an **editable event title** (defaulted from nearby text, e.g.
+"Travel: 12–23 Aug") + a **day-month / month-day toggle** for ambiguous dates (parsing can misread — always
+confirm, never auto-create). Actions: **Add to Google Calendar**, **Set Reminder** (same event + Google's
+default alarm), and **Search Google** (`<title> <raw date>`).
+
+**4 — Calendar link → `src/lib/smart/calendarLink.ts`** (pure, node-testable)
+`googleCalendarUrl({ title, startISO, endISO, allDay, details })` →
+`https://calendar.google.com/calendar/render?action=TEMPLATE&text=…&dates=<START>/<END>&details=…` (timed
+`…THHMMSSZ` or all-day `YYYYMMDD`). *Optional:* a downloadable `.ics` (`VEVENT` + `VALARM`) fallback.
+
+**5 — Block-popover cleanup → `src/components/TapPopover.tsx` (+ `OverlayLayer.tsx`)**
+Remove **Search Google** and **Open in Maps** from the block popover (they searched the whole paragraph).
+Block popover = **Edit** only (Translate/Meaning stay disabled for Phase 4).
+
+**Tests & verify**
+- Unit: `detectDates` parses the itinerary's dates incl. the `12 Aug – 23 Aug` range + `DD/MM` day-month +
+  clock times; `googleCalendarUrl` encodes date/title correctly.
+- **Browser:** dates/times show a subtle underline; tap one → confirm menu → "Add to Calendar" opens Google
+  Calendar pre-filled; the block popover shows only **Edit** (no Search/Maps).
+
+**Commit:** feature-side (reader spans + link builders + popover cleanup). No export-path change.
+
+---
+
+### Task 11B — Inline bold/italic (rich text within one edit box)  🔲
+**Goal:** let the user **bold/italic a selected word or phrase inside a single edit box** — not the whole
+box. Scope is deliberately **bold/italic only**; font size, colour and family stay whole-box (they rarely
+vary mid-line and keep the model small). Exported text stays **real & selectable** (Option-2 fidelity:
+standard fonts, per-span weight/style).
+**Depends on:** Task 9/10 (text editor), Task 4 (export seam / text handler), Task 3 (coordinates).
+**Why its own task / risk:** re-introduces `contentEditable` — the source of the earlier caret /
+reversed-typing / can't-delete-number bugs. Build it **deliberately**, after the plain-textarea editor is
+stable and Phase 1 is committed. The uncontrolled-contentEditable mitigation in step 2 is the crux.
+**Done when:** selecting part of the text and pressing **B**/**I** styles only that range on screen;
+**Done** → the export shows that word bold/italic while the rest stays regular and all text remains
+selectable/copyable; plain (un-styled) edits behave exactly as today; tests/typecheck/lint green; the
+`/verify` round-trip stays pass.
+
+#### Workflow
+
+**1 — Span model → `src/lib/export/types.ts`** (backward-compatible)
+Add an optional styled-span list to `TextEdit`; when absent the edit is plain text exactly as today.
+```ts
+export interface TextSpan {
+  readonly text: string;
+  readonly bold: boolean;
+  readonly italic: boolean;   // fontName / fontSizePt / color inherited from TextEdit.style
+}
+export interface TextEdit extends BaseEdit {
+  // …existing fields…
+  readonly spans?: readonly TextSpan[]; // present ⇒ rich; `text` stays the concatenation for hit-test/fallback
+}
+```
+Keep `text` as the plain concatenation so hit-testing, date/entity detection, and the Indic fallback keep
+working unchanged.
+
+**2 — Rich editor → `src/components/TextEditOverlay.tsx`** (the careful part)
+Replace the `<textarea>` with an **uncontrolled `contentEditable` div** — *this is the fix for the old caret
+bug*: never write a React-controlled value back into it on each keystroke.
+- Initialise its `innerHTML` **once** from the spans (`<b>`, `<i>`, plain text); after that the DOM is the
+  source of truth for the text — React state does not re-inject it per keystroke.
+- **B / I** buttons act on the **current selection** (`window.getSelection()`), wrapping/unwrapping only the
+  selected range (`document.execCommand('bold'|'italic')` on the box, or a manual Range split). They no
+  longer flip a whole-box `style.bold`.
+- On **Done** (and before wrapping) **serialise the DOM → `TextSpan[]`**: walk text nodes, emit one span per
+  contiguous (bold,italic) run, collapsing adjacent equal runs.
+- Keep auto-grow height, width-drag, move grip, A±, colour and family (all still whole-box).
+- If the whole box ends up uniform, emit **no** `spans` (stay plain) so the common case is byte-for-byte the
+  current behaviour.
+
+**3 — Span-aware wrap → extend the existing width wrap (`src/lib/edit/…`)**
+Today the soft-wrap splits `boxText` into lines by width. Extend it to wrap a **span list**: break at the
+width limit, splitting a span at the break and carrying its (bold,italic) onto both lines. Each wrapped line
+becomes its own `TextEdit` whose `spans` are that line's pieces — same one-`TextEdit`-per-line shape as now.
+
+**4 — Multi-run draw → `src/lib/export/handlers/text.ts`**
+When `edit.spans` is present, draw each span in sequence, advancing the pen by the measured width of the
+previous piece:
+```ts
+let cursorX = edit.rect.x;
+for (const span of edit.spans) {
+  const font = await resolveEnglishFont({ ...edit.style, bold: span.bold, italic: span.italic }, context);
+  context.page.drawText(span.text, { x: cursorX, y: edit.rect.y, size: edit.style.fontSizePt, font, color });
+  cursorX += font.widthOfTextAtSize(span.text, edit.style.fontSizePt);
+}
+```
+No `spans` ⇒ the existing single `drawText` path, untouched. `resolveEnglishFont` already keys off
+`{bold,italic}`, so the four Helvetica/Times variants come for free.
+
+**5 — Indic guard**
+Rich spans are **English-only** for now: if `isIndicRun(edit.text)`, ignore `spans` and keep the whole-run
+Path-A raster (Task 13). Note it in code.
+
+**Tests & verify**
+- Unit: DOM→spans serialiser (mixed bold/italic → correct span list; uniform → no spans); span-aware wrap
+  splits a span at the width break keeping style; the `text` handler advances x by measured widths.
+- Harness: add a `/verify` scenario — one block with a bold word → export → re-render diffs clean (the
+  pieces line up).
+- **Browser:** select `03:00 PM` in a line, press **B** → only that bolds; Done → export; re-open the PDF →
+  `03:00 PM` bold, rest regular, all still selectable. Type / backspace / Enter around the styled word with
+  **no caret jumps** (the old bug must not return).
+
+**Commit:** cross-cutting (editor + model + export handler). Touches the export path, so keep the `/verify`
+round-trip green.
 
 ---
 
@@ -1297,6 +1543,18 @@ only"). Prod uses no client keys (Task 28).
 **Depends on:** Task 13, Task 19.
 **Done when:** tap an English paragraph → Hindi in place → exports correctly → commit `Phase 4 ✓`.
 
+### Task 21A — Entity spans: places / names / events (AI · Phase 4)  🔲
+**Goal:** underline **meaningful** places/names/events (not junk words) and offer Search/Maps/Meaning on them
+— the AI-backed half of "tap a place to look it up." (The dates/times half ships earlier, no AI, as Task 11A.)
+**Deliverables:** `lib/smart/entityDetect.ts` — send the page's extracted text to the **provider layer**
+(Anthropic with a small NER-style prompt, or Sarvam if it exposes NER) → `{ text, kind:
+'place'|'person'|'org'|'event', pageIndex, rect }[]`, mapped back to Task 8 run positions; render them in the
+**`SmartSpanLayer`** built in Task 11A (underline); tap menu → **Search Google** / **Open in Maps** (places)
+/ **Meaning** (AI `explain`). Detect **once per document** (cached) to bound cost/latency.
+**Depends on:** Task 18 (provider layer) + Task 19 (AI wired) + Task 11A (span layer).
+**Done when:** "Bali" / "Mount Batur" are underlined and tap → Search/Maps that entity; ordinary words like
+"I'm" / "activity" are **not** underlined or offered an action.
+
 ---
 
 ## Voice discussion
@@ -1356,50 +1614,3 @@ endpoints; provider base-URL switch (dev = direct+localStorage, prod = proxy).
 key present**.
 **Depends on:** Task 28, Task 29.
 **Done when:** all three pass → commit `Phase 6 ✓`.
-
----
-
-## Feature 6 — Smart dates → calendar & places → maps  (reader-layer add-on)
-
-> **Not an edit feature.** Like Translate/Voice, these *read* the document and offer an action — they emit
-> **no `Edit`** and **never touch the export seam**, so "layout never shifts" is unaffected and nothing is
-> added to the exported PDF. Fully client-side.
->
-> **Places → Maps** is already folded into **Task 11** above (Feature A). The new work below is **dates →
-> calendar** (Tasks 31–33).
->
-> **Scheduling:** depends only on **Task 8** (text extraction) + the **Task 11** popover pattern — it's
-> independent of the Indic/image/translate/voice work. Build it **after Phase 1**, ship it **before/with
-> the Phase 6 deploy**. (Numbered 31–33 to avoid renumbering; order is by dependency, not by number.)
->
-> **Decisions locked:** "Set Reminder" = **calendar event with an alarm** (the web can't set a native OS
-> alarm). Calendar mechanism = **Add to Google Calendar** link (with an optional `.ics` fallback).
-
-### Task 31 — Date/time detection over document text  🔲
-**Goal:** find date/time strings and their positions in the page text.
-**Deliverables:** `lib/smart/dateDetect.ts` — scan `getTextContent()` runs for common formats
-(`23 Aug 2026`, `12/08/2026`, `15–23 Aug`, `3pm`, ranges) → `{ raw, start, end?, allDay, pageIndex, rect }[]`.
-Ambiguous `DD/MM` defaults to **day-month** (Indian convention). Regex-based (optionally `chrono-node`).
-**Depends on:** Task 8.
-**Done when:** unit tests parse the sample itinerary's dates — including the `12 Aug – 23 Aug` range — correctly.
-
-### Task 32 — Smart-date span overlay + confirm popover  🔲
-**Goal:** make detected dates tappable and confirmable before acting (parsing can misread — never auto-create).
-**Deliverables:** `components/SmartSpanLayer.tsx` — tappable highlights positioned via `coordinates.ts`;
-`components/DateActionPopover.tsx` — shows the parsed date + an **editable title** (defaulted from nearby
-text, e.g. "Travel: 12–23 Aug") + a **day-month / month-day toggle** for ambiguous dates.
-**Depends on:** Task 31, Task 3.
-
-### Task 33 — Calendar action (Google Calendar + alarm)  🔲
-**Goal:** turn a confirmed date into a calendar event / reminder.
-**Deliverables:** `lib/smart/calendarLink.ts` —
-- **Add to Google Calendar** → open
-  `https://calendar.google.com/calendar/render?action=TEMPLATE&text=<title>&dates=<START>/<END>&details=<snippet>&location=`
-  in a new tab (timed `…THHMMSSZ` or all-day `YYYYMMDD` ranges).
-- **Set Reminder** → the same event; the alarm is Google Calendar's **default notification** (= the agreed
-  "calendar event with an alarm").
-- *Optional secondary:* a downloadable **`.ics`** (`VEVENT` + `VALARM`) for a precise "N days before" alarm,
-  offline use, or non-Google calendars.
-**Depends on:** Task 32.
-**Done when:** tapping a date in the sample PDF → confirm → **Google Calendar opens pre-filled** with the
-correct date + title.

@@ -22,6 +22,7 @@ interface TextEditOverlayProps {
   readonly existing?: readonly TextEdit[];
   readonly screenRect: ScreenRect;
   readonly zoom: number;
+  readonly backgroundColor: string;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
 }
@@ -31,6 +32,7 @@ export function TextEditOverlay({
   existing,
   screenRect,
   zoom,
+  backgroundColor,
   onDone,
   onCancel,
 }: TextEditOverlayProps) {
@@ -121,16 +123,17 @@ export function TextEditOverlay({
 
   return (
     <div
-      className="absolute z-50"
+      className="absolute isolate z-50"
       style={{
         left: screenRect.left + moveOffset.x,
         top: screenRect.top + moveOffset.y,
         width: width * zoom,
         height: height * zoom,
+        backgroundColor,
       }}
     >
       <div
-        className={`absolute left-0 flex items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl ${controlsAbove ? 'bottom-full mb-2' : 'top-full mt-2'}`}
+        className={`absolute left-0 z-20 flex items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl ${controlsAbove ? 'bottom-full mb-2' : 'top-full mt-2'}`}
         role="toolbar"
         aria-label="Text formatting"
       >
@@ -167,14 +170,14 @@ export function TextEditOverlay({
           if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') commit();
           if (event.key === 'Escape') onCancel();
         }}
-        className="block w-full resize-none overflow-hidden whitespace-pre-wrap rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
+        className="relative z-0 block w-full resize-none overflow-hidden whitespace-pre-wrap rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
         style={{ ...textStyleToCss(style, zoom), lineHeight: `${lineHeight * zoom}px` }}
       />
       <button
         type="button"
         aria-label="Drag to change text width"
         onPointerDown={beginWidthDrag}
-        className="absolute -right-2 top-0 h-full w-4 cursor-ew-resize rounded bg-blue-500/80 hover:bg-blue-600"
+        className="absolute -right-2 top-0 z-10 h-full w-4 cursor-ew-resize rounded bg-blue-500/80 hover:bg-blue-600"
       />
       <button
         type="button"
@@ -193,7 +196,7 @@ export function TextEditOverlay({
           event.preventDefault();
           setMoveOffset((value) => ({ x: value.x + delta.x, y: value.y + delta.y }));
         }}
-        className="absolute -left-3 -top-3 h-6 w-6 cursor-move rounded-full border-2 border-white bg-blue-600 text-xs font-bold leading-none text-white shadow hover:bg-blue-700"
+        className="absolute -left-3 -top-3 z-20 h-6 w-6 cursor-move rounded-full border-2 border-white bg-blue-600 text-xs font-bold leading-none text-white shadow hover:bg-blue-700"
       >
         ✥
       </button>
