@@ -3,7 +3,7 @@ import type { TextStyle } from '@/lib/export/types';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 
 const CSS_FAMILIES = {
-  serif: 'Georgia, "Times New Roman", serif',
+  serif: '"Times New Roman", Times, serif',
   sans: 'Arial, Helvetica, sans-serif',
   mono: '"Courier New", Courier, monospace',
 } as const;

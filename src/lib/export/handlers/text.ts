@@ -7,8 +7,30 @@ import type { EditHandler } from '../registry';
 
 /** Draw English with a cached standard font; Indic remains routed to Path A. */
 export const drawText: EditHandler<TextEdit> = async (edit, context) => {
+  // Task 11B rich spans are English-only; Indic keeps the single whole-run Path-A route.
   if (isIndicRun(edit.text)) {
     await drawIndicTextPatch(edit, context);
+    return;
+  }
+
+  if (edit.spans) {
+    let cursorX = edit.rect.x;
+    for (const span of edit.spans) {
+      if (!span.text) continue;
+      const font = await resolveEnglishFont({
+        ...edit.style,
+        bold: span.bold,
+        italic: span.italic,
+      }, context);
+      context.page.drawText(span.text, {
+        x: cursorX,
+        y: edit.rect.y,
+        size: edit.style.fontSizePt,
+        font,
+        color: rgb(edit.style.color.r, edit.style.color.g, edit.style.color.b),
+      });
+      cursorX += font.widthOfTextAtSize(span.text, edit.style.fontSizePt);
+    }
     return;
   }
 

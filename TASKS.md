@@ -1387,7 +1387,7 @@ Block popover = **Edit** only (Translate/Meaning stay disabled for Phase 4).
 
 ---
 
-### Task 11B — Inline bold/italic (rich text within one edit box)  🔲
+### Task 11B — Inline bold/italic (rich text within one edit box)  ✅
 **Goal:** let the user **bold/italic a selected word or phrase inside a single edit box** — not the whole
 box. Scope is deliberately **bold/italic only**; font size, colour and family stay whole-box (they rarely
 vary mid-line and keep the model small). Exported text stays **real & selectable** (Option-2 fidelity:
@@ -1467,6 +1467,90 @@ Path-A raster (Task 13). Note it in code.
 
 **Commit:** cross-cutting (editor + model + export handler). Touches the export path, so keep the `/verify`
 round-trip green.
+
+---
+
+### Task 11C — Edit box: true no-op + open at the original footprint  ✅
+**Goal:** two seamless-editing fixes so opening/closing the editor never changes a paragraph the user didn't
+mean to change.
+- **(A) A "no-op" edit is truly a no-op.** If the user clicks **Edit** then **Done** *without changing*
+  text, style, spans, width, or position, create **no edit** — leave the original PDF text untouched. Today
+  `commit()` always calls `onDone`, so a no-change Done still replaces the original (embedded) glyphs with a
+  standard-font edit that looks slightly different (this is *why* "the font size/style changed even though I
+  changed nothing").
+- **(B) After an edit, the size stays exactly the original — the box never overflows and the user never has
+  to resize.** Two guarantees:
+  - **Size is preserved, never enlarged.** On commit the text keeps the original point size
+    (`block.style.fontSizePt`) — we do **not** change `fontSizePt` on commit; only an explicit A+/A− press may
+    change it. Font *shape/family* is best-effort matched (serif/sans/mono + bold/italic); exact glyph shape
+    can't match under Option 2 and the user has accepted that — **but the size must match the original.**
+  - **Match the on-screen font to the export font (the measured root cause).** The on-screen serif is
+    currently **Georgia** (`CSS_FAMILIES.serif` in `textStyleCss.ts`), but export uses **Times**
+    (`StandardFonts.TimesRoman`). Measured at equal point size, **Georgia is ~9% wider and ~7% taller
+    (x-height) than Times** — so edited serif text looks *enlarged* versus the original (Times-like) PDF and
+    doesn't even match what gets exported. Render serif on screen as **Times**, so screen = export ≈ original.
+  - **No surprise re-wrap.** With the font parity above the substitute is no longer oversized, but to be safe
+    also open the box **wide enough to hold the original line breaks** so a residual width difference can't
+    push a line onto a second row (which would grow the box downward and overlap the paragraph below).
+
+**Depends on:** Task 10 (editor), Task 11B (rich editor / spans), Task 3 (coordinates).
+**Non-goals:** no auto-shrink of the font (locked earlier — the *user* controls the box); no colour change;
+behaviour for edits the user actually *does* make is unchanged.
+**Done when:** Edit → Done with no change leaves the paragraph identical to the original (no edit created;
+Peek shows nothing changed); **after changing a single line, the committed text renders at the original font
+size (never enlarged) and stays within its original footprint — the user does not have to adjust the size or
+the box**; opening the editor on a one-line field shows it on one line (no re-wrap) and nothing overlaps the
+text below; tests/typecheck/lint green.
+
+#### Workflow
+
+**1 — True no-op guard → `src/components/TextEditOverlay.tsx` (`commit()`)**
+Snapshot the initial state once (already have `initialText`, `initialStyle`, `initialSpans`, and the initial
+`width`). In `commit()`, after `serializeRichText`, compare the result against that snapshot:
+- `serialized.text === initialText` (both normalised `\r\n?`→`\n`), **and**
+- style unchanged — `fontSizePt`, `bold`, `italic`, `fontName`, `color` all equal `initialStyle`, **and**
+- spans unchanged — `serialized.spans` deep-equals `initialSpans` (or both absent), **and**
+- `width === initialWidth` and `height` ≈ initial (ignore sub-pixel auto-grow), **and**
+- `moveOffset.x === 0 && moveOffset.y === 0`.
+If **all** are unchanged → call `onCancel()` (create no edit) instead of `onDone()`. That makes "Done with no
+change" identical to "Cancel", so the pristine original — or a pre-existing edit being re-opened — is left
+untouched. Keep the comparators as small local pure helpers (`sameStyle`, `sameSpans`).
+
+**2 — Keep original size + fit-on-open width → `src/components/TextEditOverlay.tsx`**
+**Size (the important guarantee):** do **not** change `fontSizePt` anywhere in `commit()` — it already equals
+the original (`block.style.fontSizePt`); only a manual A+/A− press may change it. So a plain text edit is
+always emitted at the original size, never enlarged.
+**Width:** replace the initial width `Math.max(existing width, block.rect.w)` with a width that holds each
+initial line **without re-wrapping in the standard font**:
+- Split `initialText` on `\n`; measure each line with a canvas `measureText` using
+  `textStyleToCanvasFont(initialStyle)` (px == PDF points at scale 1); take the **max + small pad**
+  (≈ `fontSizePt * 0.15`).
+- `initialWidth = clamp( max(block.rect.w, existing width, measuredMax), block.rect.w, pageWidthPt − block.rect.x − margin )`.
+- The page-width clamp stops full paragraphs from widening off-page (they keep wrapping as intended); short
+  fields/headings get just enough room to stay on their original line. Plumb `pageWidthPt` into the overlay
+  from `OverlayLayer` (it already has `viewport` — points = `viewport.width / (zoom · dpr)`).
+Because the same `wrapTextToLines` / `wrapTextSpansToLines` runs at commit against this width, the on-screen
+editor and the committed/exported result agree — no extra wrapped line, no downward overflow.
+
+**3 — Font parity (measured root cause) → `src/lib/edit/textStyleCss.ts`**
+Change `CSS_FAMILIES.serif` from `'Georgia, "Times New Roman", serif'` to `'"Times New Roman", Times, serif'`
+so the editor, the Peek/committed overlay, **and** the wrap measurement (`textStyleToCanvasFont`) all render
+in **Times** — matching export (`StandardFonts.TimesRoman`) and the typical PDF serif. This removes the
+measured ~9% width / ~7% x-height inflation that made edited serif paragraphs look enlarged and re-wrap.
+*(Also harden `classifyFontFamily`: it currently defaults any name not matching `times|georgia|serif|courier|
+mono|consolas` to **sans → Arial**, which is ~8% wider / ~16% taller than Times — so a serif PDF font with an
+unusual/subset name (e.g. `ABCDEE+`, Cambria, Garamond, Minion, Book Antiqua, PT Serif, Merriweather, Noto
+Serif) wrongly renders sans. Widen the serif regex to cover these so serif paragraphs aren't misclassified.)*
+
+**Tests & verify**
+- Unit: no-op guard — identical text+style+spans+width+pos ⇒ `onDone` is **not** called (`onCancel` is); any
+  single change ⇒ `onDone` is called. Width-fit — a line wider in the standard font than `block.rect.w`
+  yields an `initialWidth ≥` its measured width (and ≤ the page clamp).
+- **Browser:** Edit a heading → Done with no change → nothing changes (no new edit; Peek clean). Re-open the
+  same heading → it stays on one line, the paragraph below is not overlapped. Make a real change → still
+  commits normally.
+
+**Commit:** editor-side polish (no export-path change). Pairs with Task 11B.
 
 ---
 

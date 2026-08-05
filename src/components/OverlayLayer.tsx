@@ -8,7 +8,7 @@ import {
   coverRectForTextBlock,
   coverRectsForTextBlock,
 } from '@/lib/edit/buildTextEdits';
-import { wrapTextToLines } from '@/lib/edit/textLayout';
+import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
@@ -210,7 +210,19 @@ export function OverlayLayer({
               ...textStyleToCss(edit.style, zoom),
             }}
           >
-            {edit.text}
+            {edit.spans
+              ? edit.spans.map((span, index) => (
+                  <span
+                    key={`${index}:${span.text}`}
+                    style={{
+                      fontWeight: span.bold ? 700 : 400,
+                      fontStyle: span.italic ? 'italic' : 'normal',
+                    }}
+                  >
+                    {span.text}
+                  </span>
+                ))
+              : edit.text}
           </div>
         );
       })}
@@ -315,17 +327,35 @@ export function OverlayLayer({
               existing={existing?.texts}
               screenRect={screenRect}
               zoom={zoom}
+              pageWidthPt={viewport.width / (zoom * dpr)}
               backgroundColor={colorCss(sampleBackground(activeBlock.rect))}
               onCancel={() => setActiveBlock(null)}
               onDone={(next) => {
                 const canvas = window.document.createElement('canvas');
                 const context = canvas.getContext('2d');
-                if (context) context.font = textStyleToCanvasFont(next.style);
-                const wrappedLines = wrapTextToLines(
-                  next.text,
-                  next.width,
-                  (text) => context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55,
-                );
+                const wrappedLines = next.spans
+                  ? wrapTextSpansToLines(
+                      next.spans,
+                      next.width,
+                      (text, span) => {
+                        if (context) {
+                          context.font = textStyleToCanvasFont({
+                            ...next.style,
+                            bold: span.bold,
+                            italic: span.italic,
+                          });
+                        }
+                        return context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55;
+                      },
+                    )
+                  : (() => {
+                      if (context) context.font = textStyleToCanvasFont(next.style);
+                      return wrapTextToLines(
+                        next.text,
+                        next.width,
+                        (text) => context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55,
+                      );
+                    })();
                 const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
                 const built = buildTextBlockEdits(
                   activeBlock,

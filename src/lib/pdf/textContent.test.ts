@@ -35,8 +35,16 @@ describe('classifyFontFamily', () => {
   it.each([
     ['Times New Roman', 'serif'],
     ['Georgia-Bold', 'serif'],
+    ['ABCDEE+Cambria-Bold', 'serif'],
+    ['GaramondPremrPro', 'serif'],
+    ['MinionPro-Regular', 'serif'],
+    ['Book_Antiqua', 'serif'],
+    ['PTSerif-Regular', 'serif'],
+    ['Merriweather', 'serif'],
+    ['NotoSerif', 'serif'],
     ['CourierNewPSMT', 'mono'],
     ['Consolas', 'mono'],
+    ['ABCDEE+Helvetica', 'sans'],
     ['Helvetica', 'sans'],
   ] as const)('classifies %s as %s', (fontName, family) => {
     expect(classifyFontFamily(fontName)).toBe(family);

@@ -1,7 +1,8 @@
-import type { CoverEdit, TextEdit, TextStyle } from '@/lib/export/types';
+import type { CoverEdit, TextEdit, TextSpan, TextStyle } from '@/lib/export/types';
 import type { PdfRect } from '@/lib/export/types';
 import type { TextRun } from '@/lib/pdf/textContent';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
+import type { WrappedTextLine } from './textLayout';
 
 let fallbackId = 0;
 
@@ -15,6 +16,7 @@ function id(): string {
 
 export interface NextTextEdit {
   readonly text: string;
+  readonly spans?: readonly TextSpan[];
   readonly style: TextStyle;
   readonly width: number;
   readonly height: number;
@@ -49,6 +51,7 @@ export function buildTextEdits(
     z: z + 1,
     text: next.text,
     style: next.style,
+    ...(next.spans ? { spans: next.spans, boxSpans: next.spans } : {}),
     boxText: next.text,
     boxHeight: next.height,
   };
@@ -102,7 +105,7 @@ export function textBlockLineHeight(block: TextBlock, style: TextStyle): number 
 export function buildTextBlockEdits(
   block: TextBlock,
   next: NextTextEdit,
-  wrappedLines: readonly string[],
+  wrappedLines: readonly (string | WrappedTextLine)[],
   z: number,
   base: TextBlockBase = { x: block.rect.x, topBaselineY: block.topBaselineY },
 ): { readonly covers: readonly CoverEdit[]; readonly texts: readonly TextEdit[] } {
@@ -115,22 +118,28 @@ export function buildTextBlockEdits(
     sampleBackground: true,
   }));
   const lineHeight = textBlockLineHeight(block, next.style);
-  const texts = wrappedLines.map<TextEdit>((line, index) => ({
-    id: id(),
-    kind: 'text',
-    pageIndex: block.pageIndex,
-    rect: {
-      x: base.x + next.dx,
-      y: base.topBaselineY + next.dy - index * lineHeight,
-      w: next.width,
-      h: next.style.fontSizePt,
-    },
-    z: z + covers.length + index,
-    text: line,
-    style: next.style,
-    boxText: next.text,
-    boxHeight: next.height,
-  }));
+  const texts = wrappedLines.map<TextEdit>((line, index) => {
+    const text = typeof line === 'string' ? line : line.text;
+    const spans = typeof line === 'string' ? undefined : line.spans;
+    return {
+      id: id(),
+      kind: 'text',
+      pageIndex: block.pageIndex,
+      rect: {
+        x: base.x + next.dx,
+        y: base.topBaselineY + next.dy - index * lineHeight,
+        w: next.width,
+        h: next.style.fontSizePt,
+      },
+      z: z + covers.length + index,
+      text,
+      style: next.style,
+      ...(spans && spans.length > 0 ? { spans } : {}),
+      boxText: next.text,
+      ...(next.spans ? { boxSpans: next.spans } : {}),
+      boxHeight: next.height,
+    };
+  });
 
   return { covers, texts };
 }

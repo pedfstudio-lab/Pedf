@@ -28,6 +28,13 @@ export interface TextStyle {
   readonly color: Rgb;
 }
 
+/** Inline weight/style override; family, size, and color inherit from the containing TextEdit. */
+export interface TextSpan {
+  readonly text: string;
+  readonly bold: boolean;
+  readonly italic: boolean;
+}
+
 export type EditKind = 'text' | 'cover' | 'image';
 
 export interface BaseEdit {
@@ -42,8 +49,12 @@ export interface TextEdit extends BaseEdit {
   readonly kind: 'text';
   readonly text: string;
   readonly style: TextStyle;
-  /** Unwrapped textarea value retained so changing width on re-edit recomputes soft wraps. */
+  /** Present only when weight/style varies within this wrapped line. */
+  readonly spans?: readonly TextSpan[];
+  /** Unwrapped editor value retained so changing width on re-edit recomputes soft wraps. */
   readonly boxText?: string;
+  /** Unwrapped rich value retained so re-editing does not lose styles at soft-wrap boundaries. */
+  readonly boxSpans?: readonly TextSpan[];
   /** Manual editor-box height in PDF points; repeated on wrapped line edits for re-editing. */
   readonly boxHeight?: number;
 }

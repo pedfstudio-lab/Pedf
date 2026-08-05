@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import type { TextEdit, TextStyle } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
 import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
-import { textStyleToCss } from '@/lib/edit/textStyleCss';
+import { calculateInitialEditorWidth, finishTextEdit } from '@/lib/edit/textEditSession';
+import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
+import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
 
 const FAMILY_KEYWORD = {
   sans: 'Arial',
@@ -17,11 +22,60 @@ const FAMILY_KEYWORD = {
 const MIN_BOX_WIDTH = 12;
 const MIN_BOX_HEIGHT = 8;
 
+function selectionRangeInside(root: HTMLElement): Range | undefined {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return undefined;
+  const range = selection.getRangeAt(0);
+  return root.contains(range.commonAncestorContainer) ? range : undefined;
+}
+
+function placeCaretAtEnd(root: HTMLElement): void {
+  let lastNode: Node = root;
+  while (lastNode.lastChild) lastNode = lastNode.lastChild;
+  const range = window.document.createRange();
+  if (lastNode.nodeType === Node.TEXT_NODE) {
+    range.setStart(lastNode, lastNode.textContent?.length ?? 0);
+  } else {
+    range.selectNodeContents(root);
+    range.collapse(false);
+  }
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function insertPlainText(root: HTMLElement, text: string): boolean {
+  const range = selectionRangeInside(root);
+  const selection = window.getSelection();
+  if (!range || !selection) return false;
+  range.deleteContents();
+  const node = window.document.createTextNode(text.replace(/\r\n?/g, '\n'));
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function measureWidestInitialLine(text: string, style: TextStyle): number {
+  const canvas = window.document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) return 0;
+  context.font = textStyleToCanvasFont(style);
+  return Math.max(
+    0,
+    ...text.replace(/\r\n?/g, '\n').split('\n').map((line) => context.measureText(line).width),
+  );
+}
+
 interface TextEditOverlayProps {
   readonly block: TextBlock;
   readonly existing?: readonly TextEdit[];
   readonly screenRect: ScreenRect;
   readonly zoom: number;
+  readonly pageWidthPt: number;
   readonly backgroundColor: string;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
@@ -32,27 +86,38 @@ export function TextEditOverlay({
   existing,
   screenRect,
   zoom,
+  pageWidthPt,
   backgroundColor,
   onDone,
   onCancel,
 }: TextEditOverlayProps) {
   const initialText = existing?.[0]?.boxText ?? existing?.map((edit) => edit.text).join('\n') ?? block.text;
   const initialStyle = existing?.[0]?.style ?? block.style;
-  const [text, setText] = useState(initialText);
+  const initialSpans = existing?.[0]?.boxSpans ?? (existing?.length === 1 ? existing[0]?.spans : undefined);
+  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
+  const [selectionStyle, setSelectionStyle] = useState({
+    bold: initialStyle.bold,
+    italic: initialStyle.italic,
+  });
   const naturalWidth = block.rect.w;
-  const [width, setWidth] = useState(Math.max(existing?.[0]?.rect.w ?? naturalWidth, naturalWidth));
-  const [height, setHeight] = useState(Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT));
+  const [initialWidth] = useState(() => calculateInitialEditorWidth({
+    blockWidthPt: naturalWidth,
+    blockXPt: block.rect.x,
+    existingWidthPt: existing?.[0]?.rect.w,
+    fontSizePt: initialStyle.fontSizePt,
+    measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
+    pageWidthPt,
+  }));
+  const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);
+  const [width, setWidth] = useState(initialWidth);
+  const [height, setHeight] = useState(initialHeight);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
-  const editableRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const editable = editableRef.current;
-    if (!editable) return;
-    editable.focus();
-    editable.selectionStart = editable.value.length;
-    editable.selectionEnd = editable.value.length;
-  }, []);
+  const editableRef = useRef<HTMLDivElement>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
+  const initialRenderedHeightRef = useRef(initialHeight);
+  const capturedInitialHeightRef = useRef(false);
+  const initializedRef = useRef(false);
 
   const beginWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -97,29 +162,102 @@ export function TextEditOverlay({
   };
 
   const commit = () => {
-    onDone({
-      text: text.replace(/\r\n?/g, '\n'),
-      style,
+    const editable = editableRef.current;
+    if (!editable) return;
+    const serialized = serializeRichText(editable, style);
+    const next: NextTextEdit = {
+      text: serialized.text,
+      style: serialized.style,
+      ...(serialized.spans ? { spans: serialized.spans } : {}),
       width,
       height,
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
-    });
+    };
+    finishTextEdit(
+      {
+        text: initialText,
+        style: initialStyle,
+        ...(initialSpans ? { spans: initialSpans } : {}),
+        width: initialWidth,
+        height: initialRenderedHeightRef.current,
+        dx: 0,
+        dy: 0,
+      },
+      next,
+      onDone,
+      onCancel,
+    );
   };
   const controlsAbove = screenRect.top + moveOffset.y > 52;
   const lineHeight = textBlockLineHeight(block, style);
   const resizeToContent = useCallback(() => {
-    const textarea = editableRef.current;
-    if (!textarea) return;
-    textarea.style.height = '0px';
-    const contentHeight = Math.max(lineHeight * zoom, textarea.scrollHeight);
-    textarea.style.height = `${contentHeight}px`;
-    setHeight(contentHeight / zoom);
+    const editable = editableRef.current;
+    if (!editable) return;
+    editable.style.height = '0px';
+    const contentHeight = Math.max(lineHeight * zoom, editable.scrollHeight);
+    editable.style.height = `${contentHeight}px`;
+    const nextHeight = contentHeight / zoom;
+    if (!capturedInitialHeightRef.current) {
+      initialRenderedHeightRef.current = nextHeight;
+      capturedInitialHeightRef.current = true;
+    }
+    setHeight(nextHeight);
   }, [lineHeight, zoom]);
 
   useLayoutEffect(() => {
+    const editable = editableRef.current;
+    if (!editable) return;
+    if (!initializedRef.current) {
+      editable.innerHTML = initialHtmlRef.current;
+      initializedRef.current = true;
+      editable.focus({ preventScroll: true });
+      placeCaretAtEnd(editable);
+    }
     resizeToContent();
-  }, [resizeToContent, style, text, width]);
+  }, [resizeToContent, width]);
+
+  const refreshSelectionStyle = useCallback(() => {
+    const editable = editableRef.current;
+    const range = editable ? selectionRangeInside(editable) : undefined;
+    if (!editable || !range) return;
+    selectionRangeRef.current = range.cloneRange();
+    const bold = window.document.queryCommandState('bold');
+    const italic = window.document.queryCommandState('italic');
+    setSelectionStyle((current) => (
+      current.bold === bold && current.italic === italic
+        ? current
+        : { bold, italic }
+    ));
+  }, []);
+
+  useEffect(() => {
+    window.document.addEventListener('selectionchange', refreshSelectionStyle);
+    return () => window.document.removeEventListener('selectionchange', refreshSelectionStyle);
+  }, [refreshSelectionStyle]);
+
+  const applyInlineStyle = (command: 'bold' | 'italic') => {
+    const editable = editableRef.current;
+    if (!editable) return;
+    if (!selectionRangeInside(editable)) {
+      const savedRange = selectionRangeRef.current;
+      if (!savedRange || !editable.contains(savedRange.commonAncestorContainer)) return;
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(savedRange.cloneRange());
+    }
+    window.document.execCommand(command, false);
+    refreshSelectionStyle();
+    resizeToContent();
+  };
+
+  const pastePlainText = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    const editable = editableRef.current;
+    if (!editable) return;
+    event.preventDefault();
+    insertPlainText(editable, event.clipboardData.getData('text/plain'));
+    resizeToContent();
+  };
 
   return (
     <div
@@ -139,8 +277,8 @@ export function TextEditOverlay({
       >
         <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: Math.max(4, value.fontSizePt - 1) }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Decrease text size">A−</button>
         <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: value.fontSizePt + 1 }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Increase text size">A+</button>
-        <button type="button" aria-pressed={style.bold} onClick={() => setStyle((value) => ({ ...value, bold: !value.bold }))} className={`rounded px-2 py-1 text-sm font-bold ${style.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
-        <button type="button" aria-pressed={style.italic} onClick={() => setStyle((value) => ({ ...value, italic: !value.italic }))} className={`rounded px-2 py-1 text-sm italic ${style.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
+        <button type="button" aria-pressed={selectionStyle.bold} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
+        <button type="button" aria-pressed={selectionStyle.italic} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
         <select
           aria-label="Font family"
           value={classifyFontFamily(style.fontName)}
@@ -159,18 +297,31 @@ export function TextEditOverlay({
         <button type="button" onClick={commit} className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700">Done</button>
       </div>
 
-      <textarea
+      <div
         ref={editableRef}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
+        role="textbox"
         aria-label="Editable text"
-        rows={1}
+        aria-multiline="true"
+        contentEditable
+        suppressContentEditableWarning
         spellCheck={false}
+        onInput={resizeToContent}
+        onPaste={pastePlainText}
         onKeyDown={(event) => {
-          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') commit();
-          if (event.key === 'Escape') onCancel();
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          } else if (event.key === 'Enter') {
+            event.preventDefault();
+            const editable = editableRef.current;
+            if (editable) insertPlainText(editable, '\n');
+            resizeToContent();
+          }
         }}
-        className="relative z-0 block w-full resize-none overflow-hidden whitespace-pre-wrap rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
+        className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
         style={{ ...textStyleToCss(style, zoom), lineHeight: `${lineHeight * zoom}px` }}
       />
       <button

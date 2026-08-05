@@ -154,6 +154,40 @@ describe('buildTextEdits', () => {
     });
   });
 
+  it('emits per-line rich spans and retains the unwrapped spans for re-editing', () => {
+    const block: TextBlock = {
+      pageIndex: run.pageIndex,
+      text: 'Original',
+      rect: { x: 40, y: 470, w: 180, h: 48 },
+      topBaselineY: 500,
+      lineHeightPt: 16,
+      style: run.style,
+      lines: [],
+    };
+    const boxSpans = [
+      { text: 'Plain ', bold: false, italic: false },
+      { text: 'boldword', bold: true, italic: false },
+    ];
+    const result = buildTextBlockEdits(
+      block,
+      { text: 'Plain boldword', spans: boxSpans, style: run.style, width: 60, height: 40, dx: 0, dy: 0 },
+      [
+        { text: 'Plain ', spans: [boxSpans[0]!] },
+        { text: 'bold', spans: [{ text: 'bold', bold: true, italic: false }] },
+        { text: 'word', spans: [{ text: 'word', bold: true, italic: false }] },
+      ],
+      40,
+    );
+
+    expect(result.texts.map((edit) => edit.spans)).toEqual([
+      [{ text: 'Plain ', bold: false, italic: false }],
+      [{ text: 'bold', bold: true, italic: false }],
+      [{ text: 'word', bold: true, italic: false }],
+    ]);
+    expect(result.texts.every((edit) => edit.boxSpans === boxSpans)).toBe(true);
+    expect(result.texts.map((edit) => edit.text)).toEqual(['Plain ', 'bold', 'word']);
+  });
+
   it('uses a natural shared line height and emits no undeletable blank text line', () => {
     const block: TextBlock = {
       pageIndex: run.pageIndex,

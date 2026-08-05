@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitTextToBlock, wrapTextToLines } from './textLayout';
+import { fitTextToBlock, wrapTextSpansToLines, wrapTextToLines } from './textLayout';
 
 const monospaceMeasure = (text: string) => text.length;
 
@@ -41,6 +41,35 @@ describe('wrapTextToLines', () => {
 
   it('rejects a non-positive width', () => {
     expect(() => wrapTextToLines('text', 0, monospaceMeasure)).toThrow(RangeError);
+  });
+});
+
+describe('wrapTextSpansToLines', () => {
+  it('splits a styled span at the width limit while carrying its flags to both lines', () => {
+    const result = wrapTextSpansToLines([
+      { text: 'go ', bold: false, italic: false },
+      { text: 'abcdef', bold: true, italic: false },
+    ], 5, (text) => text.length);
+
+    expect(result).toEqual([
+      { text: 'go ', spans: [{ text: 'go ', bold: false, italic: false }] },
+      { text: 'abcde', spans: [{ text: 'abcde', bold: true, italic: false }] },
+      { text: 'f', spans: [{ text: 'f', bold: true, italic: false }] },
+    ]);
+  });
+
+  it('measures each style independently and preserves explicit blank lines', () => {
+    const result = wrapTextSpansToLines([
+      { text: 'a\n\n', bold: false, italic: false },
+      { text: 'bb', bold: true, italic: true },
+    ], 3, (text, span) => text.length * (span.bold ? 2 : 1));
+
+    expect(result).toEqual([
+      { text: 'a', spans: [{ text: 'a', bold: false, italic: false }] },
+      { text: '' },
+      { text: 'b', spans: [{ text: 'b', bold: true, italic: true }] },
+      { text: 'b', spans: [{ text: 'b', bold: true, italic: true }] },
+    ]);
   });
 });
 

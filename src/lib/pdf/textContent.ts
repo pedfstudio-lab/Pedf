@@ -33,7 +33,7 @@ export type FontFamilyClass = 'serif' | 'sans' | 'mono';
 
 /** Reduce arbitrary PDF font names to the three families both renderers support. */
 export function classifyFontFamily(fontName: string): FontFamilyClass {
-  if (/times|georgia|serif/i.test(fontName)) return 'serif';
+  if (/times|georgia|serif|cambria|garamond|minion|book[-_\s]*antiqua|palatino|baskerville|bodoni|constantia|merriweather/i.test(fontName)) return 'serif';
   if (/courier|mono|consolas/i.test(fontName)) return 'mono';
   return 'sans';
 }

@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-04
-**Current position:** Phase 1 implementation is green through Task 11A. Task 10F's manual opaque-box visual confirmation, real-device PDF acceptance, and the `Phase 1 ✓` commit remain pending.
+**Last updated:** 2026-08-05
+**Current position:** Phase 1 implementation is green through Task 11C. Task 10F's manual opaque-box visual confirmation, real-device PDF acceptance, and the `Phase 1 ✓` commit remain pending.
 
 ---
 
@@ -83,7 +83,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 
 ## Phase 1 — Text edit (feature 1)  ⏳ IN PROGRESS
 - [x] `lib/pdf/textContent.ts` — `getTextContent()` → runs → P-space rects via coordinates
-- [x] `components/TextEditOverlay.tsx` — one native textarea per paragraph/block; A−/A+ size; B/I toggles; font picker; move + width drag
+- [x] `components/TextEditOverlay.tsx` — deliberately uncontrolled rich editor per paragraph/block; selection-only B/I; A−/A+ size; font picker; move + width drag
 - [x] Commit produces per-line `CoverEdit{sampleBackground}` objects + wrapped `TextEdit` lines
 - [x] Task 10C shrink-to-fit implementation completed, then superseded by Task 10D's user-controlled box decision
 - [x] Task 10D manual-height/overflow-warning implementation completed, then superseded by Task 10E
@@ -102,6 +102,11 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Harness: single English line-edit scenario
 - [x] Browser verification: auto-height shows every line; width collapses wraps upward; no warning; A+/A−, whitespace, re-edit, and PDF export hold
 - [x] Browser verification: Task 11A finds the sample itinerary's date range/dates/times, renders dotted underlines, opens the correct confirmation menu and Calendar page, keeps block actions Edit-only, and logs no errors
+- [x] Task 11B inline rich text — optional bold/italic spans survive wrapping and re-edit, render as selectable multi-run PDF text, and stay on the plain legacy path when the whole box is uniform
+- [x] Browser verification: Task 11B character-by-character typing, Backspace, Enter/newline deletion, Done, and PDF export preserve the caret and surrounding text; rich export harness passes at ratio 0.000000
+- [x] Task 11C seamless edit sessions — Done without text/style/span/geometry changes creates no edit; short fields open wide enough for the standard font while staying inside the page; serif screen/wrap rendering now uses Times to match export
+- [x] Task 11C font classification recognizes common and subset Cambria/Garamond/Minion/Book Antiqua/PT Serif/Merriweather/Noto Serif names instead of falling back to Arial
+- [x] Browser verification: Task 11C pristine and pre-existing no-op sessions preserve their source; the Times-based heading stays on one line with zero overlap; real changes still commit; `/verify` remains green
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 

@@ -110,6 +110,43 @@ describe('exportPdf', () => {
     }
   });
 
+  it('writes mixed English spans as selectable text that reopens cleanly', async () => {
+    const doc = await makeTwoPageDocument();
+    doc.edits = [{
+      id: 'rich-text-1',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 20, y: 260, w: 220, h: 18 },
+      z: 20,
+      text: 'Plain bold italic',
+      spans: [
+        { text: 'Plain ', bold: false, italic: false },
+        { text: 'bold ', bold: true, italic: false },
+        { text: 'italic', bold: false, italic: true },
+      ],
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    }];
+
+    const result = await exportPdf(doc);
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const content = await (await reopened.getPage(1)).getTextContent();
+      const extracted = content.items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str)
+        .join('');
+      expect(extracted).toContain('Plain bold italic');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
   it('still rejects Indic text at the guarded Task 13 boundary', async () => {
     const doc = await makeTwoPageDocument();
     doc.edits = [{
