@@ -18,6 +18,7 @@ function EditorApp() {
   const [error, setError] = useState<string | null>(null);
   const [zoom] = useState(1.5);
   const [editMode, setEditMode] = useState(false);
+  const [textAddMode, setTextAddMode] = useState(false);
   const [imageMode, setImageMode] = useState(false);
   const [peek, setPeek] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -31,6 +32,7 @@ function EditorApp() {
       setDocument({ loaded, fileName: name });
       resetEdits();
       setEditMode(false);
+      setTextAddMode(false);
       setImageMode(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -132,16 +134,30 @@ function EditorApp() {
         onOpen={(file) => open(file, file.name)}
         fileName={document?.fileName ?? null}
         editMode={editMode}
+        textAddMode={textAddMode}
         imageMode={imageMode}
         hasEdits={edits.length > 0}
         exporting={exporting}
         onEditModeChange={(enabled) => {
           setEditMode(enabled);
-          if (enabled) setImageMode(false);
+          if (enabled) {
+            setTextAddMode(false);
+            setImageMode(false);
+          }
+        }}
+        onTextAddModeChange={(enabled) => {
+          setTextAddMode(enabled);
+          if (enabled) {
+            setEditMode(false);
+            setImageMode(false);
+          }
         }}
         onImageModeChange={(enabled) => {
           setImageMode(enabled);
-          if (enabled) setEditMode(false);
+          if (enabled) {
+            setEditMode(false);
+            setTextAddMode(false);
+          }
         }}
         onPeekChange={setPeek}
         onExport={() => void handleExport()}
@@ -155,6 +171,7 @@ function EditorApp() {
             doc={document.loaded.doc}
             zoom={zoom}
             editMode={editMode}
+            textAddMode={textAddMode}
             imageMode={imageMode}
             peek={peek}
           />

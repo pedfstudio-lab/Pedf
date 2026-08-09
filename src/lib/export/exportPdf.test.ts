@@ -76,7 +76,7 @@ describe('exportPdf', () => {
     expect(reopened.getPage(1).getRotation().angle).toBe(90);
   });
 
-  it('writes English replacement text that reopens cleanly in PDF.js', async () => {
+  it('writes cover-free English text as selectable content that reopens cleanly in PDF.js', async () => {
     const doc = await makeTwoPageDocument();
     const text: TextEdit = {
       id: 'text-1',
@@ -84,7 +84,9 @@ describe('exportPdf', () => {
       pageIndex: 0,
       rect: { x: 20, y: 300, w: 180, h: 18 },
       z: 20,
-      text: 'Edited in DesiPDF',
+      text: 'Free text in DesiPDF',
+      origin: 'free',
+      boxId: 'free-box-1',
       style: {
         fontName: 'Helvetica',
         fontSizePt: 12,
@@ -104,7 +106,7 @@ describe('exportPdf', () => {
         .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
         .map((item) => item.str)
         .join(' ');
-      expect(extracted).toContain('Edited in DesiPDF');
+      expect(extracted).toContain('Free text in DesiPDF');
     } finally {
       await reopened.destroy();
     }

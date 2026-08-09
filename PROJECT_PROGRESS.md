@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-07
-**Current position:** Phase 3 image work is green through Task 16B, including Task 15B's photo-vs-card detection precision (detect, replace, add, delete, and crop). Task 17 table-column resize is next; Phase 1's real-device PDF acceptance and final phase commits remain pending.
+**Last updated:** 2026-08-09
+**Current position:** Task 11D free-text placement is complete and Phase 3 image work remains green through Task 16B (detect, replace, add, delete, and crop). Task 17 table-column resize is next; Phase 1's real-device PDF acceptance and final phase commits remain pending.
 **Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
@@ -108,6 +108,8 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Task 11C seamless edit sessions — Done without text/style/span/geometry changes creates no edit; short fields open wide enough for the standard font while staying inside the page; serif screen/wrap rendering now uses Times to match export
 - [x] Task 11C font classification recognizes common and subset Cambria/Garamond/Minion/Book Antiqua/PT Serif/Merriweather/Noto Serif names instead of falling back to Arial
 - [x] Browser verification: Task 11C pristine and pre-existing no-op sessions preserve their source; the Times-based heading stays on one line with zero overlap; real changes still commit; `/verify` remains green
+- [x] Task 11D free text — mutually exclusive Add text mode supports drag or click placement, rich formatting, wrapping, cover-free selectable export, peek, and re-editing through grouped standalone text boxes
+- [x] Browser verification: Task 11D drag placement, multiline/bold/size editing, mode switching, re-open/update, empty no-op, and export succeeded on GOA 2026; `/verify` remains fully green
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 
@@ -129,7 +131,7 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [x] Task 16B crop — uploaded bytes crop at source resolution; existing images crop from a fresh 3× PDF.js region capture
 - [x] Browser verification on GOA 2026: original-image delete/crop and committed-image crop/delete; Peek and export remain enabled
 - [x] Task 15B browser verification on GOA 2026: page 9 review frames 9 → 0; page 8 retains all 10 destination-photo frames; browser console clean
-- [x] Unit/build verification: 23 files / 144 tests, typecheck, lint, and production build green
+- [x] Unit/build verification: 23 files / 145 tests, typecheck, lint, and production build green
 - [ ] `components/TableTool.tsx` — draw region, place vertical guides, drag guide
 - [ ] Guide drag: shift runs (x > guide) as text+cover; redraw ruling lines as thin colored covers
 - [ ] Acceptance: swap an image + widen one table column; layout holds

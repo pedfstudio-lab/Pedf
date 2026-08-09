@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
-import { pdfRectToScreenRect, pdfToViewport } from '@/lib/export/coordinates';
-import type { CoverEdit, PdfRect, Rgb, TextEdit } from '@/lib/export/types';
+import {
+  pdfRectToScreenRect,
+  pdfToViewport,
+  screenRectToPdfRect,
+} from '@/lib/export/coordinates';
+import type { ScreenRect } from '@/lib/export/coordinates';
+import type { CoverEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import { sampleDominantColor } from '@/lib/export/colorSample';
 import {
+  buildFreeTextEdits,
   buildTextBlockEdits,
   coverRectForTextBlock,
   coverRectsForTextBlock,
+  freeTextLineHeight,
 } from '@/lib/edit/buildTextEdits';
+import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
@@ -27,6 +36,7 @@ interface OverlayLayerProps {
   readonly dpr: number;
   readonly zoom: number;
   readonly editMode: boolean;
+  readonly textAddMode: boolean;
   readonly imageMode: boolean;
   readonly peek: boolean;
 }
@@ -42,7 +52,27 @@ interface PopoverTarget {
   readonly screenRect: ReturnType<typeof pdfRectToScreenRect>;
 }
 
+interface FreeTextSession {
+  readonly block: TextBlock;
+  readonly existing?: readonly TextEdit[];
+  readonly boxId?: string;
+}
+
 const WHITE_BACKGROUND: Rgb = { r: 1, g: 1, b: 1 };
+const DEFAULT_TEXT_STYLE: TextStyle = {
+  fontName: 'Helvetica',
+  fontSizePt: 14,
+  bold: false,
+  italic: false,
+  color: { r: 0, g: 0, b: 0 },
+};
+const DEFAULT_FREE_TEXT_WIDTH_PT = 180;
+const DEFAULT_FREE_TEXT_HEIGHT_PT = 18;
+const MIN_FREE_TEXT_DRAW_PX = 8;
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum);
+}
 
 function sameRect(left: PdfRect, right: PdfRect): boolean {
   const epsilon = 0.01;
@@ -85,6 +115,75 @@ function sourceText(texts: readonly TextEdit[]): string {
   return texts[0]?.boxText ?? texts.map((edit) => edit.text).join('\n');
 }
 
+function freeTextBoxRect(texts: readonly TextEdit[]): PdfRect {
+  const first = texts[0];
+  if (!first) return { x: 0, y: 0, w: 0, h: 0 };
+  const height = first.boxHeight ?? freeTextLineHeight(first.style);
+  return {
+    x: first.rect.x,
+    y: first.rect.y - height,
+    w: first.rect.w,
+    h: height,
+  };
+}
+
+function freeTextBlock(pageIndex: number, rect: PdfRect, style = DEFAULT_TEXT_STYLE): TextBlock {
+  return {
+    pageIndex,
+    text: '',
+    rect,
+    topBaselineY: rect.y + rect.h,
+    lineHeightPt: freeTextLineHeight(style),
+    style,
+    lines: [],
+  };
+}
+
+function freeTextBlockFromEdits(texts: readonly TextEdit[]): TextBlock {
+  const first = texts[0];
+  if (!first) throw new Error('Cannot reopen an empty free-text group');
+  const rect = freeTextBoxRect(texts);
+  const second = texts[1];
+  return {
+    pageIndex: first.pageIndex,
+    text: sourceText(texts),
+    rect,
+    topBaselineY: first.rect.y,
+    lineHeightPt: second
+      ? Math.abs(first.rect.y - second.rect.y)
+      : freeTextLineHeight(first.style),
+    style: first.style,
+    lines: [],
+  };
+}
+
+function wrapNextText(next: NextTextEdit) {
+  const canvas = window.document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (next.spans) {
+    return wrapTextSpansToLines(
+      next.spans,
+      next.width,
+      (text, span) => {
+        if (context) {
+          context.font = textStyleToCanvasFont({
+            ...next.style,
+            bold: span.bold,
+            italic: span.italic,
+          });
+        }
+        return context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55;
+      },
+    );
+  }
+  if (context) context.font = textStyleToCanvasFont(next.style);
+  return wrapTextToLines(
+    next.text,
+    next.width,
+    (text) => context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55,
+  );
+}
+
 function colorCss(color: Rgb): string {
   return `rgb(${Math.round(color.r * 255)} ${Math.round(color.g * 255)} ${Math.round(color.b * 255)})`;
 }
@@ -96,6 +195,7 @@ export function OverlayLayer({
   dpr,
   zoom,
   editMode,
+  textAddMode,
   imageMode,
   peek,
 }: OverlayLayerProps) {
@@ -103,7 +203,9 @@ export function OverlayLayer({
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
   const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
-  const { edits, replaceEdits } = useEdits();
+  const [freeTextSession, setFreeTextSession] = useState<FreeTextSession | null>(null);
+  const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
+  const { edits, addEdits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
 
   useEffect(() => {
@@ -119,6 +221,11 @@ export function OverlayLayer({
     };
   }, [page, pageIndex]);
 
+  useEffect(() => {
+    if (!textAddMode) setFreeDrawRect(undefined);
+    if (!textAddMode && !editMode) setFreeTextSession(null);
+  }, [editMode, textAddMode]);
+
   const detectedDates = useMemo(() => detectDates(runs), [runs]);
 
   const pageTextEdits = useMemo(
@@ -133,6 +240,20 @@ export function OverlayLayer({
     ),
     [edits, pageIndex],
   );
+  const freeTextGroups = useMemo(() => {
+    const grouped = new Map<string, TextEdit[]>();
+    for (const edit of pageTextEdits) {
+      if (edit.origin !== 'free') continue;
+      const key = edit.boxId ?? edit.id;
+      const group = grouped.get(key) ?? [];
+      group.push(edit);
+      grouped.set(key, group);
+    }
+    return [...grouped.entries()].map(([boxId, texts]) => ({
+      boxId,
+      texts: texts.sort((left, right) => left.z - right.z),
+    }));
+  }, [pageTextEdits]);
 
   const sampleBackground = useCallback((rect: PdfRect): Rgb => {
     const registration = getPageCanvas(pageIndex);
@@ -167,13 +288,71 @@ export function OverlayLayer({
     const coversByZ = new Map(pageCoverEdits.map((edit) => [edit.z, edit]));
     const covers = Array.from({ length: coverCount }, (_, index) => coversByZ.get(anchor.z + index))
       .filter((edit): edit is CoverEdit => edit !== undefined);
-    const byZ = new Map(pageTextEdits.map((edit) => [edit.z, edit]));
+    const byZ = new Map(
+      pageTextEdits
+        .filter((edit) => edit.origin !== 'free')
+        .map((edit) => [edit.z, edit]),
+    );
     const texts: TextEdit[] = [];
     for (let z = anchor.z + coverCount; byZ.has(z); z += 1) {
       const text = byZ.get(z);
       if (text) texts.push(text);
     }
     return { covers: covers.length > 0 ? covers : [anchor], texts };
+  };
+
+  const beginFreeTextPlacement = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || freeTextSession) return;
+    event.preventDefault();
+    const surface = event.currentTarget;
+    const bounds = surface.getBoundingClientRect();
+    const start = {
+      x: clamp(event.clientX - bounds.left, 0, bounds.width),
+      y: clamp(event.clientY - bounds.top, 0, bounds.height),
+    };
+    let latest: ScreenRect = { left: start.x, top: start.y, width: 0, height: 0 };
+    setFreeDrawRect(latest);
+    surface.setPointerCapture(event.pointerId);
+
+    const move = (moveEvent: PointerEvent) => {
+      const x = clamp(moveEvent.clientX - bounds.left, 0, bounds.width);
+      const y = clamp(moveEvent.clientY - bounds.top, 0, bounds.height);
+      latest = {
+        left: Math.min(start.x, x),
+        top: Math.min(start.y, y),
+        width: Math.abs(x - start.x),
+        height: Math.abs(y - start.y),
+      };
+      setFreeDrawRect(latest);
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', cancel);
+      setFreeDrawRect(undefined);
+    };
+    const finish = () => {
+      cleanup();
+      let placed = latest;
+      if (placed.width < MIN_FREE_TEXT_DRAW_PX || placed.height < MIN_FREE_TEXT_DRAW_PX) {
+        const width = Math.min(DEFAULT_FREE_TEXT_WIDTH_PT * zoom, bounds.width);
+        const height = Math.min(DEFAULT_FREE_TEXT_HEIGHT_PT * zoom, bounds.height);
+        placed = {
+          left: clamp(start.x, 0, Math.max(0, bounds.width - width)),
+          top: clamp(start.y, 0, Math.max(0, bounds.height - height)),
+          width,
+          height,
+        };
+      }
+      const rect = screenRectToPdfRect(placed, viewport, dpr);
+      setActiveBlock(null);
+      setPopoverTarget(null);
+      setFreeTextSession({ block: freeTextBlock(pageIndex, rect) });
+    };
+    const cancel = () => cleanup();
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', cancel);
   };
 
   if (peek) return null;
@@ -240,6 +419,27 @@ export function OverlayLayer({
 
       <SmartSpanLayer dates={detectedDates} viewport={viewport} dpr={dpr} />
 
+      {textAddMode && !freeTextSession && (
+        <div
+          className="absolute inset-0 z-40 cursor-crosshair bg-violet-300/5"
+          onPointerDown={beginFreeTextPlacement}
+          aria-label={`Draw text box on page ${pageIndex + 1}`}
+        />
+      )}
+
+      {freeDrawRect && (
+        <div
+          className="pointer-events-none absolute z-[45] border-2 border-dashed border-violet-600 bg-violet-300/15"
+          style={freeDrawRect}
+        />
+      )}
+
+      {textAddMode && !freeTextSession && (
+        <div className="pointer-events-none absolute left-3 top-3 z-[45] rounded-md bg-neutral-900/90 px-3 py-2 text-xs font-medium text-white shadow">
+          Drag to set a text box, or click for a default width.
+        </div>
+      )}
+
       {editMode && blocks.map((block, index) => {
         const rect = pdfRectToScreenRect(block.rect, viewport, dpr);
         const labelText = block.text.replace(/\s+/g, ' ').trim();
@@ -258,6 +458,30 @@ export function OverlayLayer({
               setPopoverTarget({ block, text: actionText, screenRect: rect });
             }}
             className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+          />
+        );
+      })}
+
+      {editMode && freeTextGroups.map(({ boxId, texts }) => {
+        const rect = pdfRectToScreenRect(freeTextBoxRect(texts), viewport, dpr);
+        const label = sourceText(texts).replace(/\s+/g, ' ').trim();
+        return (
+          <button
+            key={`free-text-${boxId}`}
+            type="button"
+            aria-label={`Edit added text: ${label}`}
+            title={label}
+            onClick={() => {
+              setActiveBlock(null);
+              setPopoverTarget(null);
+              setFreeTextSession({
+                block: freeTextBlockFromEdits(texts),
+                existing: texts,
+                boxId,
+              });
+            }}
+            className="absolute z-[28] cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
           />
         );
@@ -342,31 +566,7 @@ export function OverlayLayer({
               backgroundColor={colorCss(sampleBackground(activeBlock.rect))}
               onCancel={() => setActiveBlock(null)}
               onDone={(next) => {
-                const canvas = window.document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                const wrappedLines = next.spans
-                  ? wrapTextSpansToLines(
-                      next.spans,
-                      next.width,
-                      (text, span) => {
-                        if (context) {
-                          context.font = textStyleToCanvasFont({
-                            ...next.style,
-                            bold: span.bold,
-                            italic: span.italic,
-                          });
-                        }
-                        return context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55;
-                      },
-                    )
-                  : (() => {
-                      if (context) context.font = textStyleToCanvasFont(next.style);
-                      return wrapTextToLines(
-                        next.text,
-                        next.width,
-                        (text) => context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55,
-                      );
-                    })();
+                const wrappedLines = wrapNextText(next);
                 const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
                 const built = buildTextBlockEdits(
                   activeBlock,
@@ -385,6 +585,43 @@ export function OverlayLayer({
               }}
             />
           </>
+        );
+      })()}
+
+      {freeTextSession && (() => {
+        const { block, existing, boxId } = freeTextSession;
+        const screenRect = pdfRectToScreenRect(block.rect, viewport, dpr);
+        return (
+          <TextEditOverlay
+            key={`free-editor-${boxId ?? `${block.rect.x}:${block.rect.y}`}`}
+            block={block}
+            existing={existing}
+            screenRect={screenRect}
+            zoom={zoom}
+            pageWidthPt={viewport.width / (zoom * dpr)}
+            backgroundColor="transparent"
+            onCancel={() => setFreeTextSession(null)}
+            onDone={(next) => {
+              if (next.text.trim() === '') {
+                if (existing) replaceEdits(existing.map((edit) => edit.id), []);
+                setFreeTextSession(null);
+                return;
+              }
+              const wrappedLines = wrapNextText(next);
+              const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
+              const texts = buildFreeTextEdits(
+                pageIndex,
+                block.rect,
+                next,
+                wrappedLines,
+                nextZ,
+                boxId,
+              );
+              if (existing) replaceEdits(existing.map((edit) => edit.id), texts);
+              else addEdits(texts);
+              setFreeTextSession(null);
+            }}
+          />
         );
       })()}
     </div>

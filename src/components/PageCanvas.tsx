@@ -9,12 +9,13 @@ interface PageCanvasProps {
   pageIndex: number;
   zoom: number;
   editMode: boolean;
+  textAddMode: boolean;
   imageMode: boolean;
   peek: boolean;
 }
 
 /** One locked PDF.js canvas background for a single page. */
-export function PageCanvas({ page, pageIndex, zoom, editMode, imageMode, peek }: PageCanvasProps) {
+export function PageCanvas({ page, pageIndex, zoom, editMode, textAddMode, imageMode, peek }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [renderInfo, setRenderInfo] = useState<{ viewport: PageViewport; dpr: number } | null>(null);
   const { registerPageCanvas } = useDocumentStore();
@@ -59,6 +60,7 @@ export function PageCanvas({ page, pageIndex, zoom, editMode, imageMode, peek }:
           dpr={renderInfo.dpr}
           zoom={zoom}
           editMode={editMode}
+          textAddMode={textAddMode}
           imageMode={imageMode}
           peek={peek}
         />

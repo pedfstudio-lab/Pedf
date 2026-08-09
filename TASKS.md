@@ -1556,7 +1556,7 @@ Serif) wrongly renders sans. Widen the serif regex to cover these so serif parag
 
 **Commit:** editor-side polish (no export-path change). Pairs with Task 11B.
 
-### Task 11D — Add text anywhere (free text)  🔲
+### Task 11D — Add text anywhere (free text)  ✅
 **Goal:** let the user drop a **new** text box on any spot of any page (blank areas, form blanks, captions,
 notes) and type — not just edit text that's already there. Exports as real, selectable text.
 **Depends on:** Task 10/11 (the editor), Task 16 (reuse its "draw a region" gesture), Task 3 (coordinates).

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TextRun } from '@/lib/pdf/textContent';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import {
+  buildFreeTextEdits,
   buildTextBlockEdits,
   buildTextEdits,
   coverRectForTextBlock,
@@ -23,6 +24,28 @@ const run: TextRun = {
 };
 
 describe('buildTextEdits', () => {
+  it('builds standalone wrapped free text without cover edits', () => {
+    const style = { ...run.style, fontSizePt: 14 };
+    const edits = buildFreeTextEdits(
+      3,
+      { x: 100, y: 200, w: 160, h: 40 },
+      { text: 'First second', style, width: 150, height: 36, dx: 5, dy: -2 },
+      ['First', 'second'],
+      20,
+      'free-box-1',
+    );
+
+    expect(edits).toHaveLength(2);
+    expect(edits.map((edit) => edit.kind)).toEqual(['text', 'text']);
+    expect(edits.map((edit) => edit.rect)).toEqual([
+      { x: 105, y: 238, w: 150, h: 14 },
+      { x: 105, y: 221.2, w: 150, h: 14 },
+    ]);
+    expect(edits.map((edit) => edit.z)).toEqual([20, 21]);
+    expect(edits.every((edit) => edit.origin === 'free' && edit.boxId === 'free-box-1')).toBe(true);
+    expect(edits.every((edit) => edit.boxText === 'First second' && edit.boxHeight === 36)).toBe(true);
+  });
+
   it('builds an original-size sampled cover below the replacement text', () => {
     const style = {
       ...run.style,

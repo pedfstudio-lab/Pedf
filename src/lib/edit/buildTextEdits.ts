@@ -102,6 +102,45 @@ export function textBlockLineHeight(block: TextBlock, style: TextStyle): number 
   );
 }
 
+export function freeTextLineHeight(style: TextStyle): number {
+  return style.fontSizePt * 1.2;
+}
+
+export function buildFreeTextEdits(
+  pageIndex: number,
+  rect: PdfRect,
+  next: NextTextEdit,
+  wrappedLines: readonly (string | WrappedTextLine)[],
+  z: number,
+  boxId = id(),
+): readonly TextEdit[] {
+  const lineHeight = freeTextLineHeight(next.style);
+  return wrappedLines.map<TextEdit>((line, index) => {
+    const text = typeof line === 'string' ? line : line.text;
+    const spans = typeof line === 'string' ? undefined : line.spans;
+    return {
+      id: id(),
+      kind: 'text',
+      pageIndex,
+      rect: {
+        x: rect.x + next.dx,
+        y: rect.y + rect.h + next.dy - index * lineHeight,
+        w: next.width,
+        h: next.style.fontSizePt,
+      },
+      z: z + index,
+      text,
+      style: next.style,
+      origin: 'free',
+      boxId,
+      ...(spans && spans.length > 0 ? { spans } : {}),
+      boxText: next.text,
+      ...(next.spans ? { boxSpans: next.spans } : {}),
+      boxHeight: next.height,
+    };
+  });
+}
+
 export function buildTextBlockEdits(
   block: TextBlock,
   next: NextTextEdit,

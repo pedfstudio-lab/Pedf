@@ -49,6 +49,10 @@ export interface TextEdit extends BaseEdit {
   readonly kind: 'text';
   readonly text: string;
   readonly style: TextStyle;
+  /** Feature-side marker for text placed without an underlying source block or cover. */
+  readonly origin?: 'free';
+  /** Groups the wrapped line edits that belong to one placed free-text box. */
+  readonly boxId?: string;
   /** Present only when weight/style varies within this wrapped line. */
   readonly spans?: readonly TextSpan[];
   /** Unwrapped editor value retained so changing width on re-edit recomputes soft wraps. */
