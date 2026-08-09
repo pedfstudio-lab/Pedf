@@ -60,7 +60,6 @@ flowchart TB
     EDM["Edit Model<br/>Edit[] in PDF points"]
     COORD["Coordinate Transform<br/>screen ⇄ viewport ⇄ PDF pts"]
     EXP["Export Engine<br/>pdf-lib patch onto original bytes"]
-    FONTS["Font Subsystem<br/>Noto shaping → raster patch"]
     STORE["State Stores<br/>document / edits / prefs"]
     PROV["Provider Layer<br/>translate·explain·speak·transcribe·discuss"]
     PWA["PWA Layer<br/>manifest · SW · share-target"]
@@ -75,7 +74,6 @@ flowchart TB
   VIEW --> OVL --> EDM
   OVL <--> COORD
   EDM --> EXP
-  EXP --> FONTS
   STORE -.-> VIEW & OVL & EDM
   PROV --> SARVAM & ANTH & BROWSERAPI
   PROV -. prod .-> PROXY
@@ -101,18 +99,15 @@ changes.
 A small, closed, discriminated union of immutable `Edit` objects (`text | cover | image`), each
 carrying a page index, a rectangle **in PDF points**, and a z-order. This is the contract between the
 UI and the export engine (see §5). Features are expressed as compositions of these primitives — a
-text change is a *cover* patch plus a *text* overlay; a translated block, a moved image, a widened
-table column are all just sequences of the same three kinds.
+text change is a *cover* patch plus a *text* overlay; a moved image or a widened table column are all
+just sequences of the same three kinds.
 
 ### 3.4 Export Engine
 Re-opens the **pristine original bytes** with **pdf-lib**, groups edits by page, and draws each one
-onto its original page through a handler registry, then serializes. Two internal rendering paths:
-- **English path** — pdf-lib standard fonts, chosen by mapping the source font name to a
-  serif/sans/mono family with bold/italic, warning on any substitution.
-- **Indic path ("Path A")** — the Font Subsystem shapes the run and it is embedded as an image patch
-  (see §7). Routing between the two is purely a function of the characters in the run.
-Cover patches sample their fill color from the locked raster. The engine never regenerates pages; it
-only stamps onto them.
+onto its original page through a handler registry, then serializes. Text is drawn with **pdf-lib standard
+fonts**, chosen by mapping the source font name to a serif/sans/mono family with bold/italic, warning on any
+substitution. Cover patches sample their fill color from the locked raster. The engine never regenerates
+pages; it only stamps onto them. *(Indian-language text is never rendered into the PDF — see §6.)*
 
 ### 3.5 Coordinate Transform
 A single module that converts between three spaces — screen CSS px, PDF.js viewport px, and PDF
@@ -121,11 +116,11 @@ points — and is the *only* place that conversion is allowed to happen. PDF.js'
 kept as a cross-checked fallback. Because edits are stored in PDF points, the export side of this
 transform is nearly the identity, which keeps the export engine simple and stable.
 
-### 3.6 Font Subsystem
-Bundles Noto Sans Devanagari and Noto Sans Tamil (loaded via the FontFace API, awaited to readiness)
-and renders shaped Indic runs to an offscreen canvas at high oversampling for embedding by the
-Export Engine. It exists because correct shaping of conjuncts and reordered vowels is something the
-browser's text stack already does and pdf-lib cannot.
+### 3.6 Indian-language support (voice, not rendering)
+DesiPDF does **not** render Hindi/Tamil text into the document (that would require rasterizing shaped Indic
+runs to image patches — cut from scope: non-selectable, memory-heavy, delicate). Instead, Indian-language
+support is **spoken**: the Provider Layer explains/translates a tapped block and speaks it in the user's
+preferred language (§6, §7). No fonts are bundled; nothing Indic is embedded in the exported PDF.
 
 ### 3.7 Provider Layer (with voice discussion)
 One interface — `translate`, `explain`, `speak`, `transcribe`, `discuss` — behind which live
@@ -251,21 +246,22 @@ touch the DOM, never do coordinate math beyond consuming an already-PDF-point re
 
 ---
 
-## 6. The Indic Rendering Path (Path A)
+## 6. Indian-language Support (voice)
 
-Complex Indian scripts require shaping — reordering, conjunct formation, matra placement — that a
-glyph-and-position text API like pdf-lib's `drawText` cannot perform. DesiPDF therefore treats Indic
-text as **rasterized image content**, not text:
+DesiPDF's Indian-language layer is about **understanding** a document, not producing a translated file.
+Complex scripts (Devanagari, Tamil) need shaping that pdf-lib's `drawText` can't do, and baking them in as
+image patches was **cut** (non-selectable output, heavy memory, delicate placement — and not the goal).
+Instead:
 
-- **Routing is by character range.** Any run containing a Devanagari (U+0900–097F) or Tamil
-  (U+0B80–0BFF) code point is sent, in whole, down Path A; all other runs take the English path.
-- **The browser is the shaper.** The run is drawn to an offscreen canvas with the bundled Noto font
-  at high oversampling; the browser's own text stack shapes it correctly.
-- **The canvas is embedded as an image patch** at the exact PDF-point rectangle, over a cover patch
-  that hides whatever was underneath.
+- **Tap a block → hear it in your language.** The Provider Layer `explain`/`translate`s the block and
+  `speak`s the result in the user's preferred language (§7). The document itself is never rewritten.
+- **On-screen rendering, if shown, is native.** The browser renders Devanagari/Tamil directly — no bundled
+  fonts, no rasterization.
+- **The exported PDF stays English.** Editing produces English text edits only; the Indic export path is
+  removed.
 
-This keeps the promise for scripts pdf-lib can't set, at the cost of treating that text as an image
-(non-selectable in the output) — an explicit, accepted trade (see §9).
+(If producing a *translated file* ever becomes a goal, the closed export seam (§5) can take a new `Edit`
+kind without disturbing the rest — but it is explicitly out of scope now.)
 
 ---
 
@@ -275,8 +271,8 @@ The Provider Layer is the app's entire external attack/dependency surface, delib
 one interface with five verbs. Concrete providers are interchangeable behind it, and a fixed
 **failover order (Sarvam → Anthropic → Browser)** is applied per call, silently, with logging.
 
-- **Translation / Meaning** use `translate` / `explain`; "in-place" translation feeds the result
-  back into the Edit Model as a text overlay (which, being Indic, exports via Path A).
+- **Translation / Meaning** use `translate` / `explain`; the result is **spoken** in the user's preferred
+  language (and may be shown as an on-screen transcript). It is **not** written back into the document.
 - **Voice discussion** composes `transcribe` → `discuss` → `speak`. Its defining property is
   **grounding**: the model is given the document's extracted text as its sole source and instructed
   to answer only from it.
@@ -311,8 +307,8 @@ These are non-negotiable properties the system maintains at all times:
   module. Storage is independent of zoom and dpr.
 - **The export seam is closed and compile-checked.** A new `Edit` kind cannot ship without a handler
   (§5).
-- **Indic goes down Path A.** Any Devanagari/Tamil-bearing run is rasterized via bundled Noto fonts
-  and embedded as an image; it is never sent to `drawText` (§6).
+- **Indian-language output is spoken, never rendered into the PDF.** No Indic text is embedded; the
+  exported document is English. The Indian-language experience is voice (§6).
 - **Cover/background color is sampled from the locked raster** (dominant/mode color), not from the
   DOM or the PDF's color model.
 - **Voice answers are document-grounded.** `discuss()` answers only from the extracted document text;
@@ -333,9 +329,6 @@ These are non-negotiable properties the system maintains at all times:
 - **Buffer detachment.** PDF.js neuters the ArrayBuffer it is given; handing it the bytes meant for
   export produces empty/corrupt output. The pristine-clone rule exists precisely to prevent a subtle,
   data-destroying bug.
-- **Indic fidelity and cost.** Path A must oversample enough for crisp glyphs without exploding
-  offscreen-canvas memory on large blocks, and the output text is not selectable/searchable. Getting
-  placement, baseline, and background matching right so a patch is visually seamless is delicate.
 - **Background sampling.** Anti-aliased glyph edges poison a naive average; source pages in CMYK/ICC
   color can drift from the sRGB raster. Cover patches that don't perfectly match the background are
   immediately visible.
@@ -368,12 +361,12 @@ promise achievable:
 - **Editing rasterized or scanned text.** Text baked into page images is not made editable; there is
   no OCR-to-edit pipeline. (Voice discussion still reads whatever extractable text exists.)
 - **Arbitrary font embedding.** English export maps to the standard font families; it does not
-  faithfully re-embed the document's original fonts. Indic support is limited to the bundled Noto
-  scripts.
+  faithfully re-embed the document's original fonts. **Indian-language text is never rendered into the
+  document** — that support is spoken (voice), not written into the file.
 - **Automatic table detection.** Table column resizing is driven by manual, user-placed guides; the
   system does not infer table structure.
-- **Scripts beyond the routed ranges in v1.** Only Devanagari and Tamil are on Path A; other complex
-  scripts are not yet routed.
+- **Rendering any Indian-language text into the exported PDF.** Indic support is voice-only; no script is
+  rasterized or embedded into the file (Path A was cut). On-screen display, if any, uses native browser fonts.
 - **Multi-user, collaboration, accounts, or cloud sync.** The app is single-user and local by design.
 - **Bhashini integration** until/unless its API access is approved (a stub holds its place).
 - **A general-purpose annotation/markup suite.** The feature set is intentionally the five reader-layer

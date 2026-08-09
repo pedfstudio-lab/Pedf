@@ -67,7 +67,8 @@ export interface CoverEdit extends BaseEdit {
 
 export interface ImageEdit extends BaseEdit {
   readonly kind: 'image';
-  readonly png: Uint8Array;
+  /** Original encoded PNG/JPEG bytes; never re-sampled before embedding. */
+  readonly bytes: Uint8Array;
 }
 
 /** The closed union consumed exhaustively by the export-handler registry. */

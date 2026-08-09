@@ -6,10 +6,11 @@ interface PdfViewerProps {
   doc: PDFDocumentProxy;
   zoom: number;
   editMode: boolean;
+  imageMode: boolean;
   peek: boolean;
 }
 
-export function PdfViewer({ doc, zoom, editMode, peek }: PdfViewerProps) {
+export function PdfViewer({ doc, zoom, editMode, imageMode, peek }: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function PdfViewer({ doc, zoom, editMode, peek }: PdfViewerProps) {
           pageIndex={page.pageNumber - 1}
           zoom={zoom}
           editMode={editMode}
+          imageMode={imageMode}
           peek={peek}
         />
       ))}

@@ -9,11 +9,12 @@ interface PageCanvasProps {
   pageIndex: number;
   zoom: number;
   editMode: boolean;
+  imageMode: boolean;
   peek: boolean;
 }
 
 /** One locked PDF.js canvas background for a single page. */
-export function PageCanvas({ page, pageIndex, zoom, editMode, peek }: PageCanvasProps) {
+export function PageCanvas({ page, pageIndex, zoom, editMode, imageMode, peek }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [renderInfo, setRenderInfo] = useState<{ viewport: PageViewport; dpr: number } | null>(null);
   const { registerPageCanvas } = useDocumentStore();
@@ -22,17 +23,25 @@ export function PageCanvas({ page, pageIndex, zoom, editMode, peek }: PageCanvas
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let cancelled = false;
+    setRenderInfo(null);
+    registerPageCanvas(pageIndex, null);
     const { task, viewport, dpr } = renderPage(page, canvas, zoom);
-    setRenderInfo({ viewport, dpr });
-    registerPageCanvas(pageIndex, { canvas, viewport, dpr });
-    task.promise.catch((err: unknown) => {
-      // Cancellation during React StrictMode double-invoke / zoom change is expected.
-      if (err && (err as { name?: string }).name !== 'RenderingCancelledException') {
-        console.error('page render failed', err);
-      }
-    });
+    void task.promise
+      .then(() => {
+        if (cancelled) return;
+        registerPageCanvas(pageIndex, { canvas, viewport, dpr });
+        setRenderInfo({ viewport, dpr });
+      })
+      .catch((err: unknown) => {
+        // Cancellation during React StrictMode double-invoke / zoom change is expected.
+        if (err && (err as { name?: string }).name !== 'RenderingCancelledException') {
+          console.error('page render failed', err);
+        }
+      });
 
     return () => {
+      cancelled = true;
       task.cancel();
       registerPageCanvas(pageIndex, null);
       setRenderInfo(null);
@@ -50,6 +59,7 @@ export function PageCanvas({ page, pageIndex, zoom, editMode, peek }: PageCanvas
           dpr={renderInfo.dpr}
           zoom={zoom}
           editMode={editMode}
+          imageMode={imageMode}
           peek={peek}
         />
       )}

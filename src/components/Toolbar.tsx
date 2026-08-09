@@ -4,9 +4,11 @@ interface ToolbarProps {
   onOpen: (file: File) => void;
   fileName: string | null;
   editMode: boolean;
+  imageMode: boolean;
   hasEdits: boolean;
   exporting: boolean;
   onEditModeChange(enabled: boolean): void;
+  onImageModeChange(enabled: boolean): void;
   onPeekChange(peeking: boolean): void;
   onExport(): void;
 }
@@ -15,9 +17,11 @@ export function Toolbar({
   onOpen,
   fileName,
   editMode,
+  imageMode,
   hasEdits,
   exporting,
   onEditModeChange,
+  onImageModeChange,
   onPeekChange,
   onExport,
 }: ToolbarProps) {
@@ -38,6 +42,15 @@ export function Toolbar({
           className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${editMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
         >
           Edit text
+        </button>
+        <button
+          type="button"
+          aria-pressed={imageMode}
+          onClick={() => onImageModeChange(!imageMode)}
+          disabled={!fileName}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${imageMode ? 'bg-cyan-700 text-white hover:bg-cyan-600' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
+        >
+          Add image
         </button>
         <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />
         <button

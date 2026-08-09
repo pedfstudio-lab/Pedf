@@ -10,7 +10,7 @@ import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
-const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/sample-basic.pdf`;
+const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/GOA%202026.pdf`;
 
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
@@ -18,6 +18,7 @@ function EditorApp() {
   const [error, setError] = useState<string | null>(null);
   const [zoom] = useState(1.5);
   const [editMode, setEditMode] = useState(false);
+  const [imageMode, setImageMode] = useState(false);
   const [peek, setPeek] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -30,6 +31,7 @@ function EditorApp() {
       setDocument({ loaded, fileName: name });
       resetEdits();
       setEditMode(false);
+      setImageMode(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -46,7 +48,7 @@ function EditorApp() {
         const buf = await res.arrayBuffer();
         const head = new Uint8Array(buf.slice(0, 5));
         if (String.fromCharCode(...head) !== '%PDF-') return;
-        if (!cancelled) await open(buf, 'sample-basic.pdf');
+        if (!cancelled) await open(buf, 'GOA 2026.pdf');
       } catch {
         /* no sample present — that's fine */
       }
@@ -130,9 +132,17 @@ function EditorApp() {
         onOpen={(file) => open(file, file.name)}
         fileName={document?.fileName ?? null}
         editMode={editMode}
+        imageMode={imageMode}
         hasEdits={edits.length > 0}
         exporting={exporting}
-        onEditModeChange={setEditMode}
+        onEditModeChange={(enabled) => {
+          setEditMode(enabled);
+          if (enabled) setImageMode(false);
+        }}
+        onImageModeChange={(enabled) => {
+          setImageMode(enabled);
+          if (enabled) setEditMode(false);
+        }}
         onPeekChange={setPeek}
         onExport={() => void handleExport()}
       />
@@ -145,6 +155,7 @@ function EditorApp() {
             doc={document.loaded.doc}
             zoom={zoom}
             editMode={editMode}
+            imageMode={imageMode}
             peek={peek}
           />
         ) : (
@@ -152,7 +163,7 @@ function EditorApp() {
             <div className="flex h-full items-center justify-center px-6 text-center text-neutral-500">
               Open a PDF to begin — or drop one at{' '}
               <code className="mx-1 rounded bg-neutral-200 px-1 py-0.5 text-neutral-700">
-                public/samples/sample-basic.pdf
+                public/samples/GOA 2026.pdf
               </code>
             </div>
           )

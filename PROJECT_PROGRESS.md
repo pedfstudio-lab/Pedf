@@ -3,8 +3,9 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-05
-**Current position:** Phase 1 implementation is green through Task 11C. Task 10F's manual opaque-box visual confirmation, real-device PDF acceptance, and the `Phase 1 ✓` commit remain pending.
+**Last updated:** 2026-08-07
+**Current position:** Phase 3 image work is green through Task 16B, including Task 15B's photo-vs-card detection precision (detect, replace, add, delete, and crop). Task 17 table-column resize is next; Phase 1's real-device PDF acceptance and final phase commits remain pending.
+**Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
 
@@ -15,14 +16,14 @@
 ---
 
 ## Product in one line
-Open any PDF in the browser; tap to edit text, manipulate images, widen table columns,
-translate to Indian languages, or discuss the document by voice — layout never shifts;
-download a clean PDF.
+Open any PDF in the browser; tap to edit text, manipulate images, widen table columns, or
+**hear any part explained aloud in your language** (Hindi / Tamil / …) and discuss the document
+by voice — layout never shifts; download a clean (English) PDF.
 
 ## Locked decisions
 - [x] Language: **TypeScript** (strict)
 - [x] Scope: full plan, all 7 phases
-- [x] Sample PDF: user-provided (`public/samples/sample-basic.pdf` — Firgun travel itinerary, 6 pages)
+- [x] Sample PDF: user-provided (`public/samples/GOA 2026.pdf` — Goa travel itinerary, 16 pages)
 - [x] Stack final: Vite + React + PDF.js + pdf-lib + Tailwind (no substitutions)
 
 ## The one architectural idea (the export seam)
@@ -60,7 +61,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] `lib/export/registry.ts` — mapped-type `{ [K in Edit['kind']]: Handler }` (compile-time exhaustiveness)
 - [x] `lib/export/context.ts` — `PageExportContext` factory
 - [x] `lib/export/exportPdf.ts` — orchestrator (load pristine bytes → dispatch → save)
-- [x] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (image = not-implemented stub)
+- [x] `lib/export/handlers/` — `text.ts`, `cover.ts`, `image.ts` (PNG/JPEG byte embedding)
 - [x] `lib/export/englishFont.ts`, `pathA.ts`, `scriptRouting.ts`, `colorSample.ts` (structurally present)
 - [x] `lib/fonts/notoFonts.ts` — `ensureIndicFonts()` (FontFace, await `document.fonts.ready`)
 - [x] `lib/providers/types.ts` — `LanguageProvider` interface stub
@@ -110,39 +111,43 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 
-## Phase 2 — Indic pipeline (Path A) + harness green  ⬜ NOT STARTED
-- [ ] Bundle Noto Sans Devanagari + Tamil (Regular/Bold woff2) + OFL.txt in `public/fonts/`
-- [ ] `pathA.ts` full: offscreen canvas 3×, HarfBuzz shaping, `embedPng`, drawImage at P-rect
-- [ ] `scriptRouting.ts` wired: U+0900–097F / U+0B80–0BFF → Path A; never `drawText`
-- [ ] `harness/renderReference.ts` — native canvas render of a string
-- [ ] Indic scenarios pixel-compare patch region (tolerance < 0.02–0.03)
-- [ ] Acceptance: `किताब क्षमा हिन्दी श्रद्धा தமிழ்` renders in Android Reader; harness green
-- [ ] **Commit `Phase 2 ✓`**
+## Phase 2 — ❌ REMOVED (Indic-in-document / Path A, cut 2026-08-05)
+Indic **text is no longer rendered into the PDF**. The Indian-language experience is **voice** (see Phase 4/5):
+tap → hear it explained in your language; the exported PDF stays English.
+- [x] Decision recorded — Path A cut in favour of a spoken explanation
+- [ ] Cleanup: delete `pathA.ts`, `scriptRouting.ts`, `lib/fonts/notoFonts.ts`, and the Indic branch in `handlers/text.ts` (pair with Phase 4)
 
-## Phase 3 — Images + table column resize (features 2, 3)  ⬜ NOT STARTED
-- [ ] `lib/pdf/images.ts` — `getOperatorList()` image rects, else user-drawn region
-- [ ] Image move/resize/delete (cover + re-embed from locked raster); insert PNG/JPG
-- [ ] `handlers/image.ts` — `embedPng` + drawImage
-- [ ] `components/ImageOverlay.tsx` — drag, corner resize, delete, insert
+_Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · Indic harness · the `Phase 2 ✓` gate._
+
+## Phase 3 — Images + table column resize (features 2, 3)  ⏳ IN PROGRESS
+- [x] `lib/pdf/images.ts` — CTM-aware `getOperatorList()` image rectangles; GOA fixture counts verified across all 16 pages
+- [x] Task 15B detection precision — painted-canvas colour richness + text signals keep real photos/logos and remove flat text cards; rasterized GOA review screenshots use a dominant-background/text-edge fallback
+- [x] Replace and add PNG/JPG with aspect-fit previews and direct original-byte embedding
+- [x] `handlers/image.ts` — `embedPng` / `embedJpg` + exact-rect `drawImage`
+- [x] `components/ImageOverlay.tsx` — draw/add, pre-confirm move/resize, replace, delete, and crop controls
+- [x] Task 16A delete — added images are removed from the edit store; existing images receive an outside-colour cover patch
+- [x] Task 16B crop — uploaded bytes crop at source resolution; existing images crop from a fresh 3× PDF.js region capture
+- [x] Browser verification on GOA 2026: original-image delete/crop and committed-image crop/delete; Peek and export remain enabled
+- [x] Task 15B browser verification on GOA 2026: page 9 review frames 9 → 0; page 8 retains all 10 destination-photo frames; browser console clean
+- [x] Unit/build verification: 23 files / 144 tests, typecheck, lint, and production build green
 - [ ] `components/TableTool.tsx` — draw region, place vertical guides, drag guide
 - [ ] Guide drag: shift runs (x > guide) as text+cover; redraw ruling lines as thin colored covers
 - [ ] Acceptance: swap an image + widen one table column; layout holds
 - [ ] **Commit `Phase 3 ✓`**
 
-## Phase 4 — Translate + Meaning popover + in-place translate (feature 4)  ⬜ NOT STARTED
-- [ ] `providers/` — `SarvamProvider.translate()` (Mayura, `api.sarvam.ai/translate`)
-- [ ] `AnthropicProvider.translate()/explain()` (fallback + Meaning)
+## Phase 4 — Explain in your language (voice) + Meaning + entity spans  ⬜ NOT STARTED
+- [ ] `providers/` — `translate()` / `explain()` (Sarvam Mayura + Anthropic fallback) — generate the spoken content
 - [ ] `providers/index.ts` failover Sarvam → Anthropic → Browser (silent, logged)
 - [ ] `BhashiniProvider` stub (TODO, non-blocking)
 - [ ] `providers/keys.ts` + `SettingsPanel.tsx` — dev-only localStorage keys + "personal use only" warning
-- [ ] TapPopover: enable **Translate** + **Meaning**
-- [ ] In-place mode: translation → `TextEdit`(Indic→Path A) + `CoverEdit`
+- [ ] TapPopover: **Listen / Explain** — tap a block → hear it in the preferred language; **PDF unchanged** (no in-place rewrite, no Path A)
 - [ ] `prefsStore` — preferred language persisted
-- [ ] Acceptance: tap English para → Hindi in place → exports correctly
+- [ ] (Task 21A) AI place/name/event spans → Search / Maps / Meaning
+- [ ] Acceptance: tap English para → **spoken** explanation in Hindi/Tamil; document unchanged
 - [ ] **Commit `Phase 4 ✓`**
 
 ## Phase 5 — Voice discussion (feature 5) + PWA share-target  ⬜ NOT STARTED
-- [ ] `SarvamProvider.speak()` (Bulbul TTS), `.transcribe()` (Saarika ASR, Hinglish)
+- [ ] `SarvamProvider.speak()` (Bulbul TTS — also powers the per-block **Explain** in Task 21), `.transcribe()` (Saarika ASR, Hinglish)
 - [ ] `AnthropicProvider.discuss()` — document-grounded; else "document mein nahin hai."
 - [ ] `BrowserProvider` — speechSynthesis TTS + Web Speech API ASR
 - [ ] `components/VoiceButton.tsx` — mic → transcribe → discuss → show + speak
@@ -177,6 +182,6 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [ ] Commit after every green acceptance test with message `Phase N ✓`
 
 ## Dependencies / open items
-- [x] Sample PDF provided (`public/samples/sample-basic.pdf`)
+- [x] Sample PDF provided (`public/samples/GOA 2026.pdf`)
 - [ ] Sarvam + Anthropic API keys (needed from Phase 4)
 - [ ] Confirm Bulbul (TTS) / Saarika (ASR) request field shapes at docs.sarvam.ai (Phase 5)

@@ -18,6 +18,7 @@ import { useEdits } from '@/state/editsStore';
 import { SmartSpanLayer } from './SmartSpanLayer';
 import { TapPopover } from './TapPopover';
 import { TextEditOverlay } from './TextEditOverlay';
+import { ImageOverlay } from './ImageOverlay';
 
 interface OverlayLayerProps {
   readonly page: PDFPageProxy;
@@ -26,6 +27,7 @@ interface OverlayLayerProps {
   readonly dpr: number;
   readonly zoom: number;
   readonly editMode: boolean;
+  readonly imageMode: boolean;
   readonly peek: boolean;
 }
 
@@ -94,6 +96,7 @@ export function OverlayLayer({
   dpr,
   zoom,
   editMode,
+  imageMode,
   peek,
 }: OverlayLayerProps) {
   const [runs, setRuns] = useState<TextRun[]>([]);
@@ -226,6 +229,14 @@ export function OverlayLayer({
           </div>
         );
       })}
+
+      <ImageOverlay
+        page={page}
+        pageIndex={pageIndex}
+        viewport={viewport}
+        dpr={dpr}
+        imageMode={imageMode}
+      />
 
       <SmartSpanLayer dates={detectedDates} viewport={viewport} dpr={dpr} />
 

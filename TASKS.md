@@ -273,6 +273,10 @@ Phase 0 acceptance commit at Task 7 (optional local WIP commit).
 memoized/idempotent and safely no-ops outside a browser (unit-tested with a stubbed `FontFace`). Real
 font *files* (Task 12) and runtime shaping (Task 13) are out of scope.
 
+> **⚠ Partially superseded (2026-08-05):** Path A was cut, so the **`notoFonts.ts`** half of this task is now
+> **dead code** — delete it in the Path A cleanup (see the removed Indic section above). The
+> **`providers/types.ts`** half stays valid — the provider layer still powers voice translate / explain / speak.
+
 #### Workflow
 
 **What this task is (and isn't).** Pure scaffolding — two cross-cutting modules created early so later
@@ -1552,43 +1556,308 @@ Serif) wrongly renders sans. Widen the serif regex to cover these so serif parag
 
 **Commit:** editor-side polish (no export-path change). Pairs with Task 11B.
 
+### Task 11D — Add text anywhere (free text)  🔲
+**Goal:** let the user drop a **new** text box on any spot of any page (blank areas, form blanks, captions,
+notes) and type — not just edit text that's already there. Exports as real, selectable text.
+**Depends on:** Task 10/11 (the editor), Task 16 (reuse its "draw a region" gesture), Task 3 (coordinates).
+**Non-goals:** not for editing text **baked into an image** (that's a photo problem — *replace the image*
+instead); placing text does **not** erase what's behind it (no auto-cover in v1).
+**Done when:** click **Add text** → draw/click a spot on any page → type (with size / bold / italic / font
+controls) → Done → the text appears and **exports as real selectable text**; peek hides it; tapping it
+reopens the editor; placing a box and typing nothing creates **no** edit.
+
+#### Workflow
+
+**1 — "Add text" mode → `Toolbar` + `App`**
+Add a toolbar **"Add text"** toggle (parallel to "Add image") → a `textAddMode` state in `App`, threaded
+App → PdfViewer → PageCanvas → OverlayLayer (exactly like `imageMode`). Only one of edit / image / text-add
+mode is active at a time.
+
+**2 — Placement gesture**
+In `textAddMode`, a full-page surface captures a **draw-a-box** (reuse `ImageOverlay`'s `beginDraw` pattern)
+→ a `PdfRect` via `screenRectToPdfRect`. A drag sets the width (→ wrapping); a bare click uses a sensible
+default width. Min-size guard.
+
+**3 — Open the editor on an empty box → reuse `TextEditOverlay`**
+Seed the existing editor for new text via a **synthetic empty block**:
+`{ pageIndex, text: '', rect: placedRect, topBaselineY: <top of placedRect>, lineHeightPt: default,
+style: DEFAULT_TEXT_STYLE, lines: [] }`. It opens empty at the placed rect; the user types and adjusts
+size / B / I / font / width. *(Task 11C's no-op guard already gives us "place a box, type nothing, Done ⇒ no
+edit" for free.)* `DEFAULT_TEXT_STYLE` = standard sans (Arial/Helvetica), ~14pt, black — user-adjustable.
+
+**4 — Emit standalone text (no cover) → `buildFreeTextEdits`**
+On Done, wrap to the box width (reuse `wrapTextToLines` / `wrapTextSpansToLines`) and build **`TextEdit`s
+only — no `CoverEdit`** (nothing underneath to hide). Add `buildFreeTextEdits(rect, next, wrappedLines, z)`
+that mirrors `buildTextBlockEdits`'s per-line text construction but **omits the covers**; first baseline at
+the box top, lines stacked down by `lineHeight`. `addEdits(texts)`.
+
+**5 — Render, peek, re-edit**
+Committed free text renders through the existing `pageTextEdits` map in `OverlayLayer` (real & selectable on
+export; `HoldToPeek` hides it). Make each free-text edit **tappable to reopen** — it has no source block, so
+give it its own re-edit path (tapping seeds `TextEditOverlay` from that edit's `boxText`/`spans`/`style`/
+`rect`). Distinguish free-text edits from block edits with a tiny optional marker (e.g. `origin: 'free'` on
+the `TextEdit` — metadata only, the export handler ignores it, so it stays feature-side).
+
+**Key decisions & edge cases**
+- **No auto-cover in v1:** adding text doesn't erase what's behind it. On a plain area it's clean; over a
+  photo the text sits directly on the image (usually what you want for a caption). Hiding something behind it
+  is a separate cover action (future).
+- **Not for image-baked text:** this places *new* text; it can't edit letters inside a photo (replace the
+  image for that).
+- Reuses the editor, wrapping, `text` handler, and coordinate transform — the only genuinely new code is the
+  mode + placement + the cover-less builder + the free-text re-edit path.
+
+**Verify**
+- Unit: `buildFreeTextEdits` produces `TextEdit`s (no covers) at the placed rect with correct per-line
+  positions; wrapping splits by the box width.
+- **Browser:** Add text → draw a box on a blank area → type (multi-line, bold a word, bump the size) → Done →
+  shows; export → real selectable text in the right place; peek hides it; tap to reopen and edit;
+  place + type-nothing + Done → no edit created.
+
+**Commit:** feature-side (toolbar mode + placement UI + cover-less builder + re-edit path). **No export-seam
+change** — the `text` handler already draws `TextEdit`s.
+
 ---
 
-## Indic pipeline (Path A)
+## ~~Indic pipeline (Path A)~~ — ❌ REMOVED FROM SCOPE (2026-08-05)
 
-### Task 12 — Bundle Noto fonts  🔲
-**Goal:** ship the shaping fonts.
-**Deliverables:** Noto Sans Devanagari + Tamil (Regular/Bold woff2) + OFL.txt in `public/fonts/`.
-**Depends on:** Task 5.
+**Tasks 12, 13, 14 are cut.** DesiPDF no longer renders Hindi/Tamil **text into the document**. Doing so
+meant rasterizing shaped Indic runs to image patches (pdf-lib can't shape Devanagari/Tamil) — non-selectable
+output, heavy offscreen-canvas memory, delicate baseline/placement/background matching: the hardest fidelity
+work in the whole project — all to bake translated text into the exported file, which turned out not to be
+the goal.
 
-### Task 13 — Path A rasterization + routing  🔲
-**Goal:** Indic runs export as image patches, never `drawText`.
-**Deliverables:** `pathA.ts` (offscreen canvas 3×, HarfBuzz shaping, `embedPng`, drawImage at P-rect),
-`scriptRouting.ts` wired (U+0900–097F / U+0B80–0BFF → Path A).
-**Depends on:** Task 10, Task 12. *(Export-path work — its own commit.)*
+**Replaced by voice.** The Indian-language experience is now **spoken**: tap a paragraph → **hear it explained
+in your preferred language** (Hindi / Tamil / …). The exported PDF stays **English**. (Any on-screen Indic, if
+ever shown, needs no bundled fonts — the browser renders Devanagari/Tamil natively.) See the repointed
+**Task 21** below and the **Voice discussion** phase.
 
-### Task 14 — Indic harness scenarios + acceptance  🔲
-**Goal:** prove Indic patches render correctly.
-**Deliverables:** `harness/renderReference.ts`; Indic scenarios pixel-compare patch regions
-(tolerance < 0.02–0.03).
-**Depends on:** Task 13.
-**Done when:** `किताब क्षमा हिन्दी श्रद्धा தமிழ்` renders in Android Reader; harness green → commit `Phase 2 ✓`.
+**Removed:** ~~Task 12~~ (bundle Noto fonts), ~~Task 13~~ (Path A rasterization + routing), ~~Task 14~~ (Indic
+harness + `Phase 2 ✓`). **Phase 2 is dropped**; Phases 3–6 keep their numbers (no renumber, to avoid churn).
+**Code cleanup (small — pair with Task 21):** delete the now-dead stubs `lib/export/pathA.ts`,
+`lib/export/scriptRouting.ts`, `lib/fonts/notoFonts.ts`; drop the Indic branch in `handlers/text.ts`; abandon
+the `public/fonts/` plan.
 
 ---
 
 ## Images & tables
 
-### Task 15 — Image selection  🔲
-**Goal:** locate existing image regions, or let the user draw one.
-**Deliverables:** `lib/pdf/images.ts` (`getOperatorList()` image rects; else user-drawn region).
-**Depends on:** Task 7.
+### Task 15 — Image targets: detect existing images + draw a region  ✅
+**Goal:** know where the two actions can happen — the rects of any **existing** images (so they're tappable
+for **Replace**) and a **free-drawn** rectangle anywhere (for **Add**).
+**Deliverables:** `lib/pdf/images.ts` — `getOperatorList()` → existing image rectangles in PDF points
+(tappable for Replace); a draw-a-region interaction for Add (any position / size / page, incl. blank areas
+and image-free PDFs).
+**Depends on:** Task 7. *(Detection is **only** to enable Replace — it never restricts where Add can place.)*
 
-### Task 16 — Image edit + handler  🔲
-**Goal:** move / resize / delete / insert images.
-**Deliverables:** `handlers/image.ts` (`embedPng` + drawImage), `components/ImageOverlay.tsx`
-(drag, corner resize, delete, insert PNG/JPG); move/resize = cover old region + re-embed from the
-locked raster.
-**Depends on:** Task 15. *(Handler is export-path — separate commit from the overlay.)*
+### Task 15A — Detection precision: skip backgrounds behind text  ⚠️ SUPERSEDED BY 15B
+> **This approach (text-area coverage) did not work.** It summed sparse per-glyph text-run area, so a
+> text-filled card computed to ~20% (letters are mostly air) and never reached the 42% cutoff — live it
+> removed **1 of 66** regions. The real signal is **flat card vs rich photo**, not *how much* text. Replaced by
+> **Task 15B**. Kept here for history.
+> **⚠ Only the *coverage decision* is removed** — the `TEXT_COVERAGE_DROP` constant and the `>threshold` drop.
+> The `intersectionArea` math and the `extractTextRuns` plumbing are **reused** by 15B (and
+> `filterTextBackedRegions` is *rewritten*, not deleted) — see 15B's **"Keep vs remove"** step.
+
+**Why:** `detectImages` currently also surfaces **page/card background images that sit behind real text**, so
+on text-heavy pages (e.g. the Goa brochure's reviews page) the amber frames blanket the review text — it looks
+like text is being treated as images. *(Measured live: 22 of 66 detected frames overlapped real text; several
+were >50% covered by text.)*
+**Fix:** drop any detected image region that is **mostly covered by real text**.
+- Bring the page's extracted text runs (`extractTextRuns` — Task 8, already in PDF points) alongside the
+  detected regions (also PDF points).
+- For each region: `coverage = min(1, Σ area(region ∩ textRun) ÷ area(region))` (cap at 1 so overlapping runs
+  don't over-count).
+- If `coverage > TEXT_COVERAGE_DROP` → **drop the region** (it's a background/decoration behind text); else
+  keep it.
+- **`TEXT_COVERAGE_DROP = 0.42`** — in the **40–45%** band, a **named, tunable constant** so we can dial it on
+  the real brochure.
+**Keeps vs drops (by design):** a photo/logo with no text → 0% → **kept**; a photo with a small caption →
+~5% → **kept**; a review-card / full-page background under a paragraph → 50–67% → **dropped**.
+**Trade-off (honest):** at 40–45% we err toward **keeping** real images, so a *lightly*-texted background
+(≈25–40% coverage) may still show a frame — if the reviews page still looks noisy we nudge the constant down.
+(A decorative background you *did* want to replace, with heavy text on it, would be hidden — rare, accepted.)
+**Where:** `lib/pdf/images.ts` — a pure, unit-testable `filterTextBackedRegions(regions, textRuns, threshold)`
+applied at the end of `detectImages` (have it read the page's text runs, or accept them as a param).
+**Depends on:** Task 15, Task 8 (text runs).
+**Done when:** on the Goa brochure's reviews page the frames no longer cover the review text; real photos/logos
+still get frames; unit test — a region 50% covered by text is dropped, a region with a ~5% caption is kept;
+typecheck / lint / tests green.
+
+### Task 15B — Detection precision v2: keep real photos, drop flat text-backgrounds  ✅
+**Why:** Task 15A's text-area coverage failed (it counted sparse glyph-ink → the cutoff never fired; removed
+1/66 regions live). The real distinction isn't *how much* text — it's **flat card vs rich photo**. A review
+card is a **near-solid coloured box** with writing on it; a real photo is **visually rich** whether or not it
+carries a title. So a photo-with-text must **stay**; a flat card (long *or* short review) must **go**.
+
+**Two signals per detected region:**
+1. **Richness (flat vs rich)** — sample the region from the **rendered page canvas** (`getPageCanvas`, the same
+   raster cover-sampling already reads), downscale to ~48×48, count **distinct (quantised) colours**. A flat
+   card ≈ a handful of colours; a photo ≈ hundreds. `RICH_MIN_COLORS` sits in that (large) gap — robust, not
+   delicate. `rich` ⇒ real photo.
+2. **Text on it** — from the region's contained text runs: `hasText` = any real text run substantially inside;
+   `paragraph` = running-text volume above `PARAGRAPH_TEXT` (total characters, or count of full-width lines).
+
+**Decision — keep an image UNLESS it's a flat box with text on it, or it carries a paragraph:**
+`drop = (flat && hasText) || paragraph` — keep everything else.
+- Photo, no text → **keep** ✅
+- Photo + a word / title → rich + short → **keep** ✅ *(the case block-count got wrong)*
+- **Full-page** photo → rich → **keep** ✅ *(never mistaken for a background)*
+- Flat box with **no** text (plain colour block) → **keep** ✅ *(don't drop an image just for being simple)*
+- Short "Memories:)" card → flat + text → **drop** ✅ *(the case area/text-amount missed)*
+- Long review card → flat + paragraph → **drop** ✅
+- *Rare casualty:* a real photo with a whole paragraph painted on it → dropped. Set `PARAGRAPH_TEXT` high so a
+  normal title/caption never trips it.
+
+**Where:** the richness step needs the painted canvas, so this filter runs in the **browser** — in
+`ImageOverlay`, or a browser-only helper reading `getPageCanvas(pageIndex)` — **not** in the pure
+`detectImages`. Keep the geometry/text math in a pure, unit-testable function; unit-test richness with a
+synthetic **flat** image (few colours → flat) vs a **noise** image (many colours → rich).
+**⚠ Validation caveat:** the automated Browser pane does **not** paint PDF.js canvases (the Phase-0 rAF stall —
+verified: every page canvas reads as 1 colour / pure white in headless), so this **cannot be pre-measured in
+automation**. Confirm `RICH_MIN_COLORS` on a **real browser** once. The flat↔rich gap is huge (single-digit vs
+hundreds of colours), so the cutoff is low-risk.
+**Keep vs remove — reshape Task 15A, don't scrap it** (`src/lib/pdf/images.ts`):
+- **Keep / reuse:** `intersectionArea` (rect-overlap math) and the `extractTextRuns` fetch — 15B needs both to
+  tell which text sits inside a region.
+- **Remove (the failed part, ~2 lines):** the **`TEXT_COVERAGE_DROP`** constant and the
+  `covered/area > threshold → drop` decision.
+- **Repurpose, don't delete:** rewrite `filterTextBackedRegions` into a pure, unit-testable helper that, per
+  region, returns **`{ hasText, paragraph }`** (built on the same `intersectionArea` math) — no coverage %.
+- **Move the decision to the browser:** `detectImages` returns the **raw** `imageRegionsFromOperatorList`
+  regions; the overlay combines the new **richness** (canvas) test with `{ hasText, paragraph }` →
+  `drop = (flat && hasText) || paragraph`.
+- Update **`src/lib/pdf/images.test.ts`** to test the new `{ hasText, paragraph }` helper instead of coverage.
+**Depends on:** Task 15, Task 8 (text runs), the page-canvas registry (`getPageCanvas`).
+**Done when:** on a real browser the Goa reviews page shows **no** frames over review cards (long *and* short),
+while destination photos — **with or without titles**, full-page or not — keep their frames; a flat no-text
+block still keeps its frame; richness + text unit tests pass; typecheck / lint green.
+
+### Task 16 — Two image actions: Replace + Add (handler)  ✅
+**Goal:** exactly **two** user actions, both embedding a **user-supplied file** — so both are full quality:
+1. **Replace** *(shown only when an image is present)* — tap an existing image → pick a PNG/JPG → **cover**
+   the old image rect + embed the new file at that **same rectangle** (layout unchanged).
+2. **Add anywhere** — draw a box on any page (blank space, image-free PDF, wherever) → pick a PNG/JPG →
+   embed it at that box. It's an overlay on top; existing text does **not** reflow.
+**Deliverables:** `handlers/image.ts` (`embedPng`/`embedJpg` + drawImage — its real body), a `CoverEdit` for
+the replaced region, `components/ImageOverlay.tsx` (Replace-on-tap + Add-by-draw; fit the file into the box
+preserving aspect ratio; the just-Added image can be repositioned/resized freely before confirm since it's
+the user's own file).
+**Quality:** both paths embed the user's original file bytes **directly** — no raster re-sampling, **no
+quality loss** (only the inherent softness if a file is shown larger than its own pixels). *(We dropped
+move/resize/delete of **existing** images, so we never re-embed original pixels from the canvas — the lossy
+path is gone entirely.)*
+**Depends on:** Task 15. *(Handler is export-path — its own commit, separate from the overlay UI.)*
+
+#### Workflow (Tasks 15 + 16 — built together, committed in two parts)
+
+**Why together.** Task 15 (find targets) shows the user nothing on its own; it only feeds Task 16's two
+actions. So we plan them as one feature — but respect the discipline: the **export-path image handler ships in
+its own commit** (A), the **detection + overlay UI** in another (B).
+
+**Step 1 — Image export handler → `src/lib/export/handlers/image.ts`**  *(Commit A · export-seam)*
+Replace the not-implemented stub with the real body — sniff the encoded bytes and embed with pdf-lib:
+```ts
+const embedded = isPng(edit.bytes) ? await ctx.pdf.embedPng(edit.bytes)
+               : isJpg(edit.bytes) ? await ctx.pdf.embedJpg(edit.bytes)
+               : throwUnsupported();
+ctx.page.drawImage(embedded, { x: edit.rect.x, y: edit.rect.y, width: edit.rect.w, height: edit.rect.h });
+```
+`isPng` = bytes begin `89 50 4E 47`; `isJpg` = `FF D8 FF`. The rect is PDF points (bottom-left) so `drawImage`
+maps 1:1. The handler stays **dumb** — it draws exactly the rect it's given; aspect-fit is computed in the UI.
+*(Payload change: broaden `ImageEdit.png` → `bytes: Uint8Array` (raw PNG/JPEG). Export-seam type change —
+lands in **this** commit. pdf-lib embeds only PNG/JPEG, so those are the accepted formats.)*
+
+**Step 2 — Harness image scenario → `src/harness/…`**  *(Commit A)*
+Add a scenario: build an `EditDocument` with one `image` edit (a tiny known PNG) at a fixed rect → real
+`exportPdf` → re-render → assert the patch region is non-blank and matches a reference within tolerance.
+Proves the handler **before any UI exists**. Harness green → **Commit A**.
+
+**Step 3 — Existing-image detection → `src/lib/pdf/images.ts`**  *(Commit B · feature)*
+`detectImages(page, pageIndex): ImageRegion[]` via `page.getOperatorList()`:
+- Walk the ops keeping a **CTM stack** — `OPS.save`/`OPS.restore` push/pop, `OPS.transform` multiplies,
+  `OPS.paintFormXObjectBegin`/`End` push/pop a matrix.
+- At each `OPS.paintImageXObject` / `paintInlineImageXObject` / `paintImageMaskXObject`, the current CTM maps
+  the unit square [0,1]² to device space → bounding box → convert to a `PdfRect` (viewport scale 1, via the
+  coordinate module). Return `{ pageIndex, rect }[]`.
+- Note in code: clipped/masked/tiled images return their bounding rect (fine for tap-to-replace); nested form
+  XObjects are handled through the formXObject matrix.
+
+**Step 4 — Draw-a-region interaction**  *(Commit B)*
+A pointer-drag on the page overlay → a live rectangle → a `PdfRect` (through the coordinate transform). Used by
+**Add**. No constraints — any page, any position/size (blank space or over content).
+
+**Step 5 — Overlay UI → `src/components/ImageOverlay.tsx` (+ wire in `OverlayLayer`, toolbar)**  *(Commit B)*
+Both actions read a user file (`<input type="file" accept="image/png,image/jpeg">` → `ArrayBuffer` →
+`Uint8Array`, validate the PNG/JPEG magic):
+- **Replace** — detected image rects render as tappable frames in edit mode. Tap → file picker → emit a
+  **`CoverEdit`**(sampleBackground) over the old rect **+** an **`ImageEdit`**(file bytes) fitted into that
+  **same rect** (aspect-preserving, centered). Layout unchanged.
+- **Add** — a toolbar **"Add image"** button → draw a box (Step 4) → file picker → an **`ImageEdit`** fitted
+  into the box. The just-added frame can be dragged/resized before confirm (it's the user's file → re-placing
+  is free and full-quality). Overlay on top; text does not reflow.
+- On-screen preview: render the chosen image as an `<img>` (object URL from the bytes) at the edit rect;
+  `HoldToPeek` hides it like any overlay.
+- **Aspect-fit helper:** read the file's natural pixel size (an `Image` / `createImageBitmap`), fit the
+  largest rect inside the target box preserving ratio → that's `ImageEdit.rect` (no stretching).
+
+**Key decisions & edge cases**
+- **Core actions** — **Replace** (needs an existing image) and **Add** (anywhere), both embedding the user's
+  original file bytes ⇒ **no quality loss**. Extended by **Delete** (Task 16A) and **Crop** (Task 16B) below.
+  *(Deleting/cropping an image the user **added** is trivial — we hold its bytes; doing either to an image
+  **already in the PDF** is where the real work is — see 16B's note.)*
+- **Formats:** PNG + JPEG only (pdf-lib's embeds). Reject anything else with a clear message.
+- **Enlarging** a file beyond its own pixels is inherently soft — expected, not a bug.
+- Detection is **only** to make existing images tappable for Replace — it never limits Add.
+
+**Verify**
+- Unit: `detectImages` finds the sample's image rects (right count / plausible rects); `isPng`/`isJpg` sniff
+  correctly; aspect-fit math.
+- Harness: the Step-2 image scenario stays green (Commit A).
+- **Browser:** *(Replace)* tap an existing image → pick a file → swaps in at the same box, export holds;
+  *(Add)* draw a box in blank space on an image-free page → pick a file → it appears, export holds; peek hides
+  both; re-open the exported PDF → images present and crisp.
+
+**Commit strategy:** **Commit A** = `handlers/image.ts` real body + `ImageEdit` payload + harness image
+scenario (export-seam). **Commit B** = `lib/pdf/images.ts` + `ImageOverlay.tsx` + wiring (feature). Task 17
+then reuses this for its "swap an image" acceptance → `Phase 3 ✓`.
+
+### Task 16A — Delete an image (sub-task of 16)  ✅
+**Goal:** remove an image — one the user **added**, or one **already in the PDF**.
+**Deliverables:**
+- **Added image** → `removeEdit(id)` (the store already supports it); the overlay drops it, nothing left
+  behind.
+- **Existing image** → emit a single **`CoverEdit`**(`sampleBackground`) over its rect — a background-coloured
+  patch hides it. Sample the fill from just **outside** the image so it blends with the page (sampling inside
+  would pick up the image's own edge colour).
+- **UI:** a small **trash / ×** control on each image frame in image mode — on the amber Replace frames
+  (existing) and on committed **added** images (make them selectable in image mode).
+**Depends on:** Task 16. *(Composes the existing `cover` kind + store removal — **no export-seam change**.)*
+**Done when:** delete an added image → it's gone; delete an existing image → it's covered by the page
+background and stays gone through export; peek still reveals the untouched original.
+
+### Task 16B — Crop an image (sub-task of 16)  ✅
+**Goal:** keep only a chosen part of an image — for a user-**added** image *or* one **already in the PDF**.
+**UI:** select an image → drag a **crop rectangle** inside it → Confirm.
+**Deliverables:**
+- **Added image (we hold the file):** crop the bytes on a canvas (`createImageBitmap` → draw the crop region
+  → `canvas.toBlob` PNG/JPEG) → `ImageEdit.bytes` becomes the cropped image, placed at the crop rectangle.
+  **Full quality** (from the original file). No export-seam change — the handler still just draws bytes at a
+  rect.
+- **Existing image (needs its pixels):** "pick up" the image — capture its pixels by **re-rendering just its
+  region at high oversampling** (pragmatic default) → crop → embed the cropped bytes at the crop rect **+** a
+  `CoverEdit` over the original.
+**Depends on:** Task 16. *(Feature-side — no export handler change.)*
+**⚠ Honest note (important):** capturing an **existing** image's pixels is the *same* work we deferred for
+**resize-existing**. So if we build crop-for-existing, **resize / move existing images come almost for free**
+from the same "pick up the image" step — decide them together. Two caveats of the region-re-render route: it
+**bakes the page background behind a transparent image** (a logo picks up a white box), and quality is capped
+at the oversample scale. The heavier alternative (extract the original image bytes via PDF.js) preserves
+transparency and native resolution but carries the encoding / mask / CMYK edge-case tail.
+**Scope suggestion:** ship **crop-added first** (easy, full quality); treat **crop-existing** as its own step,
+bundled with a resize/move-existing decision.
+**Done when:** crop an added image → only the selected part shows, full quality; crop an existing image → only
+the selected part remains (rest covered); export holds.
 
 ### Task 17 — Table column resize  🔲
 **Goal:** widen a column via manual guides.
@@ -1600,7 +1869,11 @@ Composes existing `text` + `cover` kinds only — no export-path change.
 
 ---
 
-## Translate & Meaning
+## Explain in your language (voice) & Meaning
+
+> Indian-language output is **spoken**, never written into the PDF. `translate`/`explain` generate the
+> content; the Voice phase speaks it in the user's preferred language. (Path A / in-document Indic was cut —
+> see the removed section above.)
 
 ### Task 18 — Provider layer + failover skeleton  🔲
 **Goal:** the one interface with deterministic failover.
@@ -1612,7 +1885,8 @@ Composes existing `text` + `cover` kinds only — no export-path change.
 **Goal:** working translation and plain-language "Meaning".
 **Deliverables:** `SarvamProvider.translate()` (Mayura, `api.sarvam.ai/translate`),
 `AnthropicProvider.translate()/explain()` (fallback).
-**Depends on:** Task 18.
+**Depends on:** Task 18. *(Output feeds the spoken explanation (Task 21) and voice discussion (Task 24) —
+it is never rendered back into the document.)*
 
 ### Task 20 — Settings panel + key storage  🔲
 **Goal:** dev-only key entry with the personal-use warning.
@@ -1620,12 +1894,17 @@ Composes existing `text` + `cover` kinds only — no export-path change.
 only"). Prod uses no client keys (Task 28).
 **Depends on:** Task 18.
 
-### Task 21 — Translate/Meaning popover + in-place translate  🔲
-**Goal:** replace a block with its translation in place.
-**Deliverables:** enable **Translate**/**Meaning** in `TapPopover`; in-place mode emits
-`TextEdit`(Indic→Path A) + `CoverEdit`; `prefsStore` persists preferred language.
-**Depends on:** Task 13, Task 19.
-**Done when:** tap an English paragraph → Hindi in place → exports correctly → commit `Phase 4 ✓`.
+### Task 21 — Explain-in-your-language popover (voice; document unchanged)  🔲
+**Goal:** tap a block → **hear** it explained/translated in your preferred language. The English text in the
+PDF is left **unchanged** — nothing is rewritten or baked into the file.
+**Deliverables:** a **Listen / Explain** action in `TapPopover` (replaces the old in-place Translate);
+pipeline = provider `explain`/`translate` (Task 19) → `speak` (Task 23 TTS) in the preferred language;
+`prefsStore` persists the preferred language; optional on-screen transcript of what is spoken (native web
+font — **not** an `Edit`). **No `TextEdit`, no `CoverEdit`, no Path A — this touches no export-seam.**
+**Depends on:** Task 19 (explain/translate) + Task 23 (speak/TTS) + Task 11 (popover). *(Its spoken output
+needs TTS, so it finalizes alongside the Voice phase.)*
+**Done when:** tap an English paragraph → it is spoken back, explained in Hindi/Tamil (preferred language);
+the document is unchanged; commit `Phase 4 ✓`.
 
 ### Task 21A — Entity spans: places / names / events (AI · Phase 4)  🔲
 **Goal:** underline **meaningful** places/names/events (not junk words) and offer Search/Maps/Meaning on them
