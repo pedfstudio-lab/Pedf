@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-09
-**Current position:** Task 11D free-text placement is complete and Phase 3 image work remains green through Task 16B (detect, replace, add, delete, and crop). Task 17 table-column resize is next; Phase 1's real-device PDF acceptance and final phase commits remain pending.
+**Last updated:** 2026-08-11
+**Current position:** Tasks 18 and 20 are complete: the provider seam, deterministic Sarvam → Browser failover, dev-key settings, and persisted preferred language are ready. Phase 3 image work remains green through Task 16B; Task 17 (table columns) is cut. Pending: `Phase 1 ✓` / `Phase 3 ✓` commits and real-device PDF acceptance; next voice step is Task 22.
 **Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
@@ -16,9 +16,9 @@
 ---
 
 ## Product in one line
-Open any PDF in the browser; tap to edit text, manipulate images, widen table columns, or
-**hear any part explained aloud in your language** (Hindi / Tamil / …) and discuss the document
-by voice — layout never shifts; download a clean (English) PDF.
+Open any PDF in the browser; tap to edit text, add text anywhere, add / replace / delete / crop images, or
+**ask about it by voice and hear answers in your language** (Hindi / Tamil / …) — layout never shifts;
+download a clean (English) PDF.
 
 ## Locked decisions
 - [x] Language: **TypeScript** (strict)
@@ -121,7 +121,7 @@ tap → hear it explained in your language; the exported PDF stays English.
 
 _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · Indic harness · the `Phase 2 ✓` gate._
 
-## Phase 3 — Images + table column resize (features 2, 3)  ⏳ IN PROGRESS
+## Phase 3 — Images: add · replace · delete · crop (feature 2)  ⏳ IN PROGRESS
 - [x] `lib/pdf/images.ts` — CTM-aware `getOperatorList()` image rectangles; GOA fixture counts verified across all 16 pages
 - [x] Task 15B detection precision — painted-canvas colour richness + text signals keep real photos/logos and remove flat text cards; rasterized GOA review screenshots use a dominant-background/text-edge fallback
 - [x] Replace and add PNG/JPG with aspect-fit previews and direct original-byte embedding
@@ -132,30 +132,31 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [x] Browser verification on GOA 2026: original-image delete/crop and committed-image crop/delete; Peek and export remain enabled
 - [x] Task 15B browser verification on GOA 2026: page 9 review frames 9 → 0; page 8 retains all 10 destination-photo frames; browser console clean
 - [x] Unit/build verification: 23 files / 145 tests, typecheck, lint, and production build green
-- [ ] `components/TableTool.tsx` — draw region, place vertical guides, drag guide
-- [ ] Guide drag: shift runs (x > guide) as text+cover; redraw ruling lines as thin colored covers
-- [ ] Acceptance: swap an image + widen one table column; layout holds
+- ❌ ~~Table column resize~~ — **CUT (2026-08-07):** users align tables before sharing (need is rare/self-inflicted); most manual + fiddliest feature; 11D "Add text anywhere" covers the workaround. Recoverable design kept in TASKS.md Task 17.
+- [ ] Acceptance: add / replace / delete / crop an image (+ Add-text-anywhere) export cleanly and hold layout
 - [ ] **Commit `Phase 3 ✓`**
 
-## Phase 4 — Explain in your language (voice) + Meaning + entity spans  ⬜ NOT STARTED
-- [ ] `providers/` — `translate()` / `explain()` (Sarvam Mayura + Anthropic fallback) — generate the spoken content
-- [ ] `providers/index.ts` failover Sarvam → Anthropic → Browser (silent, logged)
-- [ ] `BhashiniProvider` stub (TODO, non-blocking)
-- [ ] `providers/keys.ts` + `SettingsPanel.tsx` — dev-only localStorage keys + "personal use only" warning
-- [ ] TapPopover: **Listen / Explain** — tap a block → hear it in the preferred language; **PDF unchanged** (no in-place rewrite, no Path A)
-- [ ] `prefsStore` — preferred language persisted
-- [ ] (Task 21A) AI place/name/event spans → Search / Maps / Meaning
-- [ ] Acceptance: tap English para → **spoken** explanation in Hindi/Tamil; document unchanged
+## Phase 4 — Talk to your PDF: grounded multilingual voice bot  ⬜ NOT STARTED
+> Ask anything about the PDF → answered **grounded in the document, in your chosen language**, then spoken. Build **brain → mouth → ears**. **Sarvam-only.** Translation is **parked** (the bot answers in-language directly).
+- [x] Task 18 provider infrastructure — stable `LanguageProvider` facade; capability-aware `SarvamProvider` + `BrowserProvider` shells; deterministic, silent, logged **Sarvam → Browser** failover; direct/proxy config with no embedded key
+- [x] Task 18 verification — unsupported methods are skipped, first success wins in order, failures aggregate clearly, and the attempt ring buffer records each hop; 24 test files / 152 tests, lint, typecheck, and production build green
+- [x] Task 20 settings — guarded, namespaced dev Sarvam-key storage; persisted supported-language preference; Settings modal with masked set/not-set key state and prominent personal-use warning
+- [x] Task 20 browser verification — Hindi and key status survive close/reopen and full reload; Clear restores not-set without exposing the value; production shows the language picker and server-managed-key note only
+- [x] Task 20 verification — 26 test files / 159 tests, lint, typecheck, and production build green
+- [ ] Task 22 — aggregate `getTextContent()` across pages (with page markers) as the grounding source
+- [ ] **Stage 1 (brain):** `SarvamProvider.discuss({question, documentText, language})` (Sarvam-M) — answer **only** from the doc, in the chosen language; absent → "not in the document" in that language. `components/PdfChat.tsx` (type → answer, language picker)
+- [ ] **Stage 2 (mouth):** `SarvamProvider.speak()` (Bulbul) + `BrowserProvider.speak` (speechSynthesis) → answers play aloud (▶/⏸/⏹)
+- [ ] **Stage 3 (ears):** `SarvamProvider.transcribe()` (Saarika) + `BrowserProvider` (Web Speech) + `components/VoiceButton.tsx` — mic → transcribe → discuss → speak
+- [ ] (optional) Task 21A — AI place/name/event spans → Search / Maps / Meaning (independent reader add-on)
+- [ ] Acceptance: ask "what's the check-in time?" → grounded answer; switch to Hindi → same answer in Hindi; ask by voice → spoken Hindi answer
 - [ ] **Commit `Phase 4 ✓`**
+- ⏸️ **Parked — Translation** ("tap → hear this paragraph translated"): `translate`/`explain` + Listen/Explain popover. Not needed for the core; recoverable (see TASKS.md "Set aside — Translation").
 
-## Phase 5 — Voice discussion (feature 5) + PWA share-target  ⬜ NOT STARTED
-- [ ] `SarvamProvider.speak()` (Bulbul TTS — also powers the per-block **Explain** in Task 21), `.transcribe()` (Saarika ASR, Hinglish)
-- [ ] `AnthropicProvider.discuss()` — document-grounded; else "document mein nahin hai."
-- [ ] `BrowserProvider` — speechSynthesis TTS + Web Speech API ASR
-- [ ] `components/VoiceButton.tsx` — mic → transcribe → discuss → show + speak
+## Phase 5 — PWA + Web Share Target  ⬜ NOT STARTED
+> (Voice moved up into Phase 4.) Make it installable and shareable-to.
 - [ ] PWA via `vite-plugin-pwa` (injectManifest): manifest + `share_target` (POST, multipart, application/pdf)
 - [ ] Custom service worker: intercept share POST → stash PDF → app loads it
-- [ ] Acceptance: share PDF from WhatsApp → ask by voice → grounded spoken answer
+- [ ] Acceptance: share a PDF from WhatsApp → it opens in the app (→ ask by voice → grounded spoken answer)
 - [ ] **Commit `Phase 5 ✓`**
 
 ## Phase 6 — Deploy (Cloudflare Pages + Worker proxy)  ⬜ NOT STARTED

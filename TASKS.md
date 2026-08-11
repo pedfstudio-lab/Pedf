@@ -1617,6 +1617,19 @@ the `TextEdit` — metadata only, the export handler ignores it, so it stays fea
 **Commit:** feature-side (toolbar mode + placement UI + cover-less builder + re-edit path). **No export-seam
 change** — the `text` handler already draws `TextEdit`s.
 
+### Task 11E — Remove the placeholder "Translate / Meaning" buttons from `TapPopover`  🔲
+**Goal:** the tap menu shows only actions that **work** — no "coming soon" teasers for unbuilt/parked features.
+**Why:** `components/TapPopover.tsx` currently renders **disabled** `Translate` and `Meaning` buttons with the
+tooltip *"Available in the translation update."* Translation is now **parked**, so this advertises a feature
+we've deprioritised. Don't tease unbuilt features in the UI — surface an action only once it works.
+**Deliverables:** delete the two disabled buttons (and their divider) from `TapPopover.tsx` → the block menu
+becomes **Edit only**. Nothing functional is touched (they were disabled); no test depends on them.
+**Depends on:** none — safe cleanup, do anytime.
+**Done when:** tapping a block shows a clean menu with just **Edit**; no greyed-out buttons or "translation
+update" tooltip; typecheck / lint green.
+**Later:** when the voice bot ships (Phase 4), add a *working* **"🔊 Ask / Listen"** item to this same menu —
+we only ever surface an action once its feature exists.
+
 ---
 
 ## ~~Indic pipeline (Path A)~~ — ❌ REMOVED FROM SCOPE (2026-08-05)
@@ -1640,7 +1653,7 @@ the `public/fonts/` plan.
 
 ---
 
-## Images & tables
+## Images (add · replace · delete · crop)
 
 ### Task 15 — Image targets: detect existing images + draw a region  ✅
 **Goal:** know where the two actions can happen — the rects of any **existing** images (so they're tappable
@@ -1819,8 +1832,8 @@ Both actions read a user file (`<input type="file" accept="image/png,image/jpeg"
   both; re-open the exported PDF → images present and crisp.
 
 **Commit strategy:** **Commit A** = `handlers/image.ts` real body + `ImageEdit` payload + harness image
-scenario (export-seam). **Commit B** = `lib/pdf/images.ts` + `ImageOverlay.tsx` + wiring (feature). Task 17
-then reuses this for its "swap an image" acceptance → `Phase 3 ✓`.
+scenario (export-seam). **Commit B** = `lib/pdf/images.ts` + `ImageOverlay.tsx` + wiring (feature). The image
+add / replace / delete / crop acceptance now folds into the **Phase 3** gate (tables were cut — see Task 17).
 
 ### Task 16A — Delete an image (sub-task of 16)  ✅
 **Goal:** remove an image — one the user **added**, or one **already in the PDF**.
@@ -1859,52 +1872,168 @@ bundled with a resize/move-existing decision.
 **Done when:** crop an added image → only the selected part shows, full quality; crop an existing image → only
 the selected part remains (rest covered); export holds.
 
-### Task 17 — Table column resize  🔲
-**Goal:** widen a column via manual guides.
-**Deliverables:** `components/TableTool.tsx` (draw region, place vertical guides, drag guide); guide
-drag shifts runs with x > guide (text + cover), and redraws ruling lines as thin colored covers.
-Composes existing `text` + `cover` kinds only — no export-path change.
-**Depends on:** Task 10.
-**Done when:** swap an image + widen one table column; export holds → commit `Phase 3 ✓`.
+### Task 17 — Table column resize  ❌ PARKED / CUT FROM SCOPE (2026-08-07)
+> **Cut, not built.** Reasoning: users **align their tables before sharing**, so the source is almost always
+> fine — the "overlapping columns" / "uneven columns" cases barely occur; the only real case ("I edited a cell
+> and it got too long") is self-inflicted and uncommon, and **Task 11D (Add text anywhere)** already gives a
+> rough workaround. It's also the most **manual + fiddliest** feature (draw a region, hand-place every guide),
+> for low value on a light reader/editor — same call we made on Path A and image-baked-text editing.
+> **Recoverable:** the design (manual vertical guides → shift runs with `x > guide` as text+cover, redraw
+> ruling lines as thin covers, composing existing `text`+`cover` only) is preserved here if we ever revive it.
+
+**Phase 3 gate (replaces the old table acceptance):** with tables cut, **Phase 3 closes on the image
+feature** — add / replace / delete / crop images (+ text-aware detection) and **Add-text-anywhere (11D)** all
+export cleanly and hold layout → commit `Phase 3 ✓`.
 
 ---
 
-## Explain in your language (voice) & Meaning
+## Talk to your PDF — grounded multilingual voice bot (Phase 4)
 
-> Indian-language output is **spoken**, never written into the PDF. `translate`/`explain` generate the
-> content; the Voice phase speaks it in the user's preferred language. (Path A / in-document Indic was cut —
-> see the removed section above.)
+> **The feature:** a bot you can **ask anything about the PDF** (the whole doc, or a page) that answers
+> **grounded only in the document**, **in your chosen language** (English / Hindi / Tamil / …). **No separate
+> "translate the PDF" step** — the AI reads the English text and **answers in your language directly**, then
+> speaks it.
+>
+> **Build order — brain → mouth → ears** (early testable milestone): **Stage 1** type a question → grounded
+> answer in your language (text). **Stage 2** speak the answer (TTS). **Stage 3** ask by voice (mic → STT) →
+> full spoken loop.
+>
+> **Providers — Sarvam-only:** **Saarika** (speech-in) · **Sarvam-M** (grounded multilingual answer) ·
+> **Bulbul** (speech-out); **Browser Web Speech** = free offline fallback. One API key. *(Claude is an optional
+> drop-in for the answer step.)*
+>
+> **Task map / order:** infra **18 + 20** → grounding **22** → Stage 1 brain **24** → Stage 2 mouth **23 (TTS)**
+> → Stage 3 ears **23 (ASR) + 25**. **21A** (entity spans) is an independent optional reader add-on.
+> Translation (**19, 21**) is **parked** — see "Set aside — Translation" at the end of this phase.
+>
+> **Privacy:** this is the **one** place document text leaves the device (asked text → AI provider, via the prod
+> proxy in Task 28). Editing stays 100% local.
 
-### Task 18 — Provider layer + failover skeleton  🔲
-**Goal:** the one interface with deterministic failover.
-**Deliverables:** `providers/index.ts` (Sarvam → Anthropic → Browser, silent + logged),
-`BhashiniProvider` stub.
+### Task 18 — Provider layer + failover skeleton  ✅
+**Goal:** the one seam all AI I/O passes through, with deterministic failover.
+**Deliverables:** `providers/index.ts` implementing the `LanguageProvider` seam (already stubbed in
+`lib/providers/types.ts`) — a **`SarvamProvider`** shell + a **`BrowserProvider`**, with a fixed **Sarvam →
+Browser** failover (Claude optional), silent + logged.
 **Depends on:** Task 5.
 
-### Task 19 — Sarvam + Anthropic translate/explain  🔲
-**Goal:** working translation and plain-language "Meaning".
-**Deliverables:** `SarvamProvider.translate()` (Mayura, `api.sarvam.ai/translate`),
-`AnthropicProvider.translate()/explain()` (fallback).
-**Depends on:** Task 18. *(Output feeds the spoken explanation (Task 21) and voice discussion (Task 24) —
-it is never rendered back into the document.)*
+#### Workflow
 
-### Task 20 — Settings panel + key storage  🔲
-**Goal:** dev-only key entry with the personal-use warning.
-**Deliverables:** `providers/keys.ts`, `components/SettingsPanel.tsx` (localStorage, "personal use
-only"). Prod uses no client keys (Task 28).
+**What this task is (and isn't).** Pure infrastructure — the provider **seam + a deterministic failover
+wrapper + empty provider shells**. **No real API calls yet** (Sarvam bodies land in Tasks 23/24), **no key UI**
+(Task 20), **no chat UI** (Task 24). It builds the scaffolding so later tasks fill in `discuss` / `speak` /
+`transcribe` **without touching the failover logic**. The `LanguageProvider` interface already exists in
+`lib/providers/types.ts` — this task wraps it.
+
+**Step 1 — Env + config → `src/lib/providers/config.ts`**
+Pick the base URL by build env: **dev** = call providers directly (key from the Task 20 settings panel /
+localStorage); **prod** = route everything through the **Cloudflare Worker proxy** (Task 28), no client key.
+```ts
+export const providerConfig = {
+  mode: import.meta.env.PROD ? 'proxy' : 'direct',
+  sarvamBaseUrl: import.meta.env.PROD ? '/api/sarvam' : 'https://api.sarvam.ai',
+  getSarvamKey: () => '' /* dev: localStorage (Task 20); prod: '' — the proxy holds it */,
+};
+```
+
+**Step 2 — Provider shells → `src/lib/providers/sarvam.ts`, `browser.ts`**
+Two classes implementing `LanguageProvider` (from `types.ts`), **method bodies stubbed** for now:
+- `SarvamProvider` — holds config; `discuss` / `speak` / `transcribe` throw `NotImplementedError` (filled in
+  Tasks 23/24). Supports all methods.
+- `BrowserProvider` — supports **`speak`** (speechSynthesis) and **`transcribe`** (Web Speech) only; **does not
+  support `discuss`** (no on-device LLM).
+Each provider exposes `supports(method)` (or throws a typed `NotSupportedError`) so the chain can skip it.
+
+**Step 3 — The failover chain → `src/lib/providers/index.ts`**
+`createProviderChain(providers)` returns an object with the **same `LanguageProvider` methods**; each call
+tries providers **in order**, **skipping ones that don't support the method** and **falling through on error**,
+returning the first success. Fixed order:
+- `discuss`: **Sarvam-M** (→ Anthropic if configured). *(No browser fallback — the browser can't do grounded
+  Q&A.)*
+- `speak`: **Sarvam Bulbul → Browser speechSynthesis**.
+- `transcribe`: **Sarvam Saarika → Browser Web Speech**.
+Only if **every** provider in a chain fails/opts out does the call throw. **Silent to the user; logged.**
+
+**Step 4 — Logging → `src/lib/providers/log.ts`**
+A tiny logger recording each attempt (`{ provider, method, ok, ms, error? }`) to the console in dev (and a ring
+buffer for a future debug view). Failover is **never** surfaced to the user unless the whole chain fails.
+
+**Step 5 — Default chain**
+Export `defaultProviders()` = `[SarvamProvider, BrowserProvider]` built from `providerConfig`. This single
+object is what the chat (Task 24), speak (Task 23), and mic (Task 25) will call.
+
+**Key decisions & edge cases**
+- **Capability-aware failover:** providers declare what they support; the chain **skips** unsupported methods
+  (so `discuss` never "falls back" to the browser).
+- **Deterministic + silent:** fixed order, no user-facing provider choice; every hop logged.
+- **No secrets in code:** the key accessor is stubbed here, filled by Task 20 (dev) / the proxy (prod) — never
+  hardcode a key.
+- **Interface unchanged:** the chain *is* a `LanguageProvider`, so callers don't know or care about failover.
+
+**Tests** (`providers/index.test.ts`, node)
+- Fake providers: first throws → second succeeds → chain returns second's result and logs both hops.
+- All providers fail/unsupported → chain throws a clear aggregate error.
+- Unsupported method is **skipped**, not an error (Browser `discuss` → skipped).
+- Order respected (first supporting + succeeding provider wins).
+
+**Commit:** infrastructure (provider seam + failover + shells + tests). **No feature, no export-seam, no UI.**
+
+### Task 19 — Sarvam Mayura translate / explain  ⏸️ PARKED
+**Not in the main path** — the bot answers in-language directly, so a separate translate step isn't needed for
+the core. Full design in **"Set aside — Translation"** at the end of this phase; enable later for a one-tap
+reader action.
+
+### Task 20 — Settings + Sarvam key + preferred language  ✅
+**Goal:** dev key entry **and the user's preferred language**, with the personal-use warning.
+**Deliverables:** `providers/keys.ts`, **`state/prefsStore.tsx`** (preferred language, persisted),
+`components/SettingsPanel.tsx` (localStorage Sarvam key + "personal use only"). Prod ships **no** client key —
+calls route through the Worker proxy (Task 28).
 **Depends on:** Task 18.
 
-### Task 21 — Explain-in-your-language popover (voice; document unchanged)  🔲
-**Goal:** tap a block → **hear** it explained/translated in your preferred language. The English text in the
-PDF is left **unchanged** — nothing is rewritten or baked into the file.
-**Deliverables:** a **Listen / Explain** action in `TapPopover` (replaces the old in-place Translate);
-pipeline = provider `explain`/`translate` (Task 19) → `speak` (Task 23 TTS) in the preferred language;
-`prefsStore` persists the preferred language; optional on-screen transcript of what is spoken (native web
-font — **not** an `Edit`). **No `TextEdit`, no `CoverEdit`, no Path A — this touches no export-seam.**
-**Depends on:** Task 19 (explain/translate) + Task 23 (speak/TTS) + Task 11 (popover). *(Its spoken output
-needs TTS, so it finalizes alongside the Voice phase.)*
-**Done when:** tap an English paragraph → it is spoken back, explained in Hindi/Tamil (preferred language);
-the document is unchanged; commit `Phase 4 ✓`.
+#### Workflow
+
+**What this task is (and isn't).** A small **settings surface + a saved preferences store + dev key storage**.
+It fills the two blanks Task 18 left: the **Sarvam key** (so `config.getSarvamKey()` returns something in dev)
+and the **preferred language** (what the bot answers in). **No API calls** (Tasks 23/24), **no chat** (Task 24).
+
+**Step 1 — Dev key storage → `src/lib/providers/keys.ts`**
+`getSarvamKey()` / `setSarvamKey(key)` / `clearSarvamKey()` backed by `localStorage` under a namespaced key
+(`desipdf.sarvamKey`). Browser-guarded (return `''` when there's no `window`). **Never logged.** Then **wire it
+into `config.ts`**: in `direct` (dev) mode `getSarvamKey` delegates here; in `proxy` (prod) mode it stays `''`
+(the Worker holds the key).
+
+**Step 2 — Preferred-language store → `src/state/prefsStore.tsx`**
+A context store like `documentStore` / `editsStore`: holds `preferredLanguage` (BCP-47, e.g. `hi-IN`),
+persisted to `localStorage` (`desipdf.prefs`) and restored on load. Hook `usePrefs()` → `{ preferredLanguage,
+setPreferredLanguage }`. Export `SUPPORTED_LANGUAGES` (`en-IN` English, `hi-IN` हिन्दी, `ta-IN` தமிழ், …).
+Default = a supported match for `navigator.language`, else `en-IN`. Wrap the app in `PrefsStoreProvider`.
+
+**Step 3 — Settings panel → `src/components/SettingsPanel.tsx` (+ a Toolbar gear button)**
+A modal / drawer opened from a **Settings (⚙)** button in the `Toolbar`, with two sections:
+- **Preferred language** — a `<select>` bound to `usePrefs()` (shown always, dev *and* prod).
+- **Sarvam API key** *(dev only — `import.meta.env.DEV`)* — a password-type input + **Save** / **Clear** via
+  `keys.ts`; show **"set / not set"**, never the value; a prominent **"personal use only"** warning ("stored in
+  this browser; production keeps keys on the server"). In prod this section is replaced by a one-line "keys are
+  handled by the server" note.
+
+**Key decisions & edge cases**
+- **Key hygiene:** namespaced `localStorage`, password field, show only **set/not set**, never log the value;
+  key entry is **dev-only** (prod uses the proxy).
+- **Language everywhere:** the picker is available in prod too (it's a preference, not a secret).
+- **Guards:** all `localStorage` access is `window`-guarded so node / SSR returns defaults.
+- **No calls:** storage + UI only — the key and language are *consumed* later by Tasks 23/24.
+
+**Tests** (node, with a `localStorage` stub)
+- `keys.ts`: set → get round-trips; `clear` empties; unset / no-window → `''`.
+- `prefsStore` persistence: default resolves to a supported language; `setPreferredLanguage` persists and a
+  reload restores it.
+
+**Commit:** feature-side (settings UI + prefs store + dev key storage; wires the Task 18 config key stub).
+No export-seam, no AI calls.
+
+### Task 21 — Explain-in-your-language popover  ⏸️ PARKED
+**Not in the main path** — the bot already covers this on request ("read me the 2nd paragraph in Tamil"). The
+one-tap **Listen/Explain** action (tap a block → translate → `speak`) is kept in **"Set aside — Translation"**
+at the end of this phase; enable later if wanted. Touches no export-seam.
 
 ### Task 21A — Entity spans: places / names / events (AI · Phase 4)  🔲
 **Goal:** underline **meaningful** places/names/events (not junk words) and offer Search/Maps/Meaning on them
@@ -1914,35 +2043,66 @@ the document is unchanged; commit `Phase 4 ✓`.
 'place'|'person'|'org'|'event', pageIndex, rect }[]`, mapped back to Task 8 run positions; render them in the
 **`SmartSpanLayer`** built in Task 11A (underline); tap menu → **Search Google** / **Open in Maps** (places)
 / **Meaning** (AI `explain`). Detect **once per document** (cached) to bound cost/latency.
-**Depends on:** Task 18 (provider layer) + Task 19 (AI wired) + Task 11A (span layer).
+**Depends on:** Task 18 (provider layer) + Task 24 (AI wired) + Task 11A (span layer). *(Independent optional
+reader add-on — not required for the voice bot.)*
 **Done when:** "Bali" / "Mount Batur" are underlined and tap → Search/Maps that entity; ordinary words like
 "I'm" / "activity" are **not** underlined or offered an action.
 
 ---
 
-## Voice discussion
+#### The bot — stage by stage
 
-### Task 22 — Document text extraction  🔲
-**Goal:** the grounding source for discussion.
-**Deliverables:** aggregate `getTextContent()` across pages into a single document-text string.
-**Depends on:** Task 2.
+### Task 22 — Document text as the grounding source  🔲
+**Goal:** the text the bot reasons over.
+**Deliverables:** aggregate `getTextContent()` across pages into one document-text string (reuse the Task 8
+extraction), with **page markers** so the bot can answer "on page N". Cache per document.
+**Depends on:** Task 2 / Task 8.
 
-### Task 23 — Speech providers  🔲
-**Goal:** TTS + ASR with offline fallback.
-**Deliverables:** `SarvamProvider.speak()` (Bulbul), `.transcribe()` (Saarika, Hinglish),
-`BrowserProvider` (speechSynthesis + Web Speech API).
+#### Stage 1 — the brain (build & test this first)
+
+### Task 24 — Grounded, multilingual answer + chat UI  🔲
+**Goal:** answer a question **only** from the document, **in the user's chosen language** — text first, no voice.
+**Deliverables:** `SarvamProvider.discuss({ question, documentText, language })` (Sarvam-M; Claude optional
+fallback) → `{ answer, grounded }`. Prompt discipline: **use only the document text**; answer in `language`;
+if the info isn't present, say so **in that language** (Hindi *"yeh document mein nahin hai"*); never invent.
+**UI:** `components/PdfChat.tsx` — type a question → see the answer, with a **language picker** (`prefsStore`).
+**Depends on:** Task 18, Task 20 (language), Task 22 (doc text).
+**Done when (Stage-1 milestone):** *"what's the check-in time?"* → correct answer from the PDF; switch to
+Hindi → same answer in Hindi; ask something absent → "not in the document" in that language.
+
+#### Stage 2 — the mouth (speak the answer)
+
+### Task 23 — Speech: TTS (now) + ASR (for Stage 3)  🔲
+**Goal:** turn the answer into audio (and prepare to hear the question).
+**Deliverables:** `SarvamProvider.speak({ text, language })` (Bulbul) + `BrowserProvider.speak`
+(speechSynthesis fallback) → wire into `PdfChat` so each answer **plays aloud** (▶/⏸/⏹). Also
+`SarvamProvider.transcribe({ audio, language })` (Saarika, Hinglish) + `BrowserProvider` (Web Speech
+`SpeechRecognition`), used in Stage 3.
 **Depends on:** Task 18.
+**Done when (Stage-2 milestone):** a Stage-1 answer is **spoken** in the chosen language; browser TTS works
+with no key.
 
-### Task 24 — Grounded discuss()  🔲
-**Goal:** answers strictly from the document.
-**Deliverables:** `AnthropicProvider.discuss()` — document text as sole source; absent info →
-"document mein nahin hai."
-**Depends on:** Task 22.
+#### Stage 3 — the ears (ask by voice → full loop)
 
-### Task 25 — Voice button flow  🔲
-**Goal:** end-to-end mic → answer → speech.
-**Deliverables:** `components/VoiceButton.tsx` (transcribe → discuss → show + speak).
+### Task 25 — Voice loop (mic → answer → speech)  🔲
+**Goal:** the end-to-end spoken conversation.
+**Deliverables:** `components/VoiceButton.tsx` — press mic → `transcribe` (spoken question) → `discuss`
+(grounded, in-language) → show transcript → `speak`. Handle mic permission, listening state, errors.
 **Depends on:** Task 23, Task 24.
+**Done when:** speak *"tell me about the Goa trip in Hindi"* → grounded Hindi answer spoken back → commit
+`Phase 4 ✓`.
+
+---
+
+## Set aside — Translation ("tap → hear this exact paragraph translated")  ⏸️ PARKED
+
+> **Why parked:** the voice bot answers **in your language** already, so a separate translate pipeline isn't
+> needed for the core. Kept here (recoverable) for a possible later **one-tap reader** action.
+> - **Parked Task 19 — Sarvam Mayura translate / Claude explain:** literal translation / plain-language
+>   "Meaning" of a selected chunk. *(The bot can already do this on request.)*
+> - **Parked Task 21 — Explain-in-your-language popover:** a **Listen/Explain** action in `TapPopover` —
+>   translate the tapped block → `speak` it (Task 23). Enable if/when we want the one-tap reader; no
+>   export-seam change.
 
 ---
 

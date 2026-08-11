@@ -8,8 +8,8 @@ the system, its invariants, and its hard parts.*
 ## 1. System Overview & Core Promise
 
 DesiPDF is a **100% client-side, browser-based PDF editor** with an Indian-language reader layer.
-It lets a user open any PDF and edit text, manipulate images, widen table columns, translate runs
-into Indian languages, or discuss the document by voice — then download a clean PDF.
+It lets a user open any PDF and edit text, add text anywhere, manipulate images, or **ask about the
+document by voice and hear answers in their own language** — then download a clean PDF.
 
 **The core promise is a single sentence: _layout never shifts._**
 
@@ -27,7 +27,7 @@ they download is the real document with those same edits drawn into it at identi
 
 **Trust & deployment model.** There is no backend for document handling, no database, no accounts.
 The PDF never leaves the device for rendering, editing, or export. The *only* data that crosses the
-network is text/audio sent to AI providers for translation and voice discussion, and that traffic is
+network is text/audio sent to AI providers for the voice bot (grounded Q&A answered in the user's language), and that traffic is
 funnelled through one narrow seam (the Provider Layer). The app ships as an installable PWA.
 
 ---
@@ -61,12 +61,12 @@ flowchart TB
     COORD["Coordinate Transform<br/>screen ⇄ viewport ⇄ PDF pts"]
     EXP["Export Engine<br/>pdf-lib patch onto original bytes"]
     STORE["State Stores<br/>document / edits / prefs"]
-    PROV["Provider Layer<br/>translate·explain·speak·transcribe·discuss"]
+    PROV["Provider Layer<br/>discuss·speak·transcribe (+translate)"]
     PWA["PWA Layer<br/>manifest · SW · share-target"]
   end
   subgraph Ext["External (only via Provider Layer)"]
-    SARVAM["Sarvam (Mayura/Bulbul/Saarika)"]
-    ANTH["Anthropic (fallback + discuss)"]
+    SARVAM["Sarvam (Sarvam-M/Bulbul/Saarika)"]
+    ANTH["Anthropic (optional answer engine)"]
     BROWSERAPI["Browser speech APIs"]
     PROXY["Cloudflare Worker proxy (prod)"]
   end
@@ -122,13 +122,14 @@ runs to image patches — cut from scope: non-selectable, memory-heavy, delicate
 support is **spoken**: the Provider Layer explains/translates a tapped block and speaks it in the user's
 preferred language (§6, §7). No fonts are bundled; nothing Indic is embedded in the exported PDF.
 
-### 3.7 Provider Layer (with voice discussion)
-One interface — `translate`, `explain`, `speak`, `transcribe`, `discuss` — behind which live
-concrete providers: **Sarvam** (primary: Mayura translation, Bulbul TTS, Saarika ASR incl.
-code-mixed Hinglish), **Anthropic** (translation/explanation fallback and the engine for
-document-grounded voice discussion), and **Browser** (offline `speechSynthesis` / Web Speech API).
-A **Bhashini** provider exists as a stub. The layer applies a fixed, silent, logged failover order.
-Voice discussion is a *composition* of this interface: `transcribe` → `discuss` → `speak`.
+### 3.7 Provider Layer (the grounded multilingual voice bot)
+One interface — `discuss`, `speak`, `transcribe` (plus optional, parked `translate` / `explain`) — behind
+which live concrete providers: **Sarvam** (primary: **Sarvam-M** for the grounded multilingual answer,
+**Bulbul** TTS, **Saarika** ASR incl. code-mixed Hinglish), **Browser** (offline `speechSynthesis` / Web
+Speech API fallback), and **Anthropic** (optional drop-in for the answer step). The layer applies a fixed,
+silent, logged failover order (**Sarvam → Browser**). The core feature is a *composition*: `transcribe` (your
+spoken question) → `discuss` (answer **grounded in the document, in your chosen language**) → `speak`.
+Translation as a separate reader action is **parked** (§7).
 
 ### 3.8 PWA Layer
 A manifest, a service worker, and a **Web Share Target** so the installed app appears in Android's
@@ -173,22 +174,23 @@ The pivotal detail: the **pristine copy is never given to PDF.js** (which detach
 receives) and is the **only** thing pdf-lib ever loads. Rendering and exporting read from two
 independent copies of the same original bytes.
 
-### 4.2 Voice Discussion
+### 4.2 Talk to your PDF (grounded, multilingual voice)
 
 ```mermaid
 flowchart LR
   MIC["Mic capture"] --> TR["transcribe()<br/>Saarika / Web Speech"]
   DOC["Document text<br/>(aggregated getTextContent across pages)"] --> Q
   TR --> Q["question + document context"]
-  Q --> D["discuss()<br/>Anthropic, grounded"]
+  Q --> D["discuss()<br/>Sarvam-M · grounded · in your language"]
   D --> ANS["answer text"]
   ANS --> UI["shown on screen"]
   ANS --> SP["speak()<br/>Bulbul / speechSynthesis"]
 ```
 
-The discussion is **grounded strictly in the open document**. The extracted document text is the only
-knowledge source supplied to `discuss()`; if the answer is not present in the document, the system
-says so explicitly ("document mein nahin hai") rather than answering from world knowledge.
+The discussion is **grounded strictly in the open document**, and the answer comes back **in the user's chosen
+language** (English / Hindi / Tamil / …). The extracted document text is the only knowledge source supplied to
+`discuss()`; if the answer is not present in the document, the system says so explicitly **in that language**
+("document mein nahin hai") rather than answering from world knowledge.
 
 ---
 
@@ -201,10 +203,8 @@ shifts" a structural guarantee rather than a discipline.
 ```mermaid
 flowchart LR
   subgraph Produce["Feature side (many)"]
-    T["Text edit"] --> E
-    I["Image edit"] --> E
-    TB["Table resize"] --> E
-    TL["In-place translate"] --> E
+    T["Text edit / Add text"] --> E
+    I["Image edit (add/replace/delete/crop)"] --> E
   end
   E["Edit[]  (PDF points)"] --> R{"HANDLERS[edit.kind]<br/>mapped type over Edit['kind']"}
   R --> H1["drawText"]
@@ -253,8 +253,9 @@ Complex scripts (Devanagari, Tamil) need shaping that pdf-lib's `drawText` can't
 image patches was **cut** (non-selectable output, heavy memory, delicate placement — and not the goal).
 Instead:
 
-- **Tap a block → hear it in your language.** The Provider Layer `explain`/`translate`s the block and
-  `speak`s the result in the user's preferred language (§7). The document itself is never rewritten.
+- **Ask the document → hear the answer in your language.** The Provider Layer `discuss`es your question
+  **grounded in the document** and `speak`s the answer in your chosen language (§7); the document itself is
+  never rewritten. *(One-tap translate-a-block is an optional, parked reader action.)*
 - **On-screen rendering, if shown, is native.** The browser renders Devanagari/Tamil directly — no bundled
   fonts, no rasterization.
 - **The exported PDF stays English.** Editing produces English text edits only; the Indic export path is
@@ -265,17 +266,19 @@ kind without disturbing the rest — but it is explicitly out of scope now.)
 
 ---
 
-## 7. Provider Layer & Voice Discussion (detail)
+## 7. Provider Layer & the Voice Bot (detail)
 
 The Provider Layer is the app's entire external attack/dependency surface, deliberately reduced to
-one interface with five verbs. Concrete providers are interchangeable behind it, and a fixed
-**failover order (Sarvam → Anthropic → Browser)** is applied per call, silently, with logging.
+one interface. Concrete providers are interchangeable behind it, and a fixed **failover order
+(Sarvam → Browser; Anthropic optional)** is applied per call, silently, with logging.
 
-- **Translation / Meaning** use `translate` / `explain`; the result is **spoken** in the user's preferred
-  language (and may be shown as an on-screen transcript). It is **not** written back into the document.
-- **Voice discussion** composes `transcribe` → `discuss` → `speak`. Its defining property is
-  **grounding**: the model is given the document's extracted text as its sole source and instructed
-  to answer only from it.
+- **The core is the grounded, multilingual bot:** `transcribe` (spoken question) → `discuss` → `speak`. Its
+  defining property is **grounding** — the model gets the document's extracted text as its **sole** source, is
+  told to answer **only** from it, and to reply **in the user's chosen language** (English / Hindi / Tamil / …);
+  if the answer isn't in the document it says so in that language rather than inventing. **Sarvam-M** is the
+  primary answer engine (Anthropic Claude optional).
+- **Translation as a separate reader action is parked** (`translate` / `explain` of a tapped block, spoken).
+  Not needed for the core — the bot answers in-language directly — kept as an optional one-tap reader.
 - **Secret handling is environment-split.** In development, keys may live in a local settings panel
   (localStorage, "personal use only"). In production, **no key is present in the client** — every
   provider call is routed to a Cloudflare Worker proxy that holds the secrets server-side and applies
@@ -311,8 +314,9 @@ These are non-negotiable properties the system maintains at all times:
   exported document is English. The Indian-language experience is voice (§6).
 - **Cover/background color is sampled from the locked raster** (dominant/mode color), not from the
   DOM or the PDF's color model.
-- **Voice answers are document-grounded.** `discuss()` answers only from the extracted document text;
-  absent information yields an explicit "not in the document" response, never a hallucinated answer.
+- **Voice answers are document-grounded and in the user's language.** `discuss()` answers only from the
+  extracted document text, in the user's chosen language; absent information yields an explicit "not in the
+  document" response (in that language), never a hallucinated answer.
 - **Failover is fixed, silent, and logged** (Sarvam → Anthropic → Browser).
 - **No client-side secrets in production.** Keys exist only in the dev settings panel; production
   routes all AI calls through the Worker proxy, and the shipped bundle contains no key.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
+import { SettingsPanel } from './components/SettingsPanel';
 import { PdfViewer } from './components/PdfViewer';
 import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
@@ -8,6 +9,7 @@ import { sampleDominantColor } from './lib/export/colorSample';
 import type { PdfRect, Rgb } from './lib/export/types';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
+import { PrefsStoreProvider } from './state/prefsStore';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
 const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/GOA%202026.pdf`;
@@ -22,6 +24,7 @@ function EditorApp() {
   const [imageMode, setImageMode] = useState(false);
   const [peek, setPeek] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
 
@@ -159,9 +162,11 @@ function EditorApp() {
             setTextAddMode(false);
           }
         }}
+        onOpenSettings={() => setSettingsOpen(true)}
         onPeekChange={setPeek}
         onExport={() => void handleExport()}
       />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <main className="flex-1 overflow-auto">
         {error && (
           <div className="m-4 rounded bg-red-100 p-3 text-sm text-red-800">{error}</div>
@@ -214,10 +219,12 @@ function EditorApp() {
 
 export default function App() {
   return (
-    <DocumentStoreProvider>
-      <EditsStoreProvider>
-        <EditorApp />
-      </EditsStoreProvider>
-    </DocumentStoreProvider>
+    <PrefsStoreProvider>
+      <DocumentStoreProvider>
+        <EditsStoreProvider>
+          <EditorApp />
+        </EditsStoreProvider>
+      </DocumentStoreProvider>
+    </PrefsStoreProvider>
   );
 }
