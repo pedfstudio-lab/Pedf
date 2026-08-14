@@ -2260,15 +2260,189 @@ clearly labeled.`**
 
 #### Stage 2 — the mouth (speak the answer)
 
-### Task 23 — Speech: TTS (now) + ASR (for Stage 3)  🔲
-**Goal:** turn the answer into audio (and prepare to hear the question).
-**Deliverables:** `SarvamProvider.speak({ text, language })` (Bulbul) + `BrowserProvider.speak`
-(speechSynthesis fallback) → wire into `PdfChat` so each answer **plays aloud** (▶/⏸/⏹). Also
-`SarvamProvider.transcribe({ audio, language })` (Saarika, Hinglish) + `BrowserProvider` (Web Speech
-`SpeechRecognition`), used in Stage 3.
-**Depends on:** Task 18.
-**Done when (Stage-2 milestone):** a Stage-1 answer is **spoken** in the chosen language; browser TTS works
-with no key.
+### Task 23 — Speech output: speak the answer aloud (TTS · the mouth)  ⏳
+**Goal:** after the brain writes an answer, let the user **hear** it — in the same language — with a play/stop
+control. Sarvam's Bulbul voice when a key is present; the browser's built-in voice as a free fallback.
+**Deliverables:** `SarvamProvider.speak({ text, language, voice? })` → a real audio `Blob` (Bulbul TTS); a
+**▶/⏹ speak control** on each answer in `PdfChat`; a browser `speechSynthesis` fallback when Sarvam can't be
+reached (no key / error / unsupported language).
+**Depends on:** Task 18 (provider seam), Task 24 (chat UI + answers to speak), Task 20 (language).
+**Scope note:** **TTS only.** ASR / `transcribe` (the mic) moves entirely to **Task 25** — the
+`transcribe(audio: Blob)` seam fits Sarvam STT but *not* the browser's live-mic Web Speech API, so it is cleaner
+to build the mic and its transcription together with the loop.
+**Done when (Stage-2 milestone):** ask a question → an answer appears → press ▶ → you **hear it** in the chosen
+language; with **no key**, the browser voice still reads it aloud.
+
+#### Workflow
+
+**What this task is (and isn't).** **Stage 2 — the mouth.** It gives the existing text answers a voice. No mic,
+no transcription, no new reasoning — just answer text → audio → play. Reuses the provider seam (Task 18) and the
+chat (Task 24). **No export-seam.**
+
+**Confirmed against Sarvam docs (2026-08-14):**
+- `POST https://api.sarvam.ai/text-to-speech`, header `api-subscription-key` (same auth as chat; see
+  [[sarvam-chat-model]] in memory).
+- Body `{ text, target_language_code, model, speaker? }` — the required field is **`target_language_code`**
+  (a BCP-47 code like `en-IN` / `hi-IN` / `ta-IN`). `model: 'bulbul:v3'` (latest, 30+ voices,
+  default speaker `shubh`, ≤2500 chars) or `'bulbul:v2'` (legacy, default `anushka`, ≤1500).
+- Response `{ audios: ['<base64 WAV>'] }` — audio is **base64-encoded WAV** in `audios[0]`.
+- TTS languages: bn, en, gu, hi, kn, ml, mr, od, pa, ta, te (all `-IN`). *(A `SUPPORTED_LANGUAGES` code outside
+  this set → Sarvam 4xx → the Step-3 browser fallback covers it.)*
+
+**Step 1 — Sarvam TTS → `SarvamProvider.speak()` in `src/lib/providers/sarvam.ts`**
+Replace the `NotImplementedError` stub. Add module consts:
+```ts
+const TTS_MODEL = 'bulbul:v3';   // latest; if the account returns an invalid/deprecated-model error, use 'bulbul:v2'
+const TTS_MAX_CHARS = 2500;      // v3 limit (1500 for v2)
+```
+```ts
+async speak({ text, language, voice }: SpeakInput): Promise<SpeakResult> {
+  const key = this.config.getSarvamKey().trim();
+  if (this.config.mode === 'direct' && key === '') {
+    throw new Error('Add your Sarvam API key in Settings before playing audio.');
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (key !== '') headers['api-subscription-key'] = key;
+
+  const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/text-to-speech'), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      text: text.slice(0, TTS_MAX_CHARS),
+      target_language_code: language,
+      model: TTS_MODEL,
+      ...(voice ? { speaker: voice } : {}),   // omit → Sarvam's model default (shubh on v3)
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Sarvam TTS failed (${response.status}): ${await readErrorMessage(response)}`);
+  }
+  const payload = await response.json() as { audios?: readonly string[] };
+  const base64 = payload.audios?.[0];
+  if (typeof base64 !== 'string' || base64 === '') throw new Error('Sarvam returned no audio.');
+  return { audio: new Blob([base64ToBytes(base64)], { type: 'audio/wav' }), provider: this.name };
+}
+```
+Add a pure, exported helper `base64ToBytes(b64: string): Uint8Array` (`atob` → an explicitly allocated
+`Uint8Array`, populated with each character code) so it's unit-testable. Reuse the existing `joinUrl` /
+`readErrorMessage`.
+
+**Step 2 — Make the browser fallback play-only (NOT through the Blob seam)**
+`speechSynthesis` plays directly and yields **no** audio data, so it can't return `SpeakResult { audio: Blob }`.
+Decision: **remove `'speak'` from `BROWSER_METHODS`** in `browser.ts` (leave `BrowserProvider.speak()` throwing
+`NotSupportedError`). The `speak` seam becomes **Sarvam-only** (one clean data path); the browser voice is a
+UI-level fallback in Step 3. *(Browser keeps `'transcribe'` for Task 25.)*
+
+**Step 3 — Play helper → `src/lib/speech/speakAnswer.ts`** (returns a `stop()` closure)
+```ts
+import { defaultProviders } from '@/lib/providers';
+
+export async function speakAnswer(text: string, language: string): Promise<() => void> {
+  try {
+    const { audio } = await defaultProviders().speak({ text, language });
+    const url = URL.createObjectURL(audio);
+    const el = new Audio(url);
+    void el.play();
+    el.addEventListener('ended', () => URL.revokeObjectURL(url));
+    return () => { el.pause(); URL.revokeObjectURL(url); };
+  } catch {
+    return speakWithBrowser(text, language);   // free fallback, no key needed
+  }
+}
+
+function speakWithBrowser(text: string, language: string): () => void {
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = language;
+  const match = window.speechSynthesis.getVoices().find((v) => v.lang === language);
+  if (match) utterance.voice = match;
+  window.speechSynthesis.speak(utterance);
+  return () => window.speechSynthesis.cancel();
+}
+```
+
+**Step 4 — Wire ▶/⏹ into `PdfChat.tsx`**
+- Store the answer's **language on the `ChatEntry`** when created (`language?: string`, set from `preferredLanguage`)
+  so replay uses the right voice even if the picker changes later.
+- Add a small **speak button** to each assistant bubble: ▶ when idle, ⏹ while *that* message plays. Track
+  `playingId` + the current `stop()` fn in state.
+- Click ▶ → stop any current playback, then
+  `const stop = await speakAnswer(entry.text, entry.language ?? preferredLanguage)` → record it as playing;
+  on `ended` / ⏹ / drawer close / unmount → call `stop()` and clear.
+- **No key ≠ dead button:** don't gate ▶ on the key — if Sarvam fails, `speakAnswer` already falls back to the
+  browser voice, so ▶ always does something.
+
+**Step 5 — CORS / proxy (same as chat)**
+Direct browser → `api.sarvam.ai` already works for chat, so TTS should too; confirm on the first real call. In
+prod (`proxy` mode) the path becomes `/api/sarvam/text-to-speech` — the Worker (Task 28) forwards it + injects
+the key.
+
+**Key decisions & edge cases**
+- **Two voices, one control:** Sarvam Bulbul when reachable; browser voice as a free fallback — ▶ never
+  dead-ends.
+- **Language travels with the answer** (stored on the entry), not read live from the picker.
+- **Cost:** Sarvam TTS ≈ ₹3 / 1000 chars; answers are short and playback is **user-initiated** (a button, not
+  auto-play) to avoid surprise spend. **No auto-speak** in this task.
+- **Model deprecation guard:** we just got bitten by a deprecated chat model — so if the first live TTS call
+  returns an invalid/deprecated-model error, switch `TTS_MODEL` → `'bulbul:v2'` (one line), same as the chat fix.
+- **Unsupported TTS language** → Sarvam 4xx → browser fallback speaks it.
+- Security unchanged: key stays in Settings, read via `config.getSarvamKey()`.
+
+**Tests**
+- `base64ToBytes` (pure): a known base64 string → the exact byte array.
+- `SarvamProvider.speak()` with **mocked `fetch`**: POSTs to `…/text-to-speech`; body carries `target_language_code`,
+  `model: 'bulbul:v3'`, and `speaker` only when `voice` is passed; sends the `api-subscription-key` header; a
+  `{ audios: ['<base64>'] }` reply → a non-empty `audio/wav` Blob; empty key (direct) → throws with **no** fetch;
+  HTTP error / empty `audios` → throws; proxy mode omits the key header.
+- *(The `<audio>` / `speechSynthesis` playback path is verified live — jsdom has no audio.)*
+
+**Verify (live):** ask → ▶ on the answer → hear it in English; switch language, re-ask, ▶ → hear it in
+Hindi/Tamil; clear the key → ▶ still reads it via the browser voice.
+
+**Commit:** the mouth — feature-side (`speak` provider + `base64ToBytes` + play helper + chat control). No
+export-seam; no mic.
+
+### Task 23A — Don't read the `[Page N]` citations aloud (sub-task of 23)  ⏳
+**Goal:** the read-aloud voice should **skip the `[Page N]` citation markers** — they must stay **visible** in the
+chat bubble but not be **spoken** (hearing *"open-bracket Page 3 close-bracket"* mid-sentence sounds broken).
+**Why:** live testing (2026-08-14) — a Day-2 answer was read aloud including *"[Page 3]"* and *"[Page 5]"* out
+loud. Keep them on screen (they're useful), just don't voice them.
+**Depends on:** Task 23 (TTS + `speakAnswer`, already built).
+
+**The one idea:** strip the markers from the text **only on its way to the voice**; never touch the displayed
+`entry.text`. Because both voices (Sarvam + browser fallback) go through `speakAnswer`, cleaning the string at
+the **call site** covers both.
+
+**Step 1 — Pure helper → `src/lib/speech/stripPageMarkers.ts`**
+```ts
+/** Remove [Page N] citation markers for speech; the on-screen text keeps them. */
+export function stripPageMarkers(text: string): string {
+  return text.replace(/\[Page[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+```
+Matches `[Page 3]`, `[Page 10]`, `[Page 3, 5]`, `[Pages 3-5]`; collapses the double spaces left behind; trims.
+
+**Step 2 — Apply at the read-aloud call site → `src/components/PdfChat.tsx`**
+Where the ▶ handler calls the play helper, pass the cleaned text:
+`speakAnswer(stripPageMarkers(entry.text), entry.language ?? preferredLanguage)`.
+**Do NOT** change how the bubble renders `entry.text` — citations stay visible. Keep `speakAnswer` itself
+generic (don't bake the citation format into the speech util).
+
+**Key decisions**
+- **Display untouched:** only the TTS input is cleaned; `entry.text`, the `grounded` flag, and citations on
+  screen are all unchanged.
+- Covers **both** voices (one call site feeds Sarvam and the browser fallback).
+
+**Tests** — `stripPageMarkers` (pure):
+- `'…is: [Page 3] Kick things off'` → `'…is: Kick things off'`
+- `'[Page 5] Additionally, after breakfast'` → `'Additionally, after breakfast'`
+- `'[Page 3] and [Page 5] both'` → `'and both'`
+- `'no markers here'` → `'no markers here'` (unchanged)
+
+**Verify (live):** ask about Day 2 → the bubble still shows `[Page 3]` / `[Page 5]`, but ▶ reads the sentences
+**without** speaking the page numbers.
+
+**Commit:** small speech-polish sub-task (marker-stripping helper + call-site wiring). No export-seam.
 
 #### Stage 3 — the ears (ask by voice → full loop)
 

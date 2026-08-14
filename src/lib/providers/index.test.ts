@@ -159,18 +159,17 @@ describe('createProviderChain', () => {
   it('builds the fixed Sarvam-to-Browser default chain', async () => {
     const promise = defaultProviders().speak({ text: 'hello', language: 'en-IN' });
 
-    await expect(promise).rejects.toThrow('All 2 supporting providers failed for speak');
+    await expect(promise).rejects.toThrow('All 1 supporting provider failed for speak');
     expect(getProviderLog()).toMatchObject([
       { provider: 'Sarvam', method: 'speak', ok: false },
-      { provider: 'Browser', method: 'speak', ok: false },
     ]);
   });
 });
 
 describe('BrowserProvider capabilities', () => {
-  it('supports only speech output and transcription', () => {
+  it('supports only transcription through the Blob-returning provider seam', () => {
     const browser = new BrowserProvider();
-    expect(browser.supports('speak')).toBe(true);
+    expect(browser.supports('speak')).toBe(false);
     expect(browser.supports('transcribe')).toBe(true);
     expect(browser.supports('translate')).toBe(false);
     expect(browser.supports('explain')).toBe(false);

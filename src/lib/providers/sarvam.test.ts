@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderConfig } from './config';
 import { NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
-import { SarvamProvider } from './sarvam';
+import { base64ToBytes, SarvamProvider } from './sarvam';
 
 const input = {
   question: 'What time is check-in?',
@@ -118,6 +118,105 @@ describe('SarvamProvider.discuss', () => {
       grounded: true,
     });
     const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(init?.headers).not.toHaveProperty('api-subscription-key');
+  });
+});
+
+describe('SarvamProvider.speak', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('decodes base64 into the exact bytes', () => {
+    expect([...base64ToBytes('AAEC/w==')]).toEqual([0, 1, 2, 255]);
+  });
+
+  it('requests Bulbul v3 audio with the configured key and documented language field', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ audios: ['AAEC/w=='] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new SarvamProvider(directConfig()).speak({
+      text: 'नमस्ते',
+      language: 'hi-IN',
+      voice: 'priya',
+    });
+
+    expect(result.provider).toBe('Sarvam');
+    expect(result.audio.type).toBe('audio/wav');
+    expect([...new Uint8Array(await result.audio.arrayBuffer())]).toEqual([0, 1, 2, 255]);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.sarvam.ai/text-to-speech');
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'api-subscription-key': 'configured-test-key',
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      text: 'नमस्ते',
+      target_language_code: 'hi-IN',
+      model: 'bulbul:v3',
+      speaker: 'priya',
+    });
+  });
+
+  it('clips v3 input to 2500 characters and omits an unspecified speaker', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ audios: ['AA=='] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new SarvamProvider(directConfig()).speak({
+      text: 'a'.repeat(2600),
+      language: 'en-IN',
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const request = JSON.parse(String(init?.body)) as { text: string; speaker?: string };
+    expect(request.text).toHaveLength(2500);
+    expect(request).not.toHaveProperty('speaker');
+  });
+
+  it('rejects an empty direct-mode key without making a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new SarvamProvider(directConfig('')).speak({
+      text: 'Hello',
+      language: 'en-IN',
+    })).rejects.toThrow('Add your Sarvam API key in Settings before playing audio');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces HTTP failures and an empty audio response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      error: { message: 'Unsupported language' },
+    }, 422)));
+    await expect(new SarvamProvider(directConfig()).speak({
+      text: 'Hello',
+      language: 'en-IN',
+    })).rejects.toThrow('Sarvam TTS failed (422): Unsupported language');
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ audios: [] })));
+    await expect(new SarvamProvider(directConfig()).speak({
+      text: 'Hello',
+      language: 'en-IN',
+    })).rejects.toThrow('Sarvam returned no audio');
+  });
+
+  it('leaves authentication to the production proxy', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ audios: ['AA=='] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const config: ProviderConfig = {
+      mode: 'proxy',
+      sarvamBaseUrl: '/api/sarvam',
+      getSarvamKey: () => 'must-not-leave-the-browser',
+    };
+
+    await new SarvamProvider(config).speak({ text: 'Hello', language: 'en-IN' });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('/api/sarvam/text-to-speech');
     expect(init?.headers).not.toHaveProperty('api-subscription-key');
   });
 });

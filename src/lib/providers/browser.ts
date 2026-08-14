@@ -11,9 +11,9 @@ import type {
   TranslateInput,
 } from './types';
 
-const BROWSER_METHODS = new Set<ProviderMethod>(['speak', 'transcribe']);
+const BROWSER_METHODS = new Set<ProviderMethod>(['transcribe']);
 
-/** Browser speech shell; Task 23 fills the speechSynthesis and Web Speech bodies. */
+/** Browser transcription shell; direct speech playback stays at the UI layer. */
 export class BrowserProvider implements ProviderWithCapabilities {
   readonly name = 'Browser';
 
@@ -33,7 +33,7 @@ export class BrowserProvider implements ProviderWithCapabilities {
 
   async speak(input: SpeakInput): Promise<SpeakResult> {
     void input;
-    throw new NotImplementedError(this.name, 'speak');
+    throw new NotSupportedError(this.name, 'speak');
   }
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {

@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentText } from '@/lib/pdf/documentText';
 import { defaultProviders } from '@/lib/providers';
 import { getSarvamKey } from '@/lib/providers/keys';
+import { speakAnswer } from '@/lib/speech/speakAnswer';
+import type { StopSpeech } from '@/lib/speech/speakAnswer';
+import { stripPageMarkers } from '@/lib/speech/stripPageMarkers';
 import {
   SUPPORTED_LANGUAGES,
   usePrefs,
@@ -22,6 +25,7 @@ interface ChatEntry {
   readonly role: 'user' | 'assistant';
   readonly text: string;
   readonly grounded?: boolean;
+  readonly language?: string;
 }
 
 function readableError(error: unknown): string {
@@ -38,16 +42,37 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const [question, setQuestion] = useState('');
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<number | null>(null);
   const nextId = useRef(0);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
+  const playback = useRef<{ readonly id: number; readonly stop: StopSpeech } | null>(null);
+  const playbackRequest = useRef(0);
   const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
 
+  const stopPlayback = useCallback(() => {
+    playbackRequest.current += 1;
+    playback.current?.stop();
+    playback.current = null;
+    setPlayingId(null);
+  }, []);
+
   useEffect(() => {
+    stopPlayback();
     setEntries([]);
     setQuestion('');
     setError(null);
     setThinking(false);
-  }, [doc]);
+  }, [doc, stopPlayback]);
+
+  useEffect(() => {
+    if (!open) stopPlayback();
+  }, [open, stopPlayback]);
+
+  useEffect(() => () => {
+    playbackRequest.current += 1;
+    playback.current?.stop();
+    playback.current = null;
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +88,41 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   }, [entries, open, thinking]);
 
   if (!open) return null;
+
+  const togglePlayback = async (entry: ChatEntry) => {
+    if (playingId === entry.id) {
+      stopPlayback();
+      return;
+    }
+
+    stopPlayback();
+    const request = playbackRequest.current;
+    setPlayingId(entry.id);
+    setError(null);
+
+    try {
+      const stop = await speakAnswer(
+        stripPageMarkers(entry.text),
+        entry.language ?? preferredLanguage,
+        () => {
+          if (playbackRequest.current !== request) return;
+          playbackRequest.current += 1;
+          playback.current = null;
+          setPlayingId(null);
+        },
+      );
+      if (playbackRequest.current !== request) {
+        stop();
+        return;
+      }
+      playback.current = { id: entry.id, stop };
+    } catch (caught) {
+      if (playbackRequest.current !== request) return;
+      playbackRequest.current += 1;
+      setPlayingId(null);
+      setError(`Speech playback is unavailable: ${readableError(caught)}`);
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -92,6 +152,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         role: 'assistant',
         text: result.answer,
         grounded: result.grounded,
+        language: preferredLanguage,
       }]);
     } catch (caught) {
       setError(readableError(caught));
@@ -155,10 +216,23 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               className={`max-w-[90%] rounded-xl px-4 py-3 text-sm ${entry.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'border border-neutral-200 bg-neutral-50 text-neutral-800'}`}
             >
               <p className="whitespace-pre-wrap">{entry.text}</p>
-              {entry.role === 'assistant' && entry.grounded === false && (
-                <span className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
-                  General info — not from this PDF
-                </span>
+              {entry.role === 'assistant' && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void togglePlayback(entry)}
+                    aria-label={playingId === entry.id ? 'Stop reading answer aloud' : 'Read answer aloud'}
+                    className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-neutral-700 hover:border-blue-400 hover:text-blue-700"
+                  >
+                    <span aria-hidden="true">{playingId === entry.id ? '⏹' : '▶'}</span>
+                    {playingId === entry.id ? 'Stop' : 'Read aloud'}
+                  </button>
+                  {entry.grounded === false && (
+                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                      General info — not from this PDF
+                    </span>
+                  )}
+                </div>
               )}
             </article>
           ))}

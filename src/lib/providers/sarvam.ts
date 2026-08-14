@@ -23,12 +23,27 @@ const SARVAM_METHODS = new Set<ProviderMethod>([
 ]);
 
 const CHAT_MODEL = 'sarvam-105b-conversations';
+const TTS_MODEL = 'bulbul:v3';
+const TTS_MAX_CHARS = 2500;
 
 interface SarvamChatResponse {
   readonly choices?: readonly {
     readonly message?: { readonly content?: unknown };
   }[];
   readonly error?: { readonly message?: unknown };
+}
+
+interface SarvamTtsResponse {
+  readonly audios?: readonly unknown[];
+}
+
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const decoded = atob(base64);
+  const bytes = new Uint8Array(decoded.length);
+  for (let index = 0; index < decoded.length; index += 1) {
+    bytes[index] = decoded.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function joinUrl(base: string, path: string): string {
@@ -45,7 +60,7 @@ async function readErrorMessage(response: Response): Promise<string> {
   return response.statusText || 'request failed';
 }
 
-/** Sarvam API provider; speech and translation calls arrive in later tasks. */
+/** Sarvam API provider; translation and transcription arrive in later tasks. */
 export class SarvamProvider implements ProviderWithCapabilities {
   readonly name = 'Sarvam';
 
@@ -66,8 +81,41 @@ export class SarvamProvider implements ProviderWithCapabilities {
   }
 
   async speak(input: SpeakInput): Promise<SpeakResult> {
-    void input;
-    throw new NotImplementedError(this.name, 'speak');
+    // Security boundary: direct mode reads the key only through provider config.
+    const key = this.config.getSarvamKey().trim();
+    if (this.config.mode === 'direct' && key === '') {
+      throw new Error('Add your Sarvam API key in Settings before playing audio.');
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
+
+    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/text-to-speech'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        text: input.text.slice(0, TTS_MAX_CHARS),
+        target_language_code: input.language,
+        model: TTS_MODEL,
+        ...(input.voice ? { speaker: input.voice } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await readErrorMessage(response);
+      throw new Error(`Sarvam TTS failed (${response.status}): ${detail}`);
+    }
+
+    const payload = await response.json() as SarvamTtsResponse;
+    const encodedAudio = payload.audios?.[0];
+    if (typeof encodedAudio !== 'string' || encodedAudio === '') {
+      throw new Error('Sarvam returned no audio.');
+    }
+
+    return {
+      audio: new Blob([base64ToBytes(encodedAudio)], { type: 'audio/wav' }),
+      provider: this.name,
+    };
   }
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {

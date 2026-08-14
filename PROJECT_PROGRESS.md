@@ -152,7 +152,12 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [x] Task 24A implementation — three-mode prompt keeps PDF answers grounded and cited, lets small talk stay natural, and marks outside factual answers as general knowledge; the drawer subtitle and honesty badge explain the distinction
 - [x] Task 24A automated/UI verification — focused prompt/provider tests, 29 test files / 170 tests, typecheck, lint, production build, visible labels, and browser console are green
 - [ ] **Task 24A live acceptance:** with the key entered in this browser, verify “hi” and “would you like to join?” have no tag, a day-1 stay answer cites the PDF, and Goa weather is labeled “General info — not from this PDF”
-- [ ] **Stage 2 (mouth):** `SarvamProvider.speak()` (Bulbul) + `BrowserProvider.speak` (speechSynthesis) → answers play aloud (▶/⏸/⏹)
+- [x] **Task 23 implementation (mouth):** `SarvamProvider.speak()` calls Bulbul v3 with the documented `target_language_code`, decodes WAV bytes, and keeps direct-mode authentication behind `config.getSarvamKey()`; each answer has a race-safe ▶/⏹ control with browser `speechSynthesis` as the UI fallback
+- [x] Task 23 automated/UI verification — provider request/auth/error/byte tests, provider-audio cleanup and browser-fallback tests, 30 test files / 178 tests, typecheck, lint, production build, live drawer load, and browser console are green
+- [x] Task 23A implementation — `[Page …]` / `[Pages …]` citations remain visible in chat but are stripped only from the shared Sarvam/browser speech input
+- [x] Task 23A automated verification — marker/list/range/case tests, 31 test files / 183 tests, typecheck, lint, and production build are green
+- [ ] **Task 23A live acceptance:** replay a cited Day-2 answer and confirm its visible page citations are not spoken
+- [ ] **Task 23 live acceptance:** with an answer present, hear English and Hindi/Tamil playback; clear the key and confirm ▶ still reads the existing answer through the browser voice
 - [ ] **Stage 3 (ears):** `SarvamProvider.transcribe()` (Saarika) + `BrowserProvider` (Web Speech) + `components/VoiceButton.tsx` — mic → transcribe → discuss → speak
 - [ ] (optional) Task 21A — AI place/name/event spans → Search / Maps / Meaning (independent reader add-on)
 - [ ] Acceptance: ask "what's the check-in time?" → grounded answer; switch to Hindi → same answer in Hindi; ask by voice → spoken Hindi answer
@@ -194,4 +199,5 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 ## Dependencies / open items
 - [x] Sample PDF provided (`public/samples/GOA 2026.pdf`)
 - [ ] Sarvam + Anthropic API keys (needed from Phase 4)
-- [ ] Confirm Bulbul (TTS) / Saarika (ASR) request field shapes at docs.sarvam.ai (Phase 5)
+- [x] Confirm Bulbul v3 TTS request/response fields at docs.sarvam.ai (Task 23)
+- [ ] Confirm Saarika ASR request field shapes at docs.sarvam.ai (Task 25)
