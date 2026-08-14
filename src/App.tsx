@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
+import { PdfChat } from './components/PdfChat';
 import { PdfViewer } from './components/PdfViewer';
 import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
@@ -25,6 +26,7 @@ function EditorApp() {
   const [peek, setPeek] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
 
@@ -37,6 +39,7 @@ function EditorApp() {
       setEditMode(false);
       setTextAddMode(false);
       setImageMode(false);
+      setChatOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -162,11 +165,27 @@ function EditorApp() {
             setTextAddMode(false);
           }
         }}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenChat={() => {
+          setSettingsOpen(false);
+          setChatOpen(true);
+        }}
+        onOpenSettings={() => {
+          setChatOpen(false);
+          setSettingsOpen(true);
+        }}
         onPeekChange={setPeek}
         onExport={() => void handleExport()}
       />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PdfChat
+        open={chatOpen}
+        doc={document?.loaded.doc ?? null}
+        onClose={() => setChatOpen(false)}
+        onOpenSettings={() => {
+          setChatOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
       <main className="flex-1 overflow-auto">
         {error && (
           <div className="m-4 rounded bg-red-100 p-3 text-sm text-red-800">{error}</div>

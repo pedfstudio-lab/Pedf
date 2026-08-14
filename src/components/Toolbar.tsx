@@ -11,6 +11,7 @@ interface ToolbarProps {
   onEditModeChange(enabled: boolean): void;
   onTextAddModeChange(enabled: boolean): void;
   onImageModeChange(enabled: boolean): void;
+  onOpenChat(): void;
   onOpenSettings(): void;
   onPeekChange(peeking: boolean): void;
   onExport(): void;
@@ -27,6 +28,7 @@ export function Toolbar({
   onEditModeChange,
   onTextAddModeChange,
   onImageModeChange,
+  onOpenChat,
   onOpenSettings,
   onPeekChange,
   onExport,
@@ -68,6 +70,14 @@ export function Toolbar({
           Add image
         </button>
         <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />
+        <button
+          type="button"
+          onClick={onOpenChat}
+          disabled={!fileName}
+          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          💬 Ask
+        </button>
         <button
           type="button"
           onClick={onOpenSettings}

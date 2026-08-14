@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-11
-**Current position:** Tasks 18 and 20 are complete: the provider seam, deterministic Sarvam → Browser failover, dev-key settings, and persisted preferred language are ready. Phase 3 image work remains green through Task 16B; Task 17 (table columns) is cut. Pending: `Phase 1 ✓` / `Phase 3 ✓` commits and real-device PDF acceptance; next voice step is Task 22.
+**Last updated:** 2026-08-13
+**Current position:** Task 24's grounded multilingual text-chat implementation is complete and locally verified; live Sarvam acceptance awaits a user-entered browser key. Phase 3 image work remains green through Task 16B; Task 17 (table columns) is cut. Pending: `Phase 1 ✓` / `Phase 3 ✓` commits and real-device PDF acceptance.
 **Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
@@ -136,15 +136,22 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [ ] Acceptance: add / replace / delete / crop an image (+ Add-text-anywhere) export cleanly and hold layout
 - [ ] **Commit `Phase 3 ✓`**
 
-## Phase 4 — Talk to your PDF: grounded multilingual voice bot  ⬜ NOT STARTED
+## Phase 4 — Talk to your PDF: grounded multilingual voice bot  ⏳ IN PROGRESS
 > Ask anything about the PDF → answered **grounded in the document, in your chosen language**, then spoken. Build **brain → mouth → ears**. **Sarvam-only.** Translation is **parked** (the bot answers in-language directly).
 - [x] Task 18 provider infrastructure — stable `LanguageProvider` facade; capability-aware `SarvamProvider` + `BrowserProvider` shells; deterministic, silent, logged **Sarvam → Browser** failover; direct/proxy config with no embedded key
 - [x] Task 18 verification — unsupported methods are skipped, first success wins in order, failures aggregate clearly, and the attempt ring buffer records each hop; 24 test files / 152 tests, lint, typecheck, and production build green
 - [x] Task 20 settings — guarded, namespaced dev Sarvam-key storage; persisted supported-language preference; Settings modal with masked set/not-set key state and prominent personal-use warning
 - [x] Task 20 browser verification — Hindi and key status survive close/reopen and full reload; Clear restores not-set without exposing the value; production shows the language picker and server-managed-key note only
 - [x] Task 20 verification — 26 test files / 159 tests, lint, typecheck, and production build green
-- [ ] Task 22 — aggregate `getTextContent()` across pages (with page markers) as the grounding source
-- [ ] **Stage 1 (brain):** `SarvamProvider.discuss({question, documentText, language})` (Sarvam-M) — answer **only** from the doc, in the chosen language; absent → "not in the document" in that language. `components/PdfChat.tsx` (type → answer, language picker)
+- [x] Task 22 — cached, gap-aware `getTextContent()` aggregation across pages with `[Page N]` markers and a 50k-character context guard
+- [x] Task 22 verification — page order/real-fixture/known-text/truncation/cache tests; 27 test files / 163 tests, lint, typecheck, and production build green
+- [x] **Stage 1 implementation (brain):** `SarvamProvider.discuss({question, documentText, language})` uses the live-tested `sarvam-105b-conversations` model, marker-based grounding, and the key only from `config.getSarvamKey()`; `components/PdfChat.tsx` provides Ask, messages, language selection, thinking/error states, and missing-key guidance
+- [x] Task 24 CORS/security verification — key-free preflight permits direct localhost POST + auth/content headers; no dev proxy required; key-like-value scan clean; mocked request/grounding/error tests and browser UI/console checks green
+- [x] Task 24 automated verification — 29 test files / 170 tests, lint, typecheck, and production build green
+- [x] **Stage 1 live acceptance:** corrected the deprecated model during live testing; GOA itinerary questions now return real grounded answers through Sarvam
+- [x] Task 24A implementation — three-mode prompt keeps PDF answers grounded and cited, lets small talk stay natural, and marks outside factual answers as general knowledge; the drawer subtitle and honesty badge explain the distinction
+- [x] Task 24A automated/UI verification — focused prompt/provider tests, 29 test files / 170 tests, typecheck, lint, production build, visible labels, and browser console are green
+- [ ] **Task 24A live acceptance:** with the key entered in this browser, verify “hi” and “would you like to join?” have no tag, a day-1 stay answer cites the PDF, and Goa weather is labeled “General info — not from this PDF”
 - [ ] **Stage 2 (mouth):** `SarvamProvider.speak()` (Bulbul) + `BrowserProvider.speak` (speechSynthesis) → answers play aloud (▶/⏸/⏹)
 - [ ] **Stage 3 (ears):** `SarvamProvider.transcribe()` (Saarika) + `BrowserProvider` (Web Speech) + `components/VoiceButton.tsx` — mic → transcribe → discuss → speak
 - [ ] (optional) Task 21A — AI place/name/event spans → Search / Maps / Meaning (independent reader add-on)

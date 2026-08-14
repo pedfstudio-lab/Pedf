@@ -5,16 +5,16 @@ import type { ReactNode } from 'react';
 const PREFS_STORAGE = 'desipdf.prefs';
 
 export const SUPPORTED_LANGUAGES = [
-  { code: 'en-IN', label: 'English' },
-  { code: 'hi-IN', label: 'हिन्दी' },
-  { code: 'ta-IN', label: 'தமிழ்' },
-  { code: 'bn-IN', label: 'বাংলা' },
-  { code: 'te-IN', label: 'తెలుగు' },
-  { code: 'mr-IN', label: 'मराठी' },
-  { code: 'gu-IN', label: 'ગુજરાતી' },
-  { code: 'kn-IN', label: 'ಕನ್ನಡ' },
-  { code: 'ml-IN', label: 'മലയാളം' },
-  { code: 'pa-IN', label: 'ਪੰਜਾਬੀ' },
+  { code: 'en-IN', label: 'English', name: 'English' },
+  { code: 'hi-IN', label: 'हिन्दी', name: 'Hindi' },
+  { code: 'ta-IN', label: 'தமிழ்', name: 'Tamil' },
+  { code: 'bn-IN', label: 'বাংলা', name: 'Bengali' },
+  { code: 'te-IN', label: 'తెలుగు', name: 'Telugu' },
+  { code: 'mr-IN', label: 'मराठी', name: 'Marathi' },
+  { code: 'gu-IN', label: 'ગુજરાતી', name: 'Gujarati' },
+  { code: 'kn-IN', label: 'ಕನ್ನಡ', name: 'Kannada' },
+  { code: 'ml-IN', label: 'മലയാളം', name: 'Malayalam' },
+  { code: 'pa-IN', label: 'ਪੰਜਾਬੀ', name: 'Punjabi' },
 ] as const;
 
 export type SupportedLanguageCode = typeof SUPPORTED_LANGUAGES[number]['code'];
