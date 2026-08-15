@@ -157,10 +157,11 @@ describe('SarvamProvider.speak', () => {
       target_language_code: 'hi-IN',
       model: 'bulbul:v3',
       speaker: 'priya',
+      pace: 1.15,
     });
   });
 
-  it('clips v3 input to 2500 characters and omits an unspecified speaker', async () => {
+  it('clips v3 input to 2500 characters and uses the default Ritu voice + pace', async () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock.mockResolvedValue(jsonResponse({ audios: ['AA=='] }));
     vi.stubGlobal('fetch', fetchMock);
@@ -171,9 +172,10 @@ describe('SarvamProvider.speak', () => {
     });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    const request = JSON.parse(String(init?.body)) as { text: string; speaker?: string };
+    const request = JSON.parse(String(init?.body)) as { text: string; speaker?: string; pace?: number };
     expect(request.text).toHaveLength(2500);
-    expect(request).not.toHaveProperty('speaker');
+    expect(request.speaker).toBe('ritu');
+    expect(request.pace).toBe(1.15);
   });
 
   it('rejects an empty direct-mode key without making a request', async () => {
@@ -217,6 +219,92 @@ describe('SarvamProvider.speak', () => {
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe('/api/sarvam/text-to-speech');
+    expect(init?.headers).not.toHaveProperty('api-subscription-key');
+  });
+});
+
+describe('SarvamProvider.transcribe', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('uploads browser audio as multipart without overriding its content type', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ transcript: '  what are the dates?  ' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const audio = new Blob(['webm-audio'], { type: 'audio/webm;codecs=opus' });
+
+    await expect(new SarvamProvider(directConfig()).transcribe({ audio })).resolves.toEqual({
+      text: 'what are the dates?',
+      provider: 'Sarvam',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.sarvam.ai/speech-to-text');
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toEqual({ 'api-subscription-key': 'configured-test-key' });
+    expect(init?.headers).not.toHaveProperty('Content-Type');
+    const form = init?.body as FormData;
+    const file = form.get('file') as File;
+    expect(file.name).toBe('question.webm');
+    expect(file.type).toBe('audio/webm;codecs=opus');
+    expect(file.size).toBe(audio.size);
+    expect(form.get('language_code')).toBeNull();
+    expect(form.get('model')).toBeNull();
+  });
+
+  it('includes language_code only when the caller supplies it', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ transcript: 'नमस्ते' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new SarvamProvider(directConfig()).transcribe({
+      audio: new Blob(['voice'], { type: 'audio/webm' }),
+      language: 'hi-IN',
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect((init?.body as FormData).get('language_code')).toBe('hi-IN');
+  });
+
+  it('rejects an empty direct-mode key without making a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new SarvamProvider(directConfig('')).transcribe({
+      audio: new Blob(['voice']),
+    })).rejects.toThrow('Add your Sarvam API key in Settings before using the mic');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces HTTP failures and an empty transcript', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      error: { message: 'Invalid audio' },
+    }, 422)));
+    await expect(new SarvamProvider(directConfig()).transcribe({
+      audio: new Blob(['voice']),
+    })).rejects.toThrow('Sarvam STT failed (422): Invalid audio');
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ transcript: '   ' })));
+    await expect(new SarvamProvider(directConfig()).transcribe({
+      audio: new Blob(['voice']),
+    })).rejects.toThrow('Sarvam returned an empty transcript');
+  });
+
+  it('leaves authentication to the production proxy', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({ transcript: 'Hello' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const config: ProviderConfig = {
+      mode: 'proxy',
+      sarvamBaseUrl: '/api/sarvam',
+      getSarvamKey: () => 'must-not-leave-the-browser',
+    };
+
+    await new SarvamProvider(config).transcribe({ audio: new Blob(['voice']) });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('/api/sarvam/speech-to-text');
     expect(init?.headers).not.toHaveProperty('api-subscription-key');
   });
 });

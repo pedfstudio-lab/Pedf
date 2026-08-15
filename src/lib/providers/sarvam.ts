@@ -25,6 +25,8 @@ const SARVAM_METHODS = new Set<ProviderMethod>([
 const CHAT_MODEL = 'sarvam-105b-conversations';
 const TTS_MODEL = 'bulbul:v3';
 const TTS_MAX_CHARS = 2500;
+const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
+const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
 
 interface SarvamChatResponse {
   readonly choices?: readonly {
@@ -35,6 +37,10 @@ interface SarvamChatResponse {
 
 interface SarvamTtsResponse {
   readonly audios?: readonly unknown[];
+}
+
+interface SarvamSttResponse {
+  readonly transcript?: unknown;
 }
 
 export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
@@ -97,7 +103,8 @@ export class SarvamProvider implements ProviderWithCapabilities {
         text: input.text.slice(0, TTS_MAX_CHARS),
         target_language_code: input.language,
         model: TTS_MODEL,
-        ...(input.voice ? { speaker: input.voice } : {}),
+        speaker: input.voice ?? TTS_SPEAKER,
+        pace: TTS_PACE,
       }),
     });
 
@@ -119,8 +126,34 @@ export class SarvamProvider implements ProviderWithCapabilities {
   }
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {
-    void input;
-    throw new NotImplementedError(this.name, 'transcribe');
+    // Security boundary: direct mode reads the key only through provider config.
+    const key = this.config.getSarvamKey().trim();
+    if (this.config.mode === 'direct' && key === '') {
+      throw new Error('Add your Sarvam API key in Settings before using the mic.');
+    }
+
+    const form = new FormData();
+    form.append('file', input.audio, 'question.webm');
+    if (input.language) form.append('language_code', input.language);
+
+    const headers: Record<string, string> = {};
+    if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
+
+    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/speech-to-text'), {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+
+    if (!response.ok) {
+      const detail = await readErrorMessage(response);
+      throw new Error(`Sarvam STT failed (${response.status}): ${detail}`);
+    }
+
+    const payload = await response.json() as SarvamSttResponse;
+    const text = typeof payload.transcript === 'string' ? payload.transcript.trim() : '';
+    if (text === '') throw new Error('Sarvam returned an empty transcript.');
+    return { text, provider: this.name };
   }
 
   async discuss(input: DiscussInput): Promise<DiscussResult> {

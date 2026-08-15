@@ -4,6 +4,8 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentText } from '@/lib/pdf/documentText';
 import { defaultProviders } from '@/lib/providers';
 import { getSarvamKey } from '@/lib/providers/keys';
+import { startRecording } from '@/lib/speech/recordQuestion';
+import type { Recording } from '@/lib/speech/recordQuestion';
 import { speakAnswer } from '@/lib/speech/speakAnswer';
 import type { StopSpeech } from '@/lib/speech/speakAnswer';
 import { stripPageMarkers } from '@/lib/speech/stripPageMarkers';
@@ -28,12 +30,31 @@ interface ChatEntry {
   readonly language?: string;
 }
 
+type MicState = 'idle' | 'requesting' | 'recording' | 'transcribing';
+
+interface AskOptions {
+  readonly spoken: boolean;
+  readonly voiceRequest?: number;
+}
+
 function readableError(error: unknown): string {
   if (error instanceof AggregateError) {
     const cause = error.errors.find((item): item is Error => item instanceof Error);
     if (cause) return cause.message;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function microphoneError(error: unknown): string {
+  if (error instanceof DOMException && ['NotAllowedError', 'SecurityError'].includes(error.name)) {
+    return 'Allow mic access to ask by voice.';
+  }
+  const message = readableError(error);
+  if (/permission|denied|not allowed/i.test(message)) return 'Allow mic access to ask by voice.';
+  if (/empty (recording|transcript)|didn.t catch/i.test(message)) {
+    return "Didn't catch that — try again.";
+  }
+  return message;
 }
 
 export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
@@ -43,10 +64,14 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
+  const [micState, setMicState] = useState<MicState>('idle');
   const nextId = useRef(0);
+  const askRequest = useRef(0);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
   const playback = useRef<{ readonly id: number; readonly stop: StopSpeech } | null>(null);
   const playbackRequest = useRef(0);
+  const recording = useRef<Recording | null>(null);
+  const micRequest = useRef(0);
   const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
 
   const stopPlayback = useCallback(() => {
@@ -56,22 +81,38 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     setPlayingId(null);
   }, []);
 
+  const cancelRecording = useCallback(() => {
+    micRequest.current += 1;
+    recording.current?.cancel();
+    recording.current = null;
+    setMicState('idle');
+  }, []);
+
   useEffect(() => {
+    askRequest.current += 1;
     stopPlayback();
+    cancelRecording();
     setEntries([]);
     setQuestion('');
     setError(null);
     setThinking(false);
-  }, [doc, stopPlayback]);
+  }, [cancelRecording, doc, stopPlayback]);
 
   useEffect(() => {
-    if (!open) stopPlayback();
-  }, [open, stopPlayback]);
+    if (!open) {
+      stopPlayback();
+      cancelRecording();
+    }
+  }, [cancelRecording, open, stopPlayback]);
 
   useEffect(() => () => {
+    askRequest.current += 1;
     playbackRequest.current += 1;
     playback.current?.stop();
     playback.current = null;
+    micRequest.current += 1;
+    recording.current?.cancel();
+    recording.current = null;
   }, []);
 
   useEffect(() => {
@@ -85,16 +126,11 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
 
   useEffect(() => {
     if (open) messagesEnd.current?.scrollIntoView({ block: 'nearest' });
-  }, [entries, open, thinking]);
+  }, [entries, micState, open, thinking]);
 
   if (!open) return null;
 
-  const togglePlayback = async (entry: ChatEntry) => {
-    if (playingId === entry.id) {
-      stopPlayback();
-      return;
-    }
-
+  const startPlayback = async (entry: ChatEntry) => {
     stopPlayback();
     const request = playbackRequest.current;
     setPlayingId(entry.id);
@@ -124,10 +160,20 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     }
   };
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const nextQuestion = question.trim();
+  const togglePlayback = async (entry: ChatEntry) => {
+    if (playingId === entry.id) {
+      stopPlayback();
+      return;
+    }
+    await startPlayback(entry);
+  };
+
+  const ask = async (questionText: string, options: AskOptions) => {
+    const nextQuestion = questionText.trim();
     if (!doc || !nextQuestion || thinking || keyMissing) return;
+    const request = askRequest.current + 1;
+    askRequest.current = request;
+    const answerLanguage = preferredLanguage;
 
     nextId.current += 1;
     setEntries((current) => [...current, {
@@ -135,29 +181,95 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       role: 'user',
       text: nextQuestion,
     }]);
-    setQuestion('');
     setError(null);
     setThinking(true);
 
     try {
       const documentText = await getDocumentText(doc);
+      if (askRequest.current !== request) return;
       const result = await defaultProviders().discuss({
         question: nextQuestion,
         documentText: documentText.full,
-        language: preferredLanguage,
+        language: answerLanguage,
       });
+      if (askRequest.current !== request) return;
       nextId.current += 1;
-      setEntries((current) => [...current, {
+      const answer: ChatEntry = {
         id: nextId.current,
         role: 'assistant',
         text: result.answer,
         grounded: result.grounded,
-        language: preferredLanguage,
-      }]);
+        language: answerLanguage,
+      };
+      setEntries((current) => [...current, answer]);
+      if (
+        options.spoken
+        && options.voiceRequest !== undefined
+        && micRequest.current === options.voiceRequest
+      ) {
+        void startPlayback(answer);
+      }
     } catch (caught) {
-      setError(readableError(caught));
+      if (askRequest.current === request) setError(readableError(caught));
     } finally {
-      setThinking(false);
+      if (askRequest.current === request) setThinking(false);
+    }
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const nextQuestion = question.trim();
+    if (!doc || !nextQuestion || thinking || keyMissing || micState !== 'idle') return;
+    setQuestion('');
+    void ask(nextQuestion, { spoken: false });
+  };
+
+  const beginRecording = async () => {
+    if (!doc || thinking || keyMissing || micState !== 'idle') return;
+    stopPlayback();
+    const request = micRequest.current + 1;
+    micRequest.current = request;
+    setError(null);
+    setMicState('requesting');
+
+    try {
+      const activeRecording = await startRecording();
+      if (micRequest.current !== request) {
+        activeRecording.cancel();
+        return;
+      }
+      recording.current = activeRecording;
+      setMicState('recording');
+    } catch (caught) {
+      if (micRequest.current !== request) return;
+      micRequest.current += 1;
+      setMicState('idle');
+      setError(microphoneError(caught));
+    }
+  };
+
+  const finishRecording = async () => {
+    const activeRecording = recording.current;
+    if (!activeRecording || micState !== 'recording') return;
+    recording.current = null;
+    const request = micRequest.current;
+    setError(null);
+    setMicState('transcribing');
+
+    try {
+      const audio = await activeRecording.stop();
+      if (micRequest.current !== request) return;
+      const result = await defaultProviders().transcribe({ audio });
+      if (micRequest.current !== request) return;
+      const transcript = result.text.trim();
+      if (transcript === '') throw new Error('Sarvam returned an empty transcript.');
+      setMicState('idle');
+      await ask(transcript, { spoken: true, voiceRequest: request });
+    } catch (caught) {
+      if (micRequest.current !== request) return;
+      setError(microphoneError(caught));
+    } finally {
+      if (micRequest.current === request) setMicState('idle');
     }
   };
 
@@ -205,7 +317,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         </header>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5" aria-live="polite">
-          {entries.length === 0 && !thinking && (
+          {entries.length === 0 && !thinking && micState === 'idle' && (
             <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4 text-sm text-neutral-600">
               Ask about dates, accommodation, activities, or any other information written in the PDF.
             </div>
@@ -241,6 +353,13 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               Reading the document…
             </div>
           )}
+          {micState !== 'idle' && (
+            <div role="status" className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              {micState === 'requesting' && 'Opening the microphone…'}
+              {micState === 'recording' && 'Listening… tap Stop when you finish.'}
+              {micState === 'transcribing' && 'Transcribing your question…'}
+            </div>
+          )}
           {error && (
             <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
               {error}
@@ -262,7 +381,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               </button>
             </div>
           ) : (
-            <form onSubmit={(event) => void submit(event)} className="flex items-end gap-2">
+            <form onSubmit={submit} className="flex items-end gap-2">
               <label htmlFor="pdf-chat-question" className="sr-only">Ask a question about this PDF</label>
               <textarea
                 id="pdf-chat-question"
@@ -276,12 +395,28 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                   }
                 }}
                 placeholder="Ask a question about this PDF…"
-                disabled={!doc || thinking}
+                disabled={!doc || thinking || micState !== 'idle'}
                 className="min-h-11 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-neutral-100"
               />
               <button
+                type="button"
+                onClick={() => {
+                  if (micState === 'recording') void finishRecording();
+                  else void beginRecording();
+                }}
+                disabled={!doc || thinking || micState === 'requesting' || micState === 'transcribing'}
+                aria-label={micState === 'recording' ? 'Stop recording question' : 'Ask by voice'}
+                aria-pressed={micState === 'recording'}
+                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${micState === 'recording' ? 'bg-red-600 hover:bg-red-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
+              >
+                {micState === 'requesting' && '…'}
+                {micState === 'recording' && '⏹'}
+                {micState === 'transcribing' && '…'}
+                {micState === 'idle' && '🎤'}
+              </button>
+              <button
                 type="submit"
-                disabled={!doc || thinking || question.trim() === ''}
+                disabled={!doc || thinking || micState !== 'idle' || question.trim() === ''}
                 className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Send

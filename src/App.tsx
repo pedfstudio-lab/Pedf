@@ -13,7 +13,8 @@ import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { PrefsStoreProvider } from './state/prefsStore';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
-const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/GOA%202026.pdf`;
+const DEFAULT_SAMPLE_FILE = 'RAHUL RAJPUT RESUME.pdf';
+const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/${encodeURIComponent(DEFAULT_SAMPLE_FILE)}`;
 
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
@@ -56,7 +57,7 @@ function EditorApp() {
         const buf = await res.arrayBuffer();
         const head = new Uint8Array(buf.slice(0, 5));
         if (String.fromCharCode(...head) !== '%PDF-') return;
-        if (!cancelled) await open(buf, 'GOA 2026.pdf');
+        if (!cancelled) await open(buf, DEFAULT_SAMPLE_FILE);
       } catch {
         /* no sample present — that's fine */
       }
@@ -204,7 +205,7 @@ function EditorApp() {
             <div className="flex h-full items-center justify-center px-6 text-center text-neutral-500">
               Open a PDF to begin — or drop one at{' '}
               <code className="mx-1 rounded bg-neutral-200 px-1 py-0.5 text-neutral-700">
-                public/samples/GOA 2026.pdf
+                public/samples/{DEFAULT_SAMPLE_FILE}
               </code>
             </div>
           )

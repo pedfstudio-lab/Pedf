@@ -158,7 +158,12 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [x] Task 23A automated verification — marker/list/range/case tests, 31 test files / 183 tests, typecheck, lint, and production build are green
 - [ ] **Task 23A live acceptance:** replay a cited Day-2 answer and confirm its visible page citations are not spoken
 - [ ] **Task 23 live acceptance:** with an answer present, hear English and Hindi/Tamil playback; clear the key and confirm ▶ still reads the existing answer through the browser voice
-- [ ] **Stage 3 (ears):** `SarvamProvider.transcribe()` (Saarika) + `BrowserProvider` (Web Speech) + `components/VoiceButton.tsx` — mic → transcribe → discuss → speak
+- [x] **Task 25 implementation (ears + loop):** `SarvamProvider.transcribe()` sends boundary-safe multipart WebM/Opus audio through the key-safe provider config; `recordQuestion.ts` captures/releases the mic; `PdfChat` exposes requesting/recording/transcribing states and reuses the grounded ask path with auto-speech only for voice questions
+- [x] Task 25 automated/UI verification — STT request/auth/error tests, Sarvam-only capability routing, recorder final-chunk/cancel/empty/permission tests, 32 test files / 193 tests, typecheck, lint, production build, visible production mic control, and browser console are green
+- [x] **Task 25A implementation:** the recorder preserves its encoded audio bytes while normalising the final Blob label to the base container MIME (`audio/webm;codecs=opus` → `audio/webm`, with the same handling for MP4) before multipart upload
+- [x] Task 25A automated verification — four base-MIME cases plus recorder integration, 32 test files / 197 tests, typecheck, lint, and production build are green
+- [ ] **Task 25A live acceptance:** record and stop a real question, confirm Sarvam no longer returns the invalid `audio/webm;codecs=opus` 400, and complete transcript → grounded answer → automatic speech
+- [ ] **Task 25 live acceptance:** allow microphone access, ask about the Goa dates, and confirm transcript → grounded answer → automatic speech; repeat with Hindi answer language
 - [ ] (optional) Task 21A — AI place/name/event spans → Search / Maps / Meaning (independent reader add-on)
 - [ ] Acceptance: ask "what's the check-in time?" → grounded answer; switch to Hindi → same answer in Hindi; ask by voice → spoken Hindi answer
 - [ ] **Commit `Phase 4 ✓`**
@@ -200,4 +205,4 @@ _Cut: Noto font bundling · `pathA.ts` rasterization · `scriptRouting.ts` · In
 - [x] Sample PDF provided (`public/samples/GOA 2026.pdf`)
 - [ ] Sarvam + Anthropic API keys (needed from Phase 4)
 - [x] Confirm Bulbul v3 TTS request/response fields at docs.sarvam.ai (Task 23)
-- [ ] Confirm Saarika ASR request field shapes at docs.sarvam.ai (Task 25)
+- [x] Confirm Saaras v3 STT request/response fields at docs.sarvam.ai (Task 25)

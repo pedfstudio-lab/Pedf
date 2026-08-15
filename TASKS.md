@@ -2446,13 +2446,173 @@ generic (don't bake the citation format into the speech util).
 
 #### Stage 3 — the ears (ask by voice → full loop)
 
-### Task 25 — Voice loop (mic → answer → speech)  🔲
-**Goal:** the end-to-end spoken conversation.
-**Deliverables:** `components/VoiceButton.tsx` — press mic → `transcribe` (spoken question) → `discuss`
-(grounded, in-language) → show transcript → `speak`. Handle mic permission, listening state, errors.
-**Depends on:** Task 23, Task 24.
-**Done when:** speak *"tell me about the Goa trip in Hindi"* → grounded Hindi answer spoken back → commit
-`Phase 4 ✓`.
+### Task 25 — Voice loop: ask by mic → answer → speak (the ears + full loop)  ⏳
+**Goal:** close the hands-free loop — tap 🎤, **speak** a question, it transcribes → the brain answers →
+the answer is **spoken back**. Speak once, hear once.
+**Deliverables:** `SarvamProvider.transcribe({ audio, language? })` → `{ text }` (Sarvam STT); a mic-capture
+helper (`MediaRecorder` → audio `Blob`); a 🎤 button + loop wiring in `PdfChat` (record → transcribe →
+`discuss` → **auto-speak** the answer). Mic-permission, recording, transcribing, and error states.
+**Depends on:** Task 23 (`speakAnswer`, TTS), Task 24 (`discuss`, chat), Task 20 (language).
+**Done when (Stage-3 milestone / Phase 4 done):** tap 🎤 → say *"what are the dates for Goa?"* → the question
+appears, a grounded answer appears, and it's **read aloud** — no typing. Commit `Phase 4 ✓`.
+
+#### Workflow
+
+**What this task is (and isn't).** **Stage 3 — the ears + the loop.** It adds voice *input* and chains the three
+stages you already have: ears (STT) → brain (`discuss`, Task 24) → mouth (`speakAnswer`, Task 23). No new
+reasoning, no export-seam.
+
+**Confirmed against Sarvam docs (2026-08-14):**
+- `POST https://api.sarvam.ai/speech-to-text`, header `api-subscription-key`, **`multipart/form-data`**.
+- Fields: **`file`** (required, the audio), `model` (optional — default is Sarvam's current STT model),
+  `language_code` (optional BCP-47 — **omit to auto-detect** the spoken language).
+- **Accepted audio incl. `WebM` and `OPUS`** → the browser's `MediaRecorder` default (`audio/webm;codecs=opus`)
+  uploads **as-is — no in-browser conversion**. Best at 16 kHz.
+- Response `{ request_id, transcript, language_code }` — the text is in **`transcript`**.
+
+**Step 1 — Sarvam STT → `SarvamProvider.transcribe()` in `src/lib/providers/sarvam.ts`**
+Replace the `NotImplementedError` stub:
+```ts
+async transcribe({ audio, language }: TranscribeInput): Promise<TextResult> {
+  const key = this.config.getSarvamKey().trim();
+  if (this.config.mode === 'direct' && key === '') {
+    throw new Error('Add your Sarvam API key in Settings before using the mic.');
+  }
+  const form = new FormData();
+  form.append('file', audio, 'question.webm');
+  if (language) form.append('language_code', language);   // omit → Sarvam auto-detects
+
+  const headers: Record<string, string> = {};
+  if (key !== '') headers['api-subscription-key'] = key;
+  // NOTE: do NOT set Content-Type — the browser must add the multipart boundary itself.
+
+  const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/speech-to-text'), {
+    method: 'POST', headers, body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`Sarvam STT failed (${response.status}): ${await readErrorMessage(response)}`);
+  }
+  const payload = await response.json() as { transcript?: string };
+  const text = (payload.transcript ?? '').trim();
+  if (text === '') throw new Error('Sarvam returned an empty transcript.');
+  return { text, provider: this.name };
+}
+```
+*(Leave `model` unset → Sarvam's default. If a live call ever errors on the model, pin `model` to the current
+STT model name from the docs — same guard we used for chat/TTS.)*
+
+**Step 2 — Transcribe seam is Sarvam-only** → remove `'transcribe'` from `BROWSER_METHODS` in `browser.ts`
+(leave it throwing `NotSupportedError`). **Why no browser ASR fallback:** the loop needs the brain (`discuss`),
+which needs a Sarvam key — so a keyless mic would have nothing to answer it. (Contrast with TTS, where the
+browser voice is a real free fallback for already-typed answers.) `BROWSER_METHODS` becomes empty; the browser
+provider is now an inert stub — fine to leave, removing it entirely is out of scope.
+
+**Step 3 — Mic capture → `src/lib/speech/recordQuestion.ts`**
+```ts
+export interface Recording { stop(): Promise<Blob>; cancel(): void; }
+
+export async function startRecording(): Promise<Recording> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream);
+  const chunks: Blob[] = [];
+  recorder.addEventListener('dataavailable', (e) => { if (e.data.size) chunks.push(e.data); });
+  const release = () => stream.getTracks().forEach((t) => t.stop());
+  recorder.start();
+  return {
+    stop: () => new Promise<Blob>((resolve) => {
+      recorder.addEventListener('stop', () => {
+        release();
+        resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+      }, { once: true });
+      recorder.stop();
+    }),
+    cancel: () => { try { recorder.stop(); } finally { release(); } },
+  };
+}
+```
+`getUserMedia` triggers the browser's mic-permission prompt on first use.
+
+**Step 4 — Wire the loop into `PdfChat.tsx`**
+- First, **extract the send path**: pull the `discuss` logic out of `submit` into `ask(questionText, { spoken })`
+  so both typed send (`spoken: false`) and the mic reuse it. It appends the user + assistant entries exactly as
+  today; when `spoken: true`, after the answer lands it **auto-plays** it via the existing playback machinery
+  (`speakAnswer(stripPageMarkers(answer), language)`). *(Typed questions still use the manual ▶ — keeps "no
+  surprise audio".)*
+- Add a **🎤 mic button** in the footer next to the input. States: **idle** 🎤 → **recording** ⏹ (tap to stop)
+  → **transcribing…** (spinner, disabled). On stop:
+  `const blob = await recording.stop()` → `const { text } = await defaultProviders().transcribe({ audio: blob })`
+  (omit language → auto-detect) → if non-empty, `void ask(text, { spoken: true })`.
+- **Errors/edge cases:** mic permission denied (`getUserMedia` rejects) → friendly "Allow mic access to ask by
+  voice."; empty transcript → "Didn't catch that — try again."; reset to idle on any failure. Stop/cancel any
+  recording when the drawer closes, the doc changes, or on unmount (mirror the Task 23 playback cleanup).
+- **Key-gated like the rest:** the mic sits behind the same `keyMissing` gate as the chat (no key → the existing
+  "Add your key" panel; no mic).
+
+**Step 5 — CORS / proxy (same as chat/TTS)** Direct browser → `api.sarvam.ai` already works; confirm on the
+first real call. Prod (`proxy` mode) → path `/api/sarvam/speech-to-text`, forwarded by the Worker (Task 28).
+
+**Key decisions & edge cases**
+- **No audio conversion:** record `audio/webm;codecs=opus` and upload as-is — Sarvam STT accepts WebM/Opus.
+- **Don't set `Content-Type`** on the multipart request — the browser adds the boundary; setting it breaks the
+  upload. (Common bug — call it out in review.)
+- **Auto-detect the spoken language** (omit `language_code`), so the user can speak any language regardless of
+  the answer-language picker; the **answer** language still follows the picker (`discuss` uses `preferredLanguage`).
+- **Auto-speak only voice-initiated answers.** Typed → manual ▶ only.
+- **No browser ASR fallback** (see Step 2). Mic requires a key, same as the brain.
+- Security unchanged: key only in Settings, read via `config.getSarvamKey()`; mic audio goes straight to Sarvam,
+  is not stored.
+
+**Tests**
+- `SarvamProvider.transcribe()` with **mocked `fetch`**: POSTs to `…/speech-to-text`; body is a `FormData` whose
+  `file` is present (and `language_code` only when passed); sends the `api-subscription-key` header and does
+  **not** set `Content-Type`; `{ transcript: 'hello' }` → `{ text: 'hello' }`; empty key (direct) → throws with
+  **no** fetch; HTTP error / empty transcript → throws; proxy mode omits the key header.
+- *(`getUserMedia` / `MediaRecorder` are browser-only → the capture + loop are verified live, not unit-tested.)*
+
+**Verify (live):** tap 🎤 → say *"what are the dates for Goa?"* → the transcript appears as your question → a
+grounded answer appears → it's **spoken back** automatically. Try Hindi answer-language + speaking in English
+→ English question, Hindi spoken answer.
+
+**Commit:** the ears + loop — feature-side (`transcribe` provider + mic capture + voice-loop wiring). Then the
+milestone commit **`Phase 4 ✓`** (the whole talk-to-your-PDF bot: brain + mouth + ears). No export-seam.
+
+### Task 25A — Fix STT upload MIME: strip the codec parameter (sub-task of 25)  ⏳
+**Goal:** the voice loop reaches Sarvam but transcription fails with **400 "Invalid file type:
+`audio/webm;codecs=opus`"**. Upload the clip labeled as plain **`audio/webm`** (which Sarvam accepts) so the
+loop completes.
+**Why:** live testing (2026-08-14) — `MediaRecorder` labels its Blob `audio/webm;codecs=opus`, and Sarvam's
+allow-list is an **exact string match**: `audio/webm` is allowed, but `audio/webm;codecs=opus` is **not**. The
+audio bytes are valid WebM — only the Content-Type label is too specific (it carries the codec parameter).
+**Depends on:** Task 25 (mic loop, already built).
+
+**The one idea:** drop everything after the `;` in the recording Blob's MIME type, so the file — and therefore
+the multipart part's Content-Type — is the **base container type** Sarvam recognises.
+
+**Step 1 — Pure helper + use it → `src/lib/speech/recordQuestion.ts`**
+Add a small exported, testable helper and use it where the final Blob is built (the `stop()` resolver):
+```ts
+export function baseMimeType(rawType: string): string {
+  return rawType.split(';')[0].trim() || FALLBACK_MIME_TYPE;   // 'audio/webm', not 'audio/webm;codecs=opus'
+}
+// ...in stop(): resolve the recording with the normalised label
+const audio = new Blob(chunks, { type: baseMimeType(recorder.mimeType || FALLBACK_MIME_TYPE) });
+```
+Same audio bytes, same `question.webm` filename — only the label is normalised. Deriving it from
+`recorder.mimeType` (not hardcoding `audio/webm`) also covers Safari's `audio/mp4;codecs=…` → `audio/mp4`, which
+Sarvam likewise allows. `transcribe()` keeps appending the Blob unchanged — the fix is entirely at the source.
+
+**Tests** — `baseMimeType` (pure):
+- `'audio/webm;codecs=opus'` → `'audio/webm'`
+- `'audio/webm'` → `'audio/webm'`
+- `'audio/mp4;codecs=mp4a.40.2'` → `'audio/mp4'`
+- `''` → `'audio/webm'` (fallback)
+
+*(The `MediaRecorder` capture itself stays live-verified; only the pure helper is unit-tested.)*
+
+**Verify (live):** tap 🎤 → speak → **Stop** → **no 400**; the transcript appears as your question and the loop
+finishes (grounded answer + spoken back). The failed `speech-to-text` POST should be gone from the console.
+
+**Commit:** one-line STT MIME fix (strip the codec parameter before upload).
 
 ---
 

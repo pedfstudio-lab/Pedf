@@ -2,6 +2,9 @@ import { defaultProviders } from '@/lib/providers';
 
 export type StopSpeech = () => void;
 
+/** Read ~15% faster than default; matches the Sarvam TTS pace. */
+const PLAYBACK_RATE = 1.15;
+
 function speakWithBrowser(
   text: string,
   language: string,
@@ -12,6 +15,7 @@ function speakWithBrowser(
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = language;
+  utterance.rate = PLAYBACK_RATE;
   const matchingVoice = synthesis.getVoices().find((voice) => voice.lang === language);
   if (matchingVoice) utterance.voice = matchingVoice;
 

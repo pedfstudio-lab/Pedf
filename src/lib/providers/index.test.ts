@@ -164,13 +164,22 @@ describe('createProviderChain', () => {
       { provider: 'Sarvam', method: 'speak', ok: false },
     ]);
   });
+
+  it('keeps default transcription Sarvam-only', async () => {
+    const promise = defaultProviders().transcribe({ audio: new Blob(['voice']) });
+
+    await expect(promise).rejects.toThrow('All 1 supporting provider failed for transcribe');
+    expect(getProviderLog()).toMatchObject([
+      { provider: 'Sarvam', method: 'transcribe', ok: false },
+    ]);
+  });
 });
 
 describe('BrowserProvider capabilities', () => {
-  it('supports only transcription through the Blob-returning provider seam', () => {
+  it('does not advertise provider-seam capabilities', () => {
     const browser = new BrowserProvider();
     expect(browser.supports('speak')).toBe(false);
-    expect(browser.supports('transcribe')).toBe(true);
+    expect(browser.supports('transcribe')).toBe(false);
     expect(browser.supports('translate')).toBe(false);
     expect(browser.supports('explain')).toBe(false);
     expect(browser.supports('discuss')).toBe(false);

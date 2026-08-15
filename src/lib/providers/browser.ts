@@ -1,4 +1,4 @@
-import { NotImplementedError, NotSupportedError } from './errors';
+import { NotSupportedError } from './errors';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import type {
   DiscussInput,
@@ -11,7 +11,7 @@ import type {
   TranslateInput,
 } from './types';
 
-const BROWSER_METHODS = new Set<ProviderMethod>(['transcribe']);
+const BROWSER_METHODS = new Set<ProviderMethod>();
 
 /** Browser transcription shell; direct speech playback stays at the UI layer. */
 export class BrowserProvider implements ProviderWithCapabilities {
@@ -38,7 +38,7 @@ export class BrowserProvider implements ProviderWithCapabilities {
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {
     void input;
-    throw new NotImplementedError(this.name, 'transcribe');
+    throw new NotSupportedError(this.name, 'transcribe');
   }
 
   async discuss(input: DiscussInput): Promise<DiscussResult> {

@@ -32,6 +32,7 @@ class FakeAudio {
 class FakeUtterance {
   readonly listeners = new Map<string, PlaybackListener>();
   lang = '';
+  rate = 1;
   voice: SpeechSynthesisVoice | null = null;
 
   constructor(readonly text: string) {}
@@ -99,6 +100,7 @@ describe('speakAnswer', () => {
     const utterance = synthesis.speak.mock.calls[0]?.[0] as unknown as FakeUtterance;
     expect(utterance.text).toBe('नमस्ते');
     expect(utterance.lang).toBe('hi-IN');
+    expect(utterance.rate).toBe(1.15);
     expect(utterance.voice).toBe(voice);
 
     stop();

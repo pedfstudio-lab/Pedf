@@ -83,7 +83,7 @@ export function createProviderChain(
   };
 }
 
-/** Fixed default order: Sarvam first, then browser speech capabilities. */
+/** Fixed default order: Sarvam first, then any explicitly supported browser fallbacks. */
 export function defaultProviders(): LanguageProvider {
   return createProviderChain([
     new SarvamProvider(providerConfig),
