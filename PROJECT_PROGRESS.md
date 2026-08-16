@@ -4,7 +4,7 @@
 > Full design detail lives in the approved plan; this file tracks **status**.
 
 **Last updated:** 2026-08-16
-**Current position:** Task 31's bounded document-edit Undo/Redo history, toolbar controls, and typing-safe shortcuts are implemented and locally verified; a short manual native text-undo check remains. Phase 4 voice work is green through Task 25A, with live Sarvam acceptance still pending.
+**Current position:** Task 10G (localized text reflow) was implemented but **reverted on 2026-08-16** — reflow moves extractable text, but résumé **bullet markers are baked into the pristine page and can't be moved**, so every reflowed section (Firgun, Travelmite, Wanderon) left its bullets stranded. Code rolled back to commit `1a9c6bb`; all tests green. Undo/redo (Task 31) and the voice bot (chat + read-aloud + mic loop) remain committed and working; Phase 4 live Sarvam acceptance is still pending. Task 10G needs a **bullet-aware** redesign before retrying.
 **Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
@@ -90,6 +90,7 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Task 10D manual-height/overflow-warning implementation completed, then superseded by Task 10E
 - [x] Task 10E final layout — manual width and font size with content-driven auto-height; no warning or hidden text
 - [x] Task 10F implementation — the full live editor box uses the sampled page colour with a white fallback; toolbar and handles remain stacked above it
+- [ ] Task 10G (localized text reflow) — implemented then **reverted 2026-08-16**: reflow shifts extractable text, but bullet markers are baked into the page and don't move, so reflowed sections (Firgun, Travelmite, Wanderon) left their bullets stranded. Moving more sections only spread the misalignment. Needs a bullet-aware redesign (detect marker → cover → redraw a "•" at the moved line) or acceptance of the no-reflow limit. Kept for reference: the resume extracts Firgun (~13 lines), Travelmite (~12), and Wanderon as adjacent multi-line work blocks
 - [x] Whitespace-safe layout preserves repeated spaces, explicit blank lines, and the unwrapped textarea value on re-edit
 - [x] Edited visible overlays are tappable to reopen; standalone numeric/short fields remain separate blocks
 - [x] English export path: `englishFont.ts` mapping table (serif/sans/mono × bold/italic; warn on substitution)

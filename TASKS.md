@@ -1258,6 +1258,72 @@ behaviour (no page reflow), separate from this task.
 
 **Commit:** feature-side (editor + overlay). Folds into the Phase 1 feature commit; no export-path change.
 
+### Task 10G — Reflow: push the column below down/up when an edit changes a block's height  ⛔ REVERTED (2026-08-16)
+> **Reverted — needs a bullet-aware redesign.** The reflow correctly shifted the *text* of the sections below,
+> but the **bullet markers are baked into the pristine page (not extractable text), so they can't be moved** —
+> every reflowed section (Firgun, Travelmite, Wanderon) left its bullets stranded, and moving more sections only
+> spread the misalignment. Reflowing text under fixed bullets can't align. Code rolled back to commit `1a9c6bb`
+> (2 new files deleted, `OverlayLayer.tsx` + `ImageOverlay.tsx` restored).
+> **Before retrying:** either make bullets first-class (detect each marker → cover the old one → redraw a "•" at
+> the moved line), or accept the no-reflow limit. The design below is kept for reference.
+**Goal:** when editing a text block adds or removes lines (e.g. a bullet grows to a second line), the text
+**below it in the same column slides down — or up — to keep even spacing**, instead of the new line overlapping
+the next bullet. Behaves like typing in a document.
+**Why:** live testing (2026-08-14) — editing a résumé bullet made its extra line collide with the bullet below;
+the list looked broken. This deliberately **replaces** the "overflow when longer / no page reflow" limitation
+noted in Task 10F, for the common in-column case.
+**Depends on:** Task 10C (block edits); pairs with Task 31 (the whole cascade must undo as one).
+
+**The idea in one line:** measure how much taller/shorter the edited block became, then shift the extractable
+text below it by that same amount (as new cover+text edits), stopping at the next section.
+
+**Step 0 — Confirm grouping (quick investigation).** `groupRunsIntoBlocks` (`textContent.ts`) may treat a
+bullet list as **one block** or **several** (depends on indent + spacing). Inspect a résumé + the GOA PDF: is the
+edited list one block, and what block sits directly below it? Note it in the PR — it sets how far the push runs.
+
+**Step 1 — Height delta** (where `buildTextBlockEdits` is invoked):
+- `originalHeight` = the block's footprint height (from its `lines` extent).
+- `newHeight` = `wrappedLines.length × lineHeight`.
+- `deltaY = newHeight − originalHeight`. If `|deltaY| < ~0.5pt` → no reflow (today's behavior).
+
+**Step 2 — Pick what to push → new pure helper `blocksBelowInColumn(blocks, editedBlock)`.**
+Select the page's other blocks that are **below** the edited block (baseline past its bottom) **and x-overlap it**
+(same column), ordered top→down, **stopping** at the first of:
+- a **section break** — a vertical gap ≳ 1.8× line height,
+- a different column / an image / any non-text obstacle,
+- the page bottom.
+Only extractable-text blocks can move; the first obstacle ends the run.
+
+**Step 3 — Shift them → cover + re-stamp, moved by `deltaY`.**
+For each pushed block: emit a `cover` over its original rect + `text` edits re-stamped at the shifted baseline
+(PDF y is up, so on-screen *down* = `y − deltaY`). Reuse `buildTextBlockEdits` with a shifted base so each
+block's own wrapping/spacing is unchanged. Bundle the whole cascade with the edit → **one Undo** reverts it all.
+
+**Step 4 — Boundary guard.**
+- If the push would cross the section break or run off the page bottom, **cap it** and leave the next section
+  alone (optionally a subtle "no room to reflow" hint).
+- Shrinking (`deltaY < 0`) pulls the blocks below back **up** by the same rule.
+
+**Key decisions & edge cases**
+- **In-column only, down to the next section** — never moves other columns or unrelated sections (the rest of
+  the PDF stays intact — the core promise holds *outside* the edited column).
+- **Text-only** — an image/table below is a hard stop (can't be reflowed).
+- **One Undo** reverts the edit + the whole cascade.
+- **No export-seam change** — still only `cover` + `text` edits, just more of them.
+- This is the **most involved** text-edit task — the one place we deliberately reflow part of the page.
+
+**Tests**
+- delta math: N→N+1 lines → `deltaY ≈ lineHeight`; N→N−1 → negative; unchanged → `0`.
+- `blocksBelowInColumn`: picks same-column blocks below; stops at a big gap / an image / the page bottom;
+  ignores other columns.
+- integration: edit a middle bullet to +1 line → the blocks below shift down by one line, the section after the
+  gap is untouched, and undo restores everything.
+
+**Verify (live):** edit a bullet so it wraps to a new line → the bullets below slide down, gaps stay even, no
+overlap; shorten it → they slide back up; the next job section stays put until the list actually reaches it.
+
+**Commit:** reflow-on-edit — push the in-column content by the height delta. Text-only; no export-seam change.
+
 ### Task 11 — Tap popover shell + Search Google / Maps  ✅
 **⚠ Correction (superseded by Task 11A):** block-level **Search Google / Open in Maps** search the *whole
 paragraph* — wrong granularity. Those actions move to **per-entity spans**: **dates/times now** (Task 11A,
