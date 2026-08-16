@@ -2659,3 +2659,104 @@ endpoints; provider base-URL switch (dev = direct+localStorage, prod = proxy).
 key present**.
 **Depends on:** Task 28, Task 29.
 **Done when:** all three pass → commit `Phase 6 ✓`.
+
+---
+
+## Editor — Undo / Redo
+
+### Task 31 — Undo / Redo for document edits  ⏳
+**Goal:** step backward/forward through committed document edits. Toolbar **Undo/Redo** buttons +
+**Ctrl+Z** / **Ctrl+Shift+Z** (also **Ctrl+Y** for redo). Undo restores the state before the last committed edit;
+Redo re-applies it.
+**Why:** an editor needs undo; user flagged it missing (2026-08-14).
+**Depends on:** the edits store (`src/state/editsStore.tsx`) — the single source of every edit.
+
+**What's undoable:** *everything in the edits list* — text edits, free text, cover boxes, and image
+add/replace/delete/crop — because they all flow through `editsStore` (`Edit = text | cover | image`). **Not**
+undoable, by design (different stores): Settings (language/key), chat/voice, scroll/zoom. **One undo = one
+committed action** — a text edit that is internally a cover+text pair undoes as a single step, since it's
+dispatched as one `add`/`replace`.
+
+**Step 1 — History in the reducer → `src/state/editsStore.tsx`**
+Wrap the current `Edit[]` state in a past/present/future history. **Reuse** the existing `editsReducer` to
+compute the new present, so no add/update/remove/replace logic is duplicated.
+```ts
+interface HistoryState {
+  readonly past: readonly (readonly Edit[])[];
+  readonly present: readonly Edit[];
+  readonly future: readonly (readonly Edit[])[];
+}
+const HISTORY_LIMIT = 100;
+const EMPTY_HISTORY: HistoryState = { past: [], present: [], future: [] };
+
+type HistoryAction = Action | { readonly type: 'undo' } | { readonly type: 'redo' };
+
+export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
+  switch (action.type) {
+    case 'undo': {
+      if (state.past.length === 0) return state;
+      const previous = state.past[state.past.length - 1];
+      return { past: state.past.slice(0, -1), present: previous, future: [state.present, ...state.future] };
+    }
+    case 'redo': {
+      if (state.future.length === 0) return state;
+      const [next, ...rest] = state.future;
+      return { past: [...state.past, state.present], present: next, future: rest };
+    }
+    case 'reset':
+      return EMPTY_HISTORY;
+    default: {
+      const present = editsReducer(state.present, action);
+      if (present === state.present) return state;           // cheap no-op guard
+      return { past: [...state.past, state.present].slice(-HISTORY_LIMIT), present, future: [] };
+    }
+  }
+}
+```
+
+**Step 2 — Expose undo/redo → same file**
+`useReducer(historyReducer, EMPTY_HISTORY)`. Keep every existing action creator (they dispatch the same
+`Action`s — now handled by the `default` branch). Add `undo`/`redo` and expose `edits` as `state.present`:
+```ts
+const undo = useCallback(() => dispatch({ type: 'undo' }), []);
+const redo = useCallback(() => dispatch({ type: 'redo' }), []);
+// value: { edits: state.present, ...existing creators, undo, redo,
+//          canUndo: state.past.length > 0, canRedo: state.future.length > 0 }
+```
+Extend `EditsStoreValue` with `undo()`, `redo()`, `canUndo`, `canRedo`. Consumers already read `edits`
+(= `state.present`), so **no other file needs to change** for undo to take visible effect.
+
+**Step 3 — Toolbar buttons → `src/components/Toolbar.tsx`**
+Add **Undo** (↶) and **Redo** (↷) buttons beside the existing tools, wired to `useEdits()`:
+`disabled={!canUndo}` / `disabled={!canRedo}`, with tooltips showing the shortcuts.
+
+**Step 4 — Keyboard shortcuts → small hook in `App.tsx`** (e.g. `useEditHistoryShortcuts`)
+Global `keydown`:
+- `(Ctrl|Cmd)+Z` **without** Shift → `undo()` when `canUndo`.
+- `(Ctrl|Cmd)+Shift+Z` **or** `(Ctrl|Cmd)+Y` → `redo()` when `canRedo`.
+`preventDefault()` when handled. **Skip when the user is typing** — if `event.target` is an `<input>`,
+`<textarea>`, or `[contenteditable]` (the chat box, a text-edit field), let the browser's native text-undo run
+instead. Never hijack Ctrl+Z inside an editable field.
+
+**Key decisions & edge cases**
+- **One list, one history** — no per-type logic; every editing action is undoable/redoable uniformly.
+- **New edit after undo clears redo** (standard behavior).
+- **New document → `reset` clears history** (can't undo into a previous file's edits).
+- **Typing is protected** — native text-undo still works inside inputs and the text-edit box.
+- **Bounded memory** — cap history at `HISTORY_LIMIT` (snapshots are cheap array refs, but still capped).
+- **No export-seam change** — undo only changes which edits are active; export/overlay already read `edits`.
+
+**Tests** — `historyReducer` (pure) in `src/state/editsStore.test.ts`:
+- `add` → `canUndo`; `undo` restores the prior list; `redo` re-applies it.
+- three edits → `undo` steps back in reverse order; `redo` forward.
+- edit-after-undo → future cleared (`canRedo` false).
+- `undo` on empty past / `redo` on empty future → unchanged.
+- `reset` → empties past/present/future.
+- history capped at `HISTORY_LIMIT`.
+*(Toolbar buttons + the shortcut hook are verified live.)*
+
+**Verify (live):** make a few edits (add text, delete an image, edit a paragraph) → Undo steps each back to the
+original; Redo re-applies; Ctrl+Z / Ctrl+Shift+Z work; Ctrl+Z inside the chat box or a text field still does
+normal text-undo, not document-undo.
+
+**Commit:** undo/redo for document edits (history in `editsStore` + toolbar + shortcuts). No export-seam.

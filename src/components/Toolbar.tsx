@@ -1,4 +1,5 @@
 import { HoldToPeek } from './HoldToPeek';
+import { useEdits } from '@/state/editsStore';
 
 interface ToolbarProps {
   onOpen: (file: File) => void;
@@ -33,6 +34,8 @@ export function Toolbar({
   onPeekChange,
   onExport,
 }: ToolbarProps) {
+  const { undo, redo, canUndo, canRedo } = useEdits();
+
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
       <span className="text-lg font-semibold tracking-tight text-neutral-900">DesiPDF</span>
@@ -42,6 +45,26 @@ export function Toolbar({
         </span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={undo}
+          disabled={!canUndo}
+          aria-label="Undo document edit"
+          title="Undo (Ctrl+Z)"
+          className="w-9 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          onClick={redo}
+          disabled={!canRedo}
+          aria-label="Redo document edit"
+          title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
+          className="w-9 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          ↷
+        </button>
         <button
           type="button"
           aria-pressed={editMode}

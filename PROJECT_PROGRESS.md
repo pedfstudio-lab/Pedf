@@ -3,8 +3,8 @@
 > Living checklist of the full build plan (Phases 0–6) with completed items ticked.
 > Full design detail lives in the approved plan; this file tracks **status**.
 
-**Last updated:** 2026-08-13
-**Current position:** Task 24's grounded multilingual text-chat implementation is complete and locally verified; live Sarvam acceptance awaits a user-entered browser key. Phase 3 image work remains green through Task 16B; Task 17 (table columns) is cut. Pending: `Phase 1 ✓` / `Phase 3 ✓` commits and real-device PDF acceptance.
+**Last updated:** 2026-08-16
+**Current position:** Task 31's bounded document-edit Undo/Redo history, toolbar controls, and typing-safe shortcuts are implemented and locally verified; a short manual native text-undo check remains. Phase 4 voice work is green through Task 25A, with live Sarvam acceptance still pending.
 **Scope change (2026-08-05):** Path A (rendering Hindi/Tamil **into** the PDF) is **removed**. Indian-language support is now **voice-only** — tap any block, hear it explained in your language; the exported PDF stays English. **Phase 2 dropped; Phases 3–6 keep their numbers.**
 
 ---
@@ -110,6 +110,9 @@ zoom/dpr-independent. Edit union stays small all through v1: `text | cover | ima
 - [x] Browser verification: Task 11C pristine and pre-existing no-op sessions preserve their source; the Times-based heading stays on one line with zero overlap; real changes still commit; `/verify` remains green
 - [x] Task 11D free text — mutually exclusive Add text mode supports drag or click placement, rich formatting, wrapping, cover-free selectable export, peek, and re-editing through grouped standalone text boxes
 - [x] Browser verification: Task 11D drag placement, multiline/bold/size editing, mode switching, re-open/update, empty no-op, and export succeeded on GOA 2026; `/verify` remains fully green
+- [x] Task 31 implementation — all committed text/cover/image edit batches share a 100-snapshot Undo/Redo history; new edits clear redo and opening a new PDF clears both stacks
+- [x] Task 31 automated/UI verification — six reducer cases, 33 test files / 203 tests, typecheck, lint, production build, toolbar buttons, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, editable-target history protection, and browser console are green on port 5173
+- [ ] Task 31 manual acceptance — confirm Ctrl+Z inside a rich-text field performs native typing undo while leaving document history unchanged
 - [ ] Acceptance: edit one line of a real PDF, layout holds in Adobe Reader on Android
 - [ ] **Commit `Phase 1 ✓`**
 

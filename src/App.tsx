@@ -16,9 +16,45 @@ import { PrefsStoreProvider } from './state/prefsStore';
 const DEFAULT_SAMPLE_FILE = 'RAHUL RAJPUT RESUME.pdf';
 const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/${encodeURIComponent(DEFAULT_SAMPLE_FILE)}`;
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.matches('input, textarea') || target.isContentEditable);
+}
+
+function useEditHistoryShortcuts(): void {
+  const { undo, redo, canUndo, canRedo } = useEdits();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.altKey
+        || (!event.ctrlKey && !event.metaKey)
+        || isEditableTarget(event.target)
+      ) return;
+
+      const key = event.key.toLowerCase();
+      const shouldUndo = key === 'z' && !event.shiftKey;
+      const shouldRedo = (key === 'z' && event.shiftKey) || key === 'y';
+
+      if (shouldUndo && canUndo) {
+        event.preventDefault();
+        undo();
+      } else if (shouldRedo && canRedo) {
+        event.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [canRedo, canUndo, redo, undo]);
+}
+
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
   const { edits, resetEdits } = useEdits();
+  useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
   const [zoom] = useState(1.5);
   const [editMode, setEditMode] = useState(false);
