@@ -2,6 +2,8 @@ import type { CoverEdit, TextEdit, TextSpan, TextStyle } from '@/lib/export/type
 import type { PdfRect } from '@/lib/export/types';
 import type { TextRun } from '@/lib/pdf/textContent';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
+import type { BulletList } from '@/lib/pdf/bulletList';
+import { formatBulletEditorText } from '@/lib/pdf/bulletList';
 import type { WrappedTextLine } from './textLayout';
 
 let fallbackId = 0;
@@ -181,4 +183,136 @@ export function buildTextBlockEdits(
   });
 
   return { covers, texts };
+}
+
+export interface BulletListItemLayout {
+  readonly text: string;
+  readonly lines: readonly string[];
+}
+
+export interface BuiltBulletListEdits {
+  readonly covers: readonly CoverEdit[];
+  readonly texts: readonly TextEdit[];
+  readonly usedHeightPt: number;
+  readonly overflow: boolean;
+}
+
+/** One sampled patch owns both the original text and its painted bullet strip. */
+export function coverRectForBulletList(list: BulletList): PdfRect {
+  const padding = Math.max(0.75, list.block.style.fontSizePt * 0.08);
+  return {
+    x: list.coverRect.x - padding,
+    y: list.coverRect.y - padding,
+    w: list.coverRect.w + padding * 2,
+    h: list.coverRect.h + padding * 2,
+  };
+}
+
+/** Render a list entirely through the existing cover + text export seam. */
+export function buildBulletListEdits(
+  list: BulletList,
+  next: NextTextEdit,
+  items: readonly BulletListItemLayout[],
+  z: number,
+  availableHeightPt: number,
+): BuiltBulletListEdits {
+  const lineHeight = textBlockLineHeight(list.block, next.style);
+  const spacingScale = next.style.fontSizePt / Math.max(1, list.block.style.fontSizePt);
+  const itemSpacing = list.itemSpacingPt * spacingScale;
+  const firstBaseline = list.block.topBaselineY + next.dy;
+  let baseline = firstBaseline;
+  let lastBaseline = firstBaseline;
+
+  for (const [itemIndex, item] of items.entries()) {
+    const lineCount = Math.max(1, item.lines.length);
+    lastBaseline = baseline - (lineCount - 1) * lineHeight;
+    baseline = lastBaseline - lineHeight;
+    if (itemIndex < items.length - 1) baseline -= itemSpacing;
+  }
+
+  const usedHeightPt = items.length === 0
+    ? 0
+    : next.style.fontSizePt + firstBaseline - lastBaseline;
+  if (usedHeightPt > availableHeightPt + 0.5) {
+    return { covers: [], texts: [], usedHeightPt, overflow: true };
+  }
+
+  const cover: CoverEdit = {
+    id: id(),
+    kind: 'cover',
+    pageIndex: list.block.pageIndex,
+    rect: coverRectForBulletList(list),
+    z,
+    sampleBackground: true,
+  };
+  const texts: TextEdit[] = [];
+  const boxText = formatBulletEditorText(items.map((item) => item.text));
+  const indent = Math.max(1, list.textX - list.bulletX);
+  const textWidth = Math.max(1, next.width - indent);
+  const bulletX = list.bulletX + next.dx;
+  const textX = list.textX + next.dx;
+  baseline = firstBaseline;
+
+  // Retain a non-painting session anchor when every item is removed so the
+  // now-empty list can still be reopened and edited without revealing source text.
+  if (items.length === 0) {
+    texts.push({
+      id: id(),
+      kind: 'text',
+      pageIndex: list.block.pageIndex,
+      rect: {
+        x: bulletX,
+        y: firstBaseline,
+        w: next.width,
+        h: next.style.fontSizePt,
+      },
+      z: z + 1,
+      text: '',
+      style: next.style,
+      boxText: '',
+      boxHeight: 0,
+    });
+  }
+
+  for (const [itemIndex, item] of items.entries()) {
+    const lines = item.lines.length > 0 ? item.lines : [''];
+    texts.push({
+      id: id(),
+      kind: 'text',
+      pageIndex: list.block.pageIndex,
+      rect: {
+        x: bulletX,
+        y: baseline,
+        w: next.width,
+        h: next.style.fontSizePt,
+      },
+      z: z + 1 + texts.length,
+      text: '•',
+      style: next.style,
+      boxText,
+      boxHeight: usedHeightPt,
+    });
+    for (const [lineIndex, text] of lines.entries()) {
+      texts.push({
+        id: id(),
+        kind: 'text',
+        pageIndex: list.block.pageIndex,
+        rect: {
+          x: textX,
+          y: baseline - lineIndex * lineHeight,
+          w: textWidth,
+          h: next.style.fontSizePt,
+        },
+        z: z + 1 + texts.length,
+        text,
+        style: next.style,
+        boxText,
+        boxHeight: usedHeightPt,
+      });
+    }
+    baseline -= lines.length * lineHeight;
+    if (itemIndex < items.length - 1) baseline -= itemSpacing;
+  }
+
+  return { covers: [cover], texts, usedHeightPt, overflow: false };
 }

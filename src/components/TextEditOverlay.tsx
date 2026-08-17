@@ -12,6 +12,7 @@ import { calculateInitialEditorWidth, finishTextEdit } from '@/lib/edit/textEdit
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
+import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
 
 const FAMILY_KEYWORD = {
   sans: 'Arial',
@@ -77,6 +78,11 @@ interface TextEditOverlayProps {
   readonly zoom: number;
   readonly pageWidthPt: number;
   readonly backgroundColor: string;
+  readonly bulletMode?: {
+    readonly items: readonly string[];
+    readonly maxHeightPt: number;
+  };
+  readonly externalError?: string;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
 }
@@ -88,10 +94,15 @@ export function TextEditOverlay({
   zoom,
   pageWidthPt,
   backgroundColor,
+  bulletMode,
+  externalError,
   onDone,
   onCancel,
 }: TextEditOverlayProps) {
-  const initialText = existing?.[0]?.boxText ?? existing?.map((edit) => edit.text).join('\n') ?? block.text;
+  const initialText = existing?.[0]?.boxText ??
+    (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
+    existing?.map((edit) => edit.text).join('\n') ??
+    block.text;
   const initialStyle = existing?.[0]?.style ?? block.style;
   const initialSpans = existing?.[0]?.boxSpans ?? (existing?.length === 1 ? existing[0]?.spans : undefined);
   const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans));
@@ -101,14 +112,16 @@ export function TextEditOverlay({
     italic: initialStyle.italic,
   });
   const naturalWidth = block.rect.w;
-  const [initialWidth] = useState(() => calculateInitialEditorWidth({
-    blockWidthPt: naturalWidth,
-    blockXPt: block.rect.x,
-    existingWidthPt: existing?.[0]?.rect.w,
-    fontSizePt: initialStyle.fontSizePt,
-    measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
-    pageWidthPt,
-  }));
+  const [initialWidth] = useState(() => bulletMode
+    ? Math.max(naturalWidth, existing?.[0]?.rect.w ?? 0)
+    : calculateInitialEditorWidth({
+      blockWidthPt: naturalWidth,
+      blockXPt: block.rect.x,
+      existingWidthPt: existing?.[0]?.rect.w,
+      fontSizePt: initialStyle.fontSizePt,
+      measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
+      pageWidthPt,
+    }));
   const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);
   const [width, setWidth] = useState(initialWidth);
   const [height, setHeight] = useState(initialHeight);
@@ -174,6 +187,7 @@ export function TextEditOverlay({
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
     };
+    if (bulletMode && height > bulletMode.maxHeightPt + 0.5) return;
     finishTextEdit(
       {
         text: initialText,
@@ -191,6 +205,10 @@ export function TextEditOverlay({
   };
   const controlsAbove = screenRect.top + moveOffset.y > 52;
   const lineHeight = textBlockLineHeight(block, style);
+  const bulletOverflow = Boolean(
+    bulletMode && height > bulletMode.maxHeightPt + 0.5,
+  );
+  const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
     if (!editable) return;
@@ -275,6 +293,9 @@ export function TextEditOverlay({
         role="toolbar"
         aria-label="Text formatting"
       >
+        {bulletMode && (
+          <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
+        )}
         <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: Math.max(4, value.fontSizePt - 1) }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Decrease text size">A−</button>
         <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: value.fontSizePt + 1 }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Increase text size">A+</button>
         <button type="button" aria-pressed={selectionStyle.bold} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
@@ -294,13 +315,29 @@ export function TextEditOverlay({
         </select>
         <span className="mx-1 h-5 w-px bg-neutral-200" />
         <button type="button" onClick={onCancel} className="rounded px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100">Cancel</button>
-        <button type="button" onClick={commit} className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700">Done</button>
+        <button
+          type="button"
+          onClick={commit}
+          disabled={bulletOverflow}
+          className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
+        >
+          Done
+        </button>
       </div>
+
+      {visibleError && (
+        <div
+          role="alert"
+          className="absolute left-0 top-full z-30 mt-2 whitespace-nowrap rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
+        >
+          {visibleError}
+        </div>
+      )}
 
       <div
         ref={editableRef}
         role="textbox"
-        aria-label="Editable text"
+        aria-label={bulletMode ? 'Editable bullet list' : 'Editable text'}
         aria-multiline="true"
         contentEditable
         suppressContentEditableWarning
@@ -317,7 +354,7 @@ export function TextEditOverlay({
           } else if (event.key === 'Enter') {
             event.preventDefault();
             const editable = editableRef.current;
-            if (editable) insertPlainText(editable, '\n');
+            if (editable) insertPlainText(editable, bulletMode ? '\n• ' : '\n');
             resizeToContent();
           }
         }}
@@ -332,8 +369,8 @@ export function TextEditOverlay({
       />
       <button
         type="button"
-        aria-label="Drag to move text"
-        title="Drag to move text; arrow keys move one pixel"
+        aria-label="Drag to move"
+        title="Drag to move; arrow keys move one pixel"
         onPointerDown={beginMoveDrag}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 10 : 1;

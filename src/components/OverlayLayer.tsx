@@ -10,17 +10,29 @@ import type { ScreenRect } from '@/lib/export/coordinates';
 import type { CoverEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import { sampleDominantColor } from '@/lib/export/colorSample';
 import {
+  buildBulletListEdits,
   buildFreeTextEdits,
   buildTextBlockEdits,
+  coverRectForBulletList,
   coverRectForTextBlock,
   coverRectsForTextBlock,
   freeTextLineHeight,
 } from '@/lib/edit/buildTextEdits';
-import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
+import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
+import {
+  availableBulletListHeight,
+  bulletEditorBlock,
+  detectBulletListFromRegions,
+  formatBulletEditorText,
+  parseBulletEditorItems,
+} from '@/lib/pdf/bulletList';
+import type { BulletList } from '@/lib/pdf/bulletList';
+import { detectImages } from '@/lib/pdf/images';
+import type { ImageRegion } from '@/lib/pdf/images';
 import { detectDates } from '@/lib/smart/dateDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
@@ -50,6 +62,7 @@ interface PopoverTarget {
   readonly block: TextBlock;
   readonly text: string;
   readonly screenRect: ReturnType<typeof pdfRectToScreenRect>;
+  readonly bulletList?: BulletList;
 }
 
 interface FreeTextSession {
@@ -184,6 +197,21 @@ function wrapNextText(next: NextTextEdit) {
   );
 }
 
+function wrapBulletItems(list: BulletList, next: NextTextEdit): BulletListItemLayout[] {
+  const canvas = window.document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (context) context.font = textStyleToCanvasFont(next.style);
+  const textWidth = Math.max(1, next.width - Math.max(1, list.textX - list.bulletX));
+  return parseBulletEditorItems(next.text).map((text) => ({
+    text,
+    lines: wrapTextToLines(
+      text,
+      textWidth,
+      (value) => context?.measureText(value).width ?? value.length * next.style.fontSizePt * 0.55,
+    ),
+  }));
+}
+
 function colorCss(color: Rgb): string {
   return `rgb(${Math.round(color.r * 255)} ${Math.round(color.g * 255)} ${Math.round(color.b * 255)})`;
 }
@@ -201,7 +229,10 @@ export function OverlayLayer({
 }: OverlayLayerProps) {
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
+  const [imageRegions, setImageRegions] = useState<ImageRegion[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
+  const [activeBulletList, setActiveBulletList] = useState<BulletList | null>(null);
+  const [bulletCommitError, setBulletCommitError] = useState<string>();
   const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
   const [freeTextSession, setFreeTextSession] = useState<FreeTextSession | null>(null);
   const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
@@ -210,10 +241,14 @@ export function OverlayLayer({
 
   useEffect(() => {
     let cancelled = false;
-    void extractTextRuns(page, pageIndex).then((nextRuns) => {
+    void Promise.all([
+      extractTextRuns(page, pageIndex),
+      detectImages(page, pageIndex),
+    ]).then(([nextRuns, nextImageRegions]) => {
       if (!cancelled) {
         setRuns(nextRuns);
         setBlocks(groupRunsIntoBlocks(nextRuns));
+        setImageRegions(nextImageRegions);
       }
     });
     return () => {
@@ -227,6 +262,12 @@ export function OverlayLayer({
   }, [editMode, textAddMode]);
 
   const detectedDates = useMemo(() => detectDates(runs), [runs]);
+  const bulletLists = useMemo(
+    () => blocks
+      .map((block) => detectBulletListFromRegions(block, imageRegions))
+      .filter((list): list is BulletList => list !== null),
+    [blocks, imageRegions],
+  );
 
   const pageTextEdits = useMemo(
     () => edits
@@ -299,6 +340,25 @@ export function OverlayLayer({
       if (text) texts.push(text);
     }
     return { covers: covers.length > 0 ? covers : [anchor], texts };
+  };
+
+  const findExistingBulletList = (list: BulletList): ExistingBlock | undefined => {
+    const expectedCover = coverRectForBulletList(list);
+    const anchor = pageCoverEdits.find((edit) => (
+      edit.pageIndex === list.block.pageIndex && sameRect(edit.rect, expectedCover)
+    ));
+    if (!anchor) return undefined;
+    const byZ = new Map(
+      pageTextEdits
+        .filter((edit) => edit.origin !== 'free')
+        .map((edit) => [edit.z, edit]),
+    );
+    const texts: TextEdit[] = [];
+    for (let z = anchor.z + 1; byZ.has(z); z += 1) {
+      const text = byZ.get(z);
+      if (text) texts.push(text);
+    }
+    return { covers: [anchor], texts };
   };
 
   const beginFreeTextPlacement = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -455,9 +515,43 @@ export function OverlayLayer({
             title={labelText}
             onClick={() => {
               setActiveBlock(null);
+              setActiveBulletList(null);
               setPopoverTarget({ block, text: actionText, screenRect: rect });
             }}
             className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+          />
+        );
+      })}
+
+      {editMode && bulletLists.map((list, index) => {
+        const existing = findExistingBulletList(list);
+        const actionText = existing
+          ? sourceText(existing.texts)
+          : formatBulletEditorText(list.items.map((item) => item.text));
+        const rect = pdfRectToScreenRect(
+          existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : list.coverRect,
+          viewport,
+          dpr,
+        );
+        const label = actionText.replace(/\s+/g, ' ').trim() || 'empty bullet list';
+        return (
+          <button
+            key={`bullet-list-${list.block.pageIndex}-${index}-${list.coverRect.y}`}
+            type="button"
+            aria-label={`Bullet list actions: ${label}`}
+            title={label}
+            onClick={() => {
+              setActiveBlock(null);
+              setActiveBulletList(null);
+              setPopoverTarget({
+                block: list.block,
+                bulletList: list,
+                text: actionText,
+                screenRect: rect,
+              });
+            }}
+            className="absolute z-[26] cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
           />
         );
@@ -474,6 +568,7 @@ export function OverlayLayer({
             title={label}
             onClick={() => {
               setActiveBlock(null);
+              setActiveBulletList(null);
               setPopoverTarget(null);
               setFreeTextSession({
                 block: freeTextBlockFromEdits(texts),
@@ -502,6 +597,7 @@ export function OverlayLayer({
             aria-label={`Text actions for edited text: ${sourceText(existing.texts).replace(/\s+/g, ' ').trim()}`}
             onClick={() => {
               setActiveBlock(null);
+              setActiveBulletList(null);
               setPopoverTarget({ block, text: sourceText(existing.texts), screenRect: rect });
             }}
             className="absolute z-[25] cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
@@ -517,7 +613,13 @@ export function OverlayLayer({
           screenRect={popoverTarget.screenRect}
           pageWidth={viewport.width / dpr}
           onEdit={() => {
-            setActiveBlock(popoverTarget.block);
+            setActiveBulletList(popoverTarget.bulletList ?? null);
+            setBulletCommitError(undefined);
+            setActiveBlock(
+              popoverTarget.bulletList
+                ? bulletEditorBlock(popoverTarget.bulletList)
+                : popoverTarget.block,
+            );
             setPopoverTarget(null);
           }}
           onClose={() => setPopoverTarget(null)}
@@ -525,13 +627,17 @@ export function OverlayLayer({
       )}
 
       {activeBlock && (() => {
-        const existing = findExisting(activeBlock);
+        const existing = activeBulletList
+          ? findExistingBulletList(activeBulletList)
+          : findExisting(activeBlock);
         const sourceRect = existing && existing.texts.length > 0
           ? textBoxRect(existing.texts)
-          : activeBlock.rect;
+          : activeBulletList?.coverRect ?? activeBlock.rect;
         const screenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
-        const activeCovers = coverRectsForTextBlock(activeBlock);
-        const base = existing && existing.texts.length > 0
+        const activeCovers = activeBulletList
+          ? [coverRectForBulletList(activeBulletList)]
+          : coverRectsForTextBlock(activeBlock);
+        const base = !activeBulletList && existing && existing.texts.length > 0
           ? {
               x: Math.min(...existing.texts.map((edit) => edit.rect.x)),
               topBaselineY: Math.max(...existing.texts.map((edit) => edit.rect.y)),
@@ -563,11 +669,51 @@ export function OverlayLayer({
               screenRect={screenRect}
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
-              backgroundColor={colorCss(sampleBackground(activeBlock.rect))}
-              onCancel={() => setActiveBlock(null)}
+              backgroundColor={colorCss(sampleBackground(activeBulletList?.coverRect ?? activeBlock.rect))}
+              bulletMode={activeBulletList ? {
+                items: activeBulletList.items.map((item) => item.text),
+                maxHeightPt: availableBulletListHeight(
+                  activeBulletList,
+                  blocks,
+                  page.view[1] ?? 0,
+                ),
+              } : undefined}
+              externalError={bulletCommitError}
+              onCancel={() => {
+                setActiveBlock(null);
+                setActiveBulletList(null);
+                setBulletCommitError(undefined);
+              }}
               onDone={(next) => {
-                const wrappedLines = wrapNextText(next);
                 const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
+                if (activeBulletList) {
+                  const built = buildBulletListEdits(
+                    activeBulletList,
+                    next,
+                    wrapBulletItems(activeBulletList, next),
+                    nextZ,
+                    availableBulletListHeight(
+                      activeBulletList,
+                      blocks,
+                      page.view[1] ?? 0,
+                    ),
+                  );
+                  if (built.overflow) {
+                    setBulletCommitError('No room — the next section is in the way');
+                    return;
+                  }
+                  replaceEdits(
+                    existing
+                      ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
+                      : [],
+                    [...built.covers, ...built.texts],
+                  );
+                  setActiveBlock(null);
+                  setActiveBulletList(null);
+                  setBulletCommitError(undefined);
+                  return;
+                }
+                const wrappedLines = wrapNextText(next);
                 const built = buildTextBlockEdits(
                   activeBlock,
                   next,

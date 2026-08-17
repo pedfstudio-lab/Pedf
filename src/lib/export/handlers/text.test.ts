@@ -65,3 +65,26 @@ describe('drawText rich spans', () => {
     );
   });
 });
+
+it('draws an owned bullet glyph with the standard English font', async () => {
+  const context = await makeContext();
+  const edit: TextEdit = {
+    id: 'bullet',
+    kind: 'text',
+    pageIndex: 0,
+    rect: { x: 20, y: 300, w: 20, h: 10 },
+    z: 1,
+    text: '•',
+    style: {
+      fontName: 'Helvetica',
+      fontSizePt: 10,
+      bold: false,
+      italic: false,
+      color: { r: 0, g: 0, b: 0 },
+    },
+  };
+
+  await expect(drawText(edit, context)).resolves.toBeUndefined();
+  const bytes = await context.pdf.save();
+  expect(bytes.length).toBeGreaterThan(100);
+});

@@ -1324,6 +1324,102 @@ overlap; shorten it → they slide back up; the next job section stays put until
 
 **Commit:** reflow-on-edit — push the in-column content by the height delta. Text-only; no export-seam change.
 
+### Task 10H — Bullet-aware editing · Stage 1: own the bullets (reflow inside the list)  🟡 IMPLEMENTED + LOCALLY VERIFIED (`bullet-editing`; user Chrome check/commit pending)
+**Goal:** make a **bulleted list editable** — edit / add / remove bullet points and have the bullets stay glued
+to their text — by having the app **take over drawing the bullets** (cover the original painted dots, redraw our
+own "•"). The list reflows **within its own footprint + the free space below it**, and **stops cleanly** at the
+next content. **No other content on the page moves** (that's Stage 2).
+**Why:** confirmed 2026-08-16 — résumé/legal bullets are **baked-in vector graphics, not text** (RAHUL résumé:
+0 bullet characters, 711 vector paths), so text edits can't move them → bullets misalign the moment a list grows
+or shrinks. "Add a bullet point" is a core edit for résumés and legal docs; without it we lose those users.
+This is the successor to the reverted Task 10G, built the safe way.
+**Depends on:** Task 8/10C (block edits), Task 31 (undo). Builds on `textContent.ts`, `buildTextEdits.ts`, the
+export seam (`Edit = text | cover | image`), and the page canvas (`getPageCanvas`, as `colorSample.ts` uses it).
+
+**⚠ Scope — Stage 1 ONLY.** One list, one page. **Does not** push other sections (Stage 2) or flow across pages
+(Stage 3). If a list isn't a detectable bullet list, fall back to today's normal text editing — never regress it.
+
+> **Implementation note (2026-08-17):** the résumé markers are repeated 8×8 image XObjects, so Stage 1 uses
+> their transformed operator-list rectangles rather than a brightness heuristic. Fixture gate: Firgun 6/6 and
+> Travelmite 5/5 markers detected; continuation lines and non-bullet prose excluded. Live local verification
+> passed reword/add/remove, hard stop before Travelmite, one-action Undo/Redo, and selectable-bullet export.
+
+**Step 0 — Work on a throwaway branch (do everything here).**
+```bash
+git checkout main && git pull        # start from the committed checkpoint
+git checkout -b bullet-editing       # all Stage-1 work lives here; main stays untouched
+```
+Nothing merges to `main` until it's verified working. If the approach fails, the branch is deleted and `main` is
+unaffected.
+
+**Step 1 — Detect the bullets (the linchpin — PROVE THIS FIRST) → `src/lib/pdf/bulletList.ts`**
+Produce, for a candidate list block, which of its lines are **bullet-item starts** and where each bullet sits.
+- **Recommended method (robust):** for each `TextLine` in a block, sample the **rendered page canvas** in a small
+  window just LEFT of the line's text start, around its `baselineY`. A dark (non-background) blob there → that
+  line has a bullet; record its center x/y. Reuse the canvas access + background-colour logic already in
+  `colorSample.ts` / `getPageCanvas`.
+- **Alternative:** scan `page.getOperatorList()` for small dot-sized filled paths in the left margin (see how
+  `src/lib/pdf/images.ts` already walks the operator list). Note: in this PDF the paint may be bundled into
+  `constructPath` args — handle accordingly.
+- **Success gate:** on `public/samples/RAHUL RAJPUT RESUME.pdf`, correctly flag every bullet line in the Firgun
+  and Travelmite sections (and not flag non-bullet lines). **If detection isn't reliable, STOP and report** —
+  don't build the rest on a shaky base. Write a unit test asserting the detected bullet count/positions on that
+  fixture.
+
+**Step 2 — Model the list → `bulletList.ts`**
+Group a block's lines into **items**: each item = `{ bulletX, baselineY, text, lines }`, where an item runs from
+one detected bullet line up to (but not including) the next. Expose `detectBulletList(block, page): BulletList |
+null` (null when it isn't a bullet list). Capture the list's inter-item spacing and the bullet glyph size (to
+match the original dot).
+
+**Step 3 — Editor UX → extend the text-edit overlay (`TextEditOverlay.tsx` / the edit trigger)**
+When the tapped block is a `BulletList`, open the editor in **bullet mode**: one editable line per **item**,
+each shown with a leading "• ". Enter = **new bullet**, deleting an item's line = **remove that bullet**. Keep it
+built on the existing text-edit plumbing; just treat lines as items.
+
+**Step 4 — Render: own the bullets → new `buildBulletListEdits(...)` in `buildTextEdits.ts`**
+On commit, emit `Edit`s that:
+1. **Cover** the whole list region — the text column **and** the bullet strip to its left (use `sampleBackground`
+   covers so the original painted dots disappear under the page colour).
+2. For each item: draw our **own "•"** (a `text` edit) at `bulletX`, aligned to the item's first line, sized to
+   match the original dot; then the item's **re-wrapped** text lines at the list's line height.
+3. Lay items out top-down with the list's consistent spacing.
+All via the export seam — no seam change, just `cover` + `text` edits.
+
+**Step 5 — Reflow inside the list's own space, stop cleanly at the next content.**
+- Available space = from the list's top down to the **top of the next block below it** (original footprint + the
+  gap). Reuse the "block below in same column" idea (simple version — no pushing).
+- New list height ≤ available → render it (grows into the gap).
+- New list height > available → **do not overlap and do not move the next block.** Stop: block the extra
+  input / show a small **"No room — the next section is in the way"** note. (Stage 2 is what lifts this.)
+
+**Step 6 — Undo.** Bundle the covers + redrawn list as **one** action so a single Undo (Task 31) reverts the
+whole edit.
+
+**Key decisions & edge cases**
+- **We own the bullets only for the edited list**; untouched lists keep their original painted dots (they don't
+  move, so they're fine).
+- **Detection-gated:** not a detectable bullet list → normal text editing, unchanged. No regression risk.
+- **Match the look:** size/colour/x of our "•" tuned to the original dot; accept it may not be pixel-identical.
+- **Contained blast radius:** Stage 1 never touches other sections — the failure mode is a clean "no room" stop,
+  never the cross-section mess that sank Task 10G.
+- Runs entirely on the `bullet-editing` branch until proven.
+
+**Tests**
+- `bulletList` detection (fixture: RAHUL résumé): correct bullet lines/positions in Firgun + Travelmite; a
+  non-bullet paragraph → `null`.
+- list model: N bullets → N items; multi-line items grouped correctly.
+- `buildBulletListEdits`: covers span text **and** bullet column; one "•" per item at `bulletX` aligned to the
+  item's first line; adding an item raises the height by ~one item.
+- reflow: fits within available space → placed; exceeds → constrained/stop flag, next block unchanged.
+
+**Verify (live, on the branch):** open RAHUL's résumé → edit the Firgun list → reword a bullet (stays aligned) →
+**add a new bullet** (proper "•", list grows into the gap below, all bullets aligned, Travelmite untouched) →
+keep adding until it reaches Travelmite → clean **"no room"** stop, no overlap → Undo reverts the whole thing.
+
+**Commit (on `bullet-editing`):** Stage-1 bullet-aware editing — detect, own, and reflow bullets within a list.
+Merge to `main` only after the live check passes; otherwise delete the branch (main is untouched).
+
 ### Task 11 — Tap popover shell + Search Google / Maps  ✅
 **⚠ Correction (superseded by Task 11A):** block-level **Search Google / Open in Maps** search the *whole
 paragraph* — wrong granularity. Those actions move to **per-entity spans**: **dates/times now** (Task 11A,
