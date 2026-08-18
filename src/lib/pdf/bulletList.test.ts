@@ -8,9 +8,11 @@ import type { PageGeometry } from './types';
 import { detectImages } from './images';
 import {
   availableBulletListHeight,
+  bulletListHeadingBlock,
   detectBulletListFromRegions,
   detectBulletMarkers,
   formatBulletEditorText,
+  isBulletListBlock,
   nextBlockBelowBulletList,
   parseBulletEditorItems,
 } from './bulletList';
@@ -87,6 +89,23 @@ describe('RAHUL résumé bullet detection', () => {
     expect(detectBulletListFromRegions(block, imageRegions)).toBeNull();
   });
 
+  it('splits a job-title heading above a bullet list into its own editable block', () => {
+    const headings = blocks.flatMap((block) => {
+      const list = detectBulletListFromRegions(block, imageRegions);
+      if (!list) return [];
+      const heading = bulletListHeadingBlock(list);
+      return heading ? [{ list, heading }] : [];
+    });
+
+    // At least one résumé list (e.g. Firgun) has its job title grouped above the bullets.
+    expect(headings.length).toBeGreaterThan(0);
+    for (const { list, heading } of headings) {
+      expect(heading.lines).toEqual(list.sourceBlock.lines.slice(0, heading.lines.length));
+      expect(list.block.lines).toEqual(list.sourceBlock.lines.slice(heading.lines.length));
+      expect(heading.text).not.toContain('•');
+    }
+  });
+
   it('bounds Firgun at the untouched Travelmite section', () => {
     const firgun = detectBulletListFromRegions(
       fixtureBlock('Joined Firgun Travels', 'vendor communication, planning, and execution'),
@@ -98,6 +117,19 @@ describe('RAHUL résumé bullet detection', () => {
     expect(firgun ? availableBulletListHeight(firgun, blocks) : 0).toBeGreaterThan(
       firgun?.coverRect.h ?? Number.POSITIVE_INFINITY,
     );
+  });
+
+  it('owns each detected list block without claiming ordinary headings', () => {
+    const firgunBlock = fixtureBlock(
+      'Joined Firgun Travels',
+      'vendor communication, planning, and execution',
+    );
+    const firgun = detectBulletListFromRegions(firgunBlock, imageRegions);
+    if (!firgun) throw new Error('Firgun bullet list was not detected');
+    const heading = fixtureBlock('WORK EXPERIENCE', 'WORK EXPERIENCE');
+
+    expect(isBulletListBlock(firgunBlock, [firgun])).toBe(true);
+    expect(isBulletListBlock(heading, [firgun])).toBe(false);
   });
 
   it('exports owned bullets as selectable text through the unchanged edit seam', async () => {

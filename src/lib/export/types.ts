@@ -43,6 +43,8 @@ export interface BaseEdit {
   readonly pageIndex: number;
   readonly rect: PdfRect;
   readonly z: number;
+  /** Stable owner for an atomic, replaceable single-page reflow cascade. */
+  readonly reflowKey?: string;
 }
 
 export interface TextEdit extends BaseEdit {

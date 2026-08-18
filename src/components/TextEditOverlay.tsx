@@ -81,6 +81,7 @@ interface TextEditOverlayProps {
   readonly bulletMode?: {
     readonly items: readonly string[];
     readonly maxHeightPt: number;
+    readonly noRoomMessage?: string;
   };
   readonly externalError?: string;
   onDone(next: NextTextEdit): void;
@@ -208,7 +209,9 @@ export function TextEditOverlay({
   const bulletOverflow = Boolean(
     bulletMode && height > bulletMode.maxHeightPt + 0.5,
   );
-  const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
+  const visibleError = externalError ?? (bulletOverflow
+    ? bulletMode?.noRoomMessage ?? BULLET_NO_ROOM_MESSAGE
+    : undefined);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
     if (!editable) return;

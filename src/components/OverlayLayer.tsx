@@ -21,11 +21,19 @@ import {
 import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import {
+  bulletReflowKey,
+  columnPushRoom,
+  contentBelowInColumn,
+  initialListHeight,
+  planColumnPush,
+  pushColumnEdits,
+} from '@/lib/edit/columnPush';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 import {
-  availableBulletListHeight,
   bulletEditorBlock,
+  bulletListHeadingBlock,
   detectBulletListFromRegions,
   formatBulletEditorText,
   parseBulletEditorItems,
@@ -501,12 +509,15 @@ export function OverlayLayer({
       )}
 
       {editMode && blocks.map((block, index) => {
-        const rect = pdfRectToScreenRect(block.rect, viewport, dpr);
-        const labelText = block.text.replace(/\s+/g, ' ').trim();
-        const existing = findExisting(block);
+        const list = bulletLists.find((entry) => entry.sourceBlock === block);
+        const target = list ? bulletListHeadingBlock(list) : block;
+        if (!target) return null;
+        const rect = pdfRectToScreenRect(target.rect, viewport, dpr);
+        const labelText = target.text.replace(/\s+/g, ' ').trim();
+        const existing = findExisting(target);
         const actionText = existing && existing.texts.length > 0
           ? sourceText(existing.texts)
-          : block.text;
+          : target.text;
         return (
           <button
             key={`${block.pageIndex}-${index}-${block.rect.x}-${block.rect.y}`}
@@ -516,7 +527,7 @@ export function OverlayLayer({
             onClick={() => {
               setActiveBlock(null);
               setActiveBulletList(null);
-              setPopoverTarget({ block, text: actionText, screenRect: rect });
+              setPopoverTarget({ block: target, text: actionText, screenRect: rect });
             }}
             className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
@@ -583,7 +594,10 @@ export function OverlayLayer({
       })}
 
       {editMode && blocks.map((block, index) => {
-        const existing = findExisting(block);
+        const list = bulletLists.find((entry) => entry.sourceBlock === block);
+        const target = list ? bulletListHeadingBlock(list) : block;
+        if (!target) return null;
+        const existing = findExisting(target);
         if (!existing || existing.texts.length === 0) return null;
         const rect = pdfRectToScreenRect(
           textBoxRect(existing.texts),
@@ -598,7 +612,7 @@ export function OverlayLayer({
             onClick={() => {
               setActiveBlock(null);
               setActiveBulletList(null);
-              setPopoverTarget({ block, text: sourceText(existing.texts), screenRect: rect });
+              setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
             }}
             className="absolute z-[25] cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
@@ -643,6 +657,16 @@ export function OverlayLayer({
               topBaselineY: Math.max(...existing.texts.map((edit) => edit.rect.y)),
             }
           : undefined;
+        const pageBottomY = page.view[1] ?? 0;
+        const columnRun = activeBulletList
+          ? contentBelowInColumn(blocks, imageRegions, activeBulletList, pageBottomY)
+          : undefined;
+        const bulletInitialHeight = activeBulletList && columnRun
+          ? initialListHeight(activeBulletList, columnRun)
+          : 0;
+        const bulletMaxHeight = columnRun
+          ? bulletInitialHeight + columnPushRoom(columnRun)
+          : bulletInitialHeight;
         return (
           <>
             {activeCovers.map((cover, index) => {
@@ -672,11 +696,8 @@ export function OverlayLayer({
               backgroundColor={colorCss(sampleBackground(activeBulletList?.coverRect ?? activeBlock.rect))}
               bulletMode={activeBulletList ? {
                 items: activeBulletList.items.map((item) => item.text),
-                maxHeightPt: availableBulletListHeight(
-                  activeBulletList,
-                  blocks,
-                  page.view[1] ?? 0,
-                ),
+                maxHeightPt: bulletMaxHeight,
+                noRoomMessage: 'No room on this page',
               } : undefined}
               externalError={bulletCommitError}
               onCancel={() => {
@@ -686,27 +707,62 @@ export function OverlayLayer({
               }}
               onDone={(next) => {
                 const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
-                if (activeBulletList) {
+                if (activeBulletList && columnRun) {
+                  const items = wrapBulletItems(activeBulletList, next);
+                  const probe = buildBulletListEdits(
+                    activeBulletList,
+                    next,
+                    items,
+                    nextZ,
+                    bulletInitialHeight,
+                  );
+                  const pushPlan = planColumnPush(
+                    probe.usedHeightPt,
+                    bulletInitialHeight,
+                    columnRun,
+                  );
+                  if (pushPlan.stopped) {
+                    setBulletCommitError('No room on this page');
+                    return;
+                  }
+                  const reflowKey = bulletReflowKey(activeBulletList);
+                  const cascade = pushColumnEdits(
+                    columnRun,
+                    pushPlan.pushDeltaY,
+                    nextZ,
+                    reflowKey,
+                  );
+                  if (cascade.stopped) {
+                    setBulletCommitError('No room on this page');
+                    return;
+                  }
                   const built = buildBulletListEdits(
                     activeBulletList,
                     next,
-                    wrapBulletItems(activeBulletList, next),
-                    nextZ,
-                    availableBulletListHeight(
-                      activeBulletList,
-                      blocks,
-                      page.view[1] ?? 0,
-                    ),
+                    items,
+                    nextZ + cascade.edits.length,
+                    bulletMaxHeight,
                   );
                   if (built.overflow) {
-                    setBulletCommitError('No room — the next section is in the way');
+                    setBulletCommitError('No room on this page');
                     return;
                   }
+                  const activeEdits = [...built.covers, ...built.texts].map((edit) => ({
+                    ...edit,
+                    reflowKey,
+                  }));
+                  const removeIds = new Set(
+                    edits
+                      .filter((edit) => edit.reflowKey === reflowKey)
+                      .map((edit) => edit.id),
+                  );
+                  if (existing) {
+                    existing.covers.forEach((edit) => removeIds.add(edit.id));
+                    existing.texts.forEach((edit) => removeIds.add(edit.id));
+                  }
                   replaceEdits(
-                    existing
-                      ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
-                      : [],
-                    [...built.covers, ...built.texts],
+                    [...removeIds],
+                    [...cascade.edits, ...activeEdits],
                   );
                   setActiveBlock(null);
                   setActiveBulletList(null);
