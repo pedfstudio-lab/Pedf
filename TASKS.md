@@ -36,6 +36,12 @@ ESLint, `.gitattributes`/`.editorconfig`, `index.html`, `main.tsx`, git repo.
 **Depends on:** Task 2.
 **Done when:** transform tests pass for rotations 0/90/180/270; edits store rects in PDF points.
 
+> **⚠ Amendment (2026-08-18) — `TextStyle` gains an optional font identity.** See **Task 10 → Amendment A**
+> for the full workflow. `TextStyle` grows `readonly fontRef?: string` (pdf.js loaded font id, e.g. `g_d0_f2`)
+> so edits can be drawn in the document's **own** embedded font. It **must stay optional** — `TextStyle` is
+> constructed in ~25 places (tests, harness, overlays) and a required field breaks all of them. `fontName`
+> keeps its current meaning (paragraph grouping depends on it).
+
 #### Workflow
 
 **What this task is (and isn't).** Pure types + math + tests — no UI, no export, nothing visible on
@@ -567,6 +573,12 @@ bold/italic from font name), positioned via `coordinates.ts`.
 **Done when:** `extractTextRuns(page, i)` returns runs with correct text + PDF-point `rect` + `style`
 (unit-tested on a synthetic PDF), and `hitTestRun` resolves a tap to the right run.
 
+> **⚠ Amendment (2026-08-18) — stop discarding the embedded font id.** See **Task 10 → Amendment A** for the
+> full workflow. `extractTextRuns` currently overwrites pdf.js's `item.fontName` (the loaded font id, e.g.
+> `g_d0_f2`) with the generic family guess (`"sans-serif"`), losing the only handle on the document's real font.
+> Keep `style.fontName` **exactly as-is** (grouping in `canJoinBlock` depends on it) and additionally record
+> `style.fontRef = item.fontName`.
+
 #### Workflow
 
 **What this task is (and isn't).** Pure **read-side plumbing** — no visible UI, no export change. It
@@ -809,12 +821,120 @@ layout shift). (Edit-region pixel-verify against a reference render is more mean
   the *end* of Phase 1 (after the Task 11 popover), not on this commit.
 
 **Key decisions & edge cases**
-- **Substituted standard fonts, not the original embedded font** — widths/kerning differ; always surfaced via
-  `warnings`. (Faithful original-font re-embedding is out of scope by design.)
+- ~~**Substituted standard fonts, not the original embedded font**~~ — **⚠ SUPERSEDED (2026-08-18) by
+  Amendment A below.** This decision is the root cause of every "the font/size changed" report; we now reuse the
+  PDF's own embedded font. Standard fonts become the *fallback*, not the default.
+- **Substituted standard fonts** still apply as the fallback — widths/kerning differ; surfaced via `warnings`.
 - **No auto-fit / wrapping** — text draws at its size on one baseline; an over-long replacement can overflow
   the width. Wrapping is a future nicety; width-drag governs the cover/overlay extent.
 - **Cover sampling** reads the locked raster (mode color) via the app callback — `cover.ts` stays as-is.
 - **Indic still stubbed** — Indic text edits throw until Task 13; English is fully live here.
+
+#### Amendment A — Use the PDF's own embedded font (replaces standard-font substitution)  🔲 EXPERIMENT (branch)
+
+**Goal:** edited, added, and moved text keeps the document's **actual font** instead of being redrawn in one of
+3 standard fonts. Standard fonts become the **fallback**, not the default.
+**Why:** every "the font/size changed" report traces here. Measured on the résumé (2026-08-18): the same
+sentence is **198.4pt** in the PDF's real font vs **164.3pt** in our Times substitute — **~21% too narrow**,
+which also explains the drifting word spacing. Sejda does exactly this (it names the embedded font, e.g.
+`AYDWWG+Montserrat-Regular`), which is why its edits look untouched.
+**Depends on:** Task 3 (TextStyle), Task 8 (extraction), Task 9/10 (edit + export path).
+
+**Investigation results (2026-08-18 — both halves PROVEN, do not re-litigate):**
+- **Export ✅** Text drawn with raw operators referencing **the page's existing font resource** (e.g. `/F2`)
+  round-trips correctly — verified by re-opening the saved PDF and reading the text back. **No `@pdf-lib/fontkit`,
+  no font extraction, no re-embedding, no bundled font files.** The font is already in the page's `/Resources`.
+- **Preview ✅** pdf.js **already registers every embedded font as a browser FontFace** under its loaded name
+  (`g_d0_f1`, `g_d0_f2`, …, all `status: "loaded"`). Using `font-family: "g_d0_f2"` measured **198.43px** vs a
+  bogus family's **164.28px** — i.e. the real embedded font genuinely applies.
+- **Font landscape in our samples:** simple **TrueType + WinAnsiEncoding** dominates (résumé `/F1 Arial Black`,
+  `/F2 Lucida Sans Unicode`, `/F6 Tahoma,Bold`; `sample pdf` `/F1 ArialMT` …) — the easy case. Also present:
+  **Type0 / Identity-H** (GOA `Lato-Regular`, `LeagueSpartan-Bold`) — needs glyph-ID encoding; **Type3** (GOA) —
+  no reusable font, must fall back; and **non-embedded** (résumé `/F5 Arial`) — nothing to reuse, must fall back.
+- **The résumé's body font is `Lucida Sans Unicode`** — a sans face we currently render as **Times**.
+
+**⚠ Structural constraint — DO NOT BREAK THESE (verified by audit, 2026-08-18):**
+1. **`TextStyle` is constructed in ~25 places** (tests, harness, overlays, `columnPush`, `bulletList`, …). Any new
+   field **MUST be optional** (`readonly fontRef?: string`). A required field breaks every one of them.
+2. **Do NOT repurpose `style.fontName`.** `textContent.ts:181` uses `classifyFontFamily(fontName)` to decide
+   **which lines join a block** — changing what `fontName` holds silently changes paragraph/bullet grouping.
+   Leave `fontName` exactly as-is and add the font identity **alongside** it.
+3. `PageExportContext` already exposes `pdf` + `page` (pdf-lib), so the handler can reach
+   `page.node.Resources()` — **no context/seam change needed**.
+
+**Step 0 — Branch.** `git checkout main && git checkout -b embedded-fonts`. Merge only after it's verified.
+
+**Step 1 — Keep the font identity at extraction → `src/lib/pdf/textContent.ts` (~line 339).**
+Today: `const fontName = content.styles[item.fontName]?.fontFamily ?? item.fontName;` — this **discards**
+pdf.js's loaded name. Keep both:
+```ts
+const fontName = content.styles[item.fontName]?.fontFamily ?? item.fontName; // unchanged (grouping depends on it)
+runs.push({
+  ...,
+  style: { fontName, fontSizePt: verticalScale, ...classifyFontStyle(fontName), color: {...},
+           fontRef: item.fontName },   // NEW: pdf.js loaded name, e.g. "g_d0_f2"
+});
+```
+
+**Step 2 — Optional field on the model → `src/lib/export/types.ts`.**
+```ts
+export interface TextStyle {
+  readonly fontName: string;      // unchanged
+  readonly fontSizePt: number;
+  readonly bold: boolean;
+  readonly italic: boolean;
+  readonly color: Rgb;
+  /** pdf.js loaded font id (e.g. "g_d0_f2"); the embedded font's browser FontFace + export lookup key. */
+  readonly fontRef?: string;      // NEW — optional, so all existing construction sites still compile
+}
+```
+Then make sure `fontRef` **survives** the edit pipeline: `buildTextEdits`, `buildTextBlockEdits`,
+`buildBulletListEdits`, `buildFreeTextEdits`, `columnPush` all spread `style` through — confirm none of them
+rebuild a style object field-by-field (which would drop it).
+
+**Step 3 — Preview in the real font → `src/lib/edit/textStyleCss.ts`.**
+Put the embedded face first, generic family as fallback:
+```ts
+const family = CSS_FAMILIES[classifyFontFamily(style.fontName)];
+const fontFamily = style.fontRef ? `"${style.fontRef}", ${family}` : family;
+```
+Apply in **both** `textStyleToCss` and `textStyleToCanvasFont` so the on-screen text **and** the width
+measurement used for wrapping agree. *(This alone fixes the visible font/size mismatch — biggest win, lowest risk.)*
+
+**Step 4 — Export with the page's own font → `src/lib/export/handlers/text.ts` + a new
+`src/lib/export/embeddedFont.ts`.**
+- `resolvePageFontResource(context, style)` → find the page's `/Font` resource matching `style.fontRef`, or
+  `null`. *(Mapping pdf.js's loaded name → the PDF resource name is the one unproven piece — confirm the route
+  first: pdf.js's font object exposes the original BaseFont name, which can be matched against the resource
+  dict's `BaseFont`. **If this can't be made reliable, STOP and report** — Step 3 alone is still a real win.)*
+- When resolved **and** the font is simple TrueType/Type1 with `WinAnsiEncoding` → draw with raw operators
+  (`pushGraphicsState, beginText, setFillingRgbColor, setFontAndSize(name, size), setTextMatrix(1,0,0,1,x,y),
+  showText(PDFString.of(text)), endText, popGraphicsState`).
+- **Otherwise** (Type0, Type3, non-embedded, unresolved) → today's `resolveEnglishFont` path, unchanged.
+
+**Step 5 — Make the fallback smarter (do this regardless).** `classifyFontFamily("sans-serif")` currently
+returns **`'serif'`** (the string *contains* "serif") → sans PDFs fall back to **Times**. Test sans **before**
+serif, and add `'sans-serif'` to `textContent.test.ts`'s table. This is a general bug, not résumé-specific.
+
+**Impact audit — verify these still pass unchanged**
+- `npm run test` (all ~229), `typecheck`, `lint`, `npm run build`.
+- **Grouping unchanged:** `bulletList.test.ts` (Firgun 6 markers / Travelmite 5 items) and `textContent.test.ts`
+  block tests must be **identical** — proves Step 1 didn't disturb `fontName`/`classifyFontFamily`.
+- **Round-trip unchanged:** `/verify` zero-edit scenario stays green (no edits → no font path touched).
+- **Existing style constructors** (harness `englishEdit.ts` / `richTextEdit.ts`, `columnPush.test.ts`,
+  `exportPdf.test.ts`, `handlers/text.test.ts`) compile untouched — the proof that `fontRef` is optional.
+- New: a style **with** `fontRef` renders CSS with the embedded family first; **without** it falls back exactly
+  as before.
+
+**Verify (live, on the branch):** open RAHUL's résumé → edit a bullet → the text stays **Lucida Sans Unicode**
+(not Times) at the same size → push a section down (Stage 2) → pushed text keeps its font → Export → the
+downloaded PDF shows the same font, and the text is still selectable.
+
+**Out of scope here (later):** Type0/Identity-H drawing, subset **glyph-coverage detection**, and the
+Sejda-style "font is missing some characters" picker. Those land only after this proves out.
+
+**Commit (on `embedded-fonts`):** use the document's own font for preview and export; standard fonts demoted to
+fallback. Merge to `main` only after the live check; else delete the branch.
 
 ### Task 10a — Text-edit fixes: move · run-switch leak · font picker  ✅
 **Goal:** fix three issues found in the Task 9/10 build — (1) you can't move the text box, (2) editing one
@@ -1324,7 +1444,10 @@ overlap; shorten it → they slide back up; the next job section stays put until
 
 **Commit:** reflow-on-edit — push the in-column content by the height delta. Text-only; no export-seam change.
 
-### Task 10H — Bullet-aware editing · Stage 1: own the bullets (reflow inside the list)  🟡 IMPLEMENTED + LOCALLY VERIFIED (`bullet-editing`; user Chrome check/commit pending)
+### Task 10H — Bullet-aware editing · Stage 1: own the bullets (reflow inside the list)  ✅ MERGED TO MAIN (2026-08-16)
+> Shipped: detection + model (`bulletList.ts`), `buildBulletListEdits` (cover painted dots → redraw editable
+> bullets, reflow within the list, stop at the next section), bullet-mode editor, and **movable bullet lists**
+> (drag handle + `dx`/`dy` in the builder). Merged `bullet-editing` → `main` (commit `df690b8`), pushed to origin.
 **Goal:** make a **bulleted list editable** — edit / add / remove bullet points and have the bullets stay glued
 to their text — by having the app **take over drawing the bullets** (cover the original painted dots, redraw our
 own "•"). The list reflows **within its own footprint + the free space below it**, and **stops cleanly** at the
@@ -1419,6 +1542,270 @@ keep adding until it reaches Travelmite → clean **"no room"** stop, no overlap
 
 **Commit (on `bullet-editing`):** Stage-1 bullet-aware editing — detect, own, and reflow bullets within a list.
 Merge to `main` only after the live check passes; otherwise delete the branch (main is untouched).
+
+### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
+> **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
+> (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.
+> **Why parked:** Stage 2 exposed a design gap — every edit is computed from the **original** page geometry, so
+> the app has no model of *where content currently sits*. Re-editing a section that a previous push had moved
+> therefore **duplicates** it (confirmed live: move Travelmite after a Firgun push → two copies; moving it from a
+> fresh load works fine). Sub-tasks 10I(B) and 10I(C) below are parked with it — the bugs they fix only exist
+> *because* content is pushed, so neither can occur while Stage 2 is off.
+> **Prerequisite for resuming:** give the app a model of current position (each section knows where it now sits,
+> and edits compute from there) instead of patching each symptom. Stage 1 (Task 10H) is unaffected and stays live.
+**Goal:** lift Stage 1's "no room" ceiling — when an edited list needs more space than the gap below it, **push
+the sections below it down (within the page)** to make room instead of stopping. Every pushed section is moved
+**bullet-aware** (its own painted dots covered + redrawn), so nothing gets stranded. Stops at the **bottom of the
+page** (spilling to a new page is Stage 3).
+**Why:** Stage 1 stops at the next section, but real edits (add a résumé point when sections are packed tight)
+need the page to flow. This is **Task 10G done right** — 10G failed because it re-stamped pushed blocks with
+uniform spacing *and* left their bullets frozen; Stage 1 gave us the "own the bullets" tool that makes this safe.
+**Depends on:** Task 10H (Stage 1: `bulletList.ts`, `buildBulletListEdits`, own-the-bullets), Task 31 (undo).
+
+**⚠ Scope — Stage 2 ONLY.** One page. Pushes **text + bullet-list** content down; an **image / non-text block is
+a hard stop** (obstacle). **No new pages, no cross-page flow** (Stage 3). If the push would run off the page
+bottom → a clean "no room on this page" stop.
+
+**Step 0 — Fresh branch (do everything here).**
+```bash
+git checkout main && git pull            # start from Stage 1, already on main
+git checkout -b bullet-stage-2
+```
+Merge to `main` only after it's verified; otherwise delete the branch — `main` (Stage 1) stays untouched.
+
+**Step 1 — Overflow → push amount.** Stage 1's `buildBulletListEdits` already flags `overflow` when
+`usedHeightPt > availableHeightPt`. Compute `pushDeltaY = usedHeightPt − availableHeightPt` (extra room the list
+needs). On overflow, **trigger the push cascade** below by `pushDeltaY` instead of stopping.
+
+**Step 2 — Gather what to push → `contentBelowInColumn(blocks, images, editedList, pageBottomY)`** (new, pure).
+From the edited list's bottom, collect the **contiguous run of blocks below it in the same column**, top→down,
+**down to the page bottom**. **Stop** the run at the first **image / non-text obstacle** (can't be reflowed).
+Learn from — but don't reuse verbatim — the reverted `blocksBelowInColumn`; keep it a pure, tested helper.
+
+**Step 3 — Shift each pushed block down by `pushDeltaY`, FAITHFULLY + bullet-aware → new `pushColumnEdits(...)`.**
+For each block in the run:
+- **Plain text block** → cover its original rect + re-stamp **each original line at `baseline − pushDeltaY`**,
+  keeping its *own* per-line spacing (do **NOT** re-wrap / re-space — that was 10G's drift bug).
+- **Bullet-list block** → `detectBulletList(block, page)` then `buildBulletListEdits(..., dy = −pushDeltaY)` so
+  its painted dots are covered and its bullets redrawn at the shifted position (the Stage 1 trick).
+All as `cover` + `text` edits — no export-seam change.
+
+**Step 4 — Page-bottom guard (the Stage-2 ceiling).** Room = from the lowest pushed block down to `pageBottomY`.
+If `pushDeltaY` > that room, it **doesn't fit on the page**: fall back to Stage 1's behaviour — **stop**, show
+"No room on this page", make **no partial push and no new page.** (Stage 3 lifts this.)
+
+**Step 5 — One Undo.** Bundle the list edit + the whole pushed cascade into a single `replace` so one Undo
+(Task 31) reverts it all at once.
+
+**Key decisions & edge cases**
+- **Faithful translation, not re-flow:** pushed blocks keep their exact internal layout, only offset by
+  `pushDeltaY` — the specific fix for what sank 10G.
+- **Bullet-aware for every pushed section** — reuse Stage 1's own-the-bullets on any pushed bullet list.
+- **In-column, single-page only:** other columns, other pages, and everything *above* the edit never move.
+- **Images are a hard stop** (can't reflow through them); shifting images too is a later refinement.
+- **Shrinking pulls back up:** removing bullets (negative delta) slides the pushed run back up by the same rule.
+- Runs entirely on `bullet-stage-2` until proven.
+
+**Tests**
+- push math: overflow → `pushDeltaY = usedHeightPt − availableHeightPt`; no overflow → 0.
+- `contentBelowInColumn`: contiguous same-column run below; stops at an image and at the page bottom; ignores
+  other columns.
+- faithful shift: a pushed text block's internal line gaps unchanged, every line offset by `−pushDeltaY`.
+- a pushed **bullet list** redraws its bullets at the shifted baselines (cover at the new position).
+- page-bottom cap: a push exceeding page room → stop flag, nothing moved.
+- one undo reverts the edit + cascade.
+
+**Verify (live, on the branch):** RAHUL résumé, a tightly-packed section → add a bullet → the list grows **and**
+Travelmite + everything below slide down, **their bullets redrawn correctly** (no 10G stranding) → keep adding
+until the page fills → clean **"no room on this page"** stop (no new page) → Undo reverts the whole cascade →
+other columns/pages untouched.
+
+**Commit (on `bullet-stage-2`):** Stage-2 single-page reflow — push text + bullet sections down (bullet-aware,
+faithful), stop at the page bottom. Merge to `main` only after the live check passes; else delete the branch.
+
+### Task 10I(A) — Fix: a bullet list shows two edit boxes (double edit-target)  🔲 PENDING ON `main` (Stage 1 bug)
+> **Not a Stage 2 bug — keep this one.** The double edit-target exists in **Stage 1** on `main` today. The fix
+> below is superseded in one detail: don't skip the whole source block (that made job-title headings
+> uneditable). Instead render the text target for the block's **heading portion** via
+> `bulletListHeadingBlock(list)` (`bulletList.ts`), so the heading keeps its own box and the bullets keep theirs.
+> Code is ready on `origin/bullet-stage-2`; to be landed on `main` separately from Stage 2.
+**Goal:** a bullet-list paragraph should have exactly **one** editable box (the bullet editor), not two. Right now
+it's registered as **both** a plain text block **and** a bullet list, so two overlapping edit boxes appear over
+the same paragraph.
+**Why:** live testing on RAHUL's résumé (2026-08-18) — every bullet list shows two stacked editable boxes. Root
+cause: in `OverlayLayer.tsx`, the plain-text edit-target pass (`blocks.map`) does **not** skip blocks that are
+detected bullet lists, while the `bulletLists.map` pass adds a second target for the same block.
+**Depends on:** Task 10I (Stage 2). **Do this on the existing `bullet-stage-2` branch** — it fixes Stage 2's own
+regression; do NOT open a new branch.
+
+**Step 1 — Skip bullet-list blocks in the plain-text edit-target map → `src/components/OverlayLayer.tsx`.**
+In the `{editMode && blocks.map((block, index) => { … })}` pass (the plain-text clickable targets, ~line 510),
+return `null` for any block that is a detected bullet list:
+```tsx
+{editMode && blocks.map((block, index) => {
+  if (bulletLists.some((list) => list.sourceBlock === block)) return null; // bullet lists get their own target below
+  …
+```
+`bulletLists` is already in scope (the `useMemo` at ~line 272), and each `BulletList` carries `sourceBlock`, so
+this reliably identifies bullet-list blocks.
+
+**Step 2 — Same guard on the "re-edit" targets → `src/components/OverlayLayer.tsx`.**
+The re-edit pass (`blocks.map` at ~line 592, for blocks that already have committed edits) can also double-count a
+bullet list. Add the same skip at the top of that map:
+```tsx
+if (bulletLists.some((list) => list.sourceBlock === block)) return null;
+```
+Re-editing a committed bullet list already flows through the `bulletLists` map + `findExistingBulletList`, so the
+plain-text re-edit target is redundant for them.
+
+**Step 3 — Only if a *faint* second box still shows *while editing*.** The committed `cover`/`text` edits render
+unconditionally (~lines 429–477), so a previously-committed list can peek out behind the open editor. If that
+happens after Steps 1–2: while a bullet list is actively being edited (`activeBulletList` set), exclude that
+list's own committed edits from `pageCoverEdits` / `pageTextEdits` so only the editor shows. *(Do this only if
+needed — the double edit-target is the primary cause.)*
+
+**Key decisions**
+- One edit target per block: **headings / paragraphs → text target; bullet lists → bullet target.** Headings
+  (never bullet lists) are untouched — they keep their single text box.
+- The whole bullet list stays a **single** box (all items) — unchanged from Stage 1.
+- Pure edit-target wiring — no detection, layout, or export-seam change.
+
+**Tests / verify**
+- Optional unit test: extract the predicate to `isBulletListBlock(block, bulletLists)` and assert a bullet-list
+  block → `true`, a heading block → `false`.
+- **Live (on `bullet-stage-2`):** open RAHUL's résumé in edit mode → each bullet list shows **one** box, each
+  heading shows **one** box, no overlap → editing / adding a bullet still works and reflows (Stage 2) → normal
+  paragraphs unaffected.
+
+**Commit (on `bullet-stage-2`):** fix double edit-target — skip bullet-list blocks in the plain-text edit maps.
+
+### Task 10I(B) — Fix: pushed bullet text changes font/size — sub-task of 10I  ⏸️ PARKED with Stage 2
+**Goal:** when Stage 2 pushes a bullet section down, its **text must keep its exact original font, size, and
+style** — only the position changes. Right now the pushed bullet *text* is re-typeset in a substitute font/size.
+**Why:** live testing on RAHUL's résumé (2026-08-18) — after a Firgun edit pushes Travelmite + Wanderon down,
+their **bullet text switches font and grows in size**, while the **headings shift correctly.** A font check
+confirmed detection is fine; the fault is the push **re-typesetting** the bullet text instead of moving it.
+**Depends on:** Task 10I (Stage 2). **Do this on the existing `bullet-stage-2` branch.**
+
+**Root cause — `src/lib/edit/columnPush.ts`.** Pushed content shifts via two paths:
+- `exactShiftGroup` (headings / plain text) → **faithfully translates** each original run down by `pushDeltaY`,
+  keeping every run's `style` (font, size, weight). ✅
+- `bulletShiftGroup` (bullet lists) → **re-typesets** the whole list through `buildBulletListEdits` with one
+  `list.block.style`, discarding per-line/per-run fonts and sizes. ❌ ← this is the bug.
+
+**The fix — make `bulletShiftGroup` faithful, like `exactShiftGroup`.** Stop re-typesetting the text; slide the
+original runs down, and keep the bullet-dot redraw that already works (the user confirmed the bullets are fine):
+```ts
+function bulletShiftGroup(list: BulletList, pushDeltaY: number): EditGroup {
+  // (a) Faithful text: translate the list's ORIGINAL runs down, preserving each run's font/size/weight.
+  const textGroup = exactShiftGroup(list.block, pushDeltaY);
+
+  // (b) Own the bullets (unchanged behaviour): cover each painted dot, redraw a "•" at the shifted item.
+  const markerCovers = list.items.map<CoverEdit>((item) => ({
+    id: id(), kind: 'cover', pageIndex: list.block.pageIndex,
+    rect: item.markerRect, z: 0, sampleBackground: true,
+  }));
+  const markerTexts = list.items.map<TextEdit>((item) => {
+    const style = item.lines[0]?.style ?? list.block.style;
+    return {
+      id: id(), kind: 'text', pageIndex: list.block.pageIndex,
+      rect: {
+        x: list.bulletX,
+        y: item.baselineY - pushDeltaY,
+        w: Math.max(1, list.textX - list.bulletX),
+        h: style.fontSizePt,
+      },
+      z: 0, text: '•', style,
+    };
+  });
+
+  return {
+    covers: [...textGroup.covers, ...markerCovers],
+    texts: [...textGroup.texts, ...markerTexts],
+  };
+}
+```
+`exactShiftGroup` already covers the original text region and re-stamps each run at `y − pushDeltaY`; the marker
+cover hides each original painted dot, and the `•` is drawn at the item's shifted baseline, sized to the item's
+own line style. `buildBulletListEdits` / `formatBulletEditorText` are no longer needed inside `bulletShiftGroup`
+(leave them for Stage-1 editing).
+
+**Key decisions**
+- **Faithful translation, no re-typesetting** — pushed text is the original runs, only offset by `pushDeltaY`:
+  same font, size, weight, italics.
+- **Bullets unchanged** — the dot cover + `•` redraw keep working exactly as before.
+- **Headings already correct** (`exactShiftGroup`) — untouched.
+- Only `cover` + `text` edits; no export-seam change.
+
+**Tests**
+- Extend the bullet-shift / `columnPush` test: after a push, the shifted bullet **text edits carry the source
+  lines' `style`** (matching `fontName` + `fontSizePt`), **not** a single flattened style; and one `•` marker
+  per item still appears at the shifted baseline.
+
+**Verify (live, on `bullet-stage-2`):** edit Firgun so it pushes Travelmite + Wanderon down → their bullet text
+keeps the **same font and size** as before the push (matches the headings) → bullets still aligned → Undo
+restores everything.
+
+**Commit (on `bullet-stage-2`):** faithful pushed-bullet text — translate original runs instead of
+re-typesetting; keep the dot redraw.
+
+### Task 10I(C) — Fix: pushed bullets show two dots (the cover paints the dot) — sub-task of 10I  ⏸️ PARKED with Stage 2
+**Goal:** when a bullet section is pushed down, each item shows **one** bullet — the redrawn "•" — not a dark
+square beside it.
+**Why:** live testing on RAHUL's résumé (2026-08-18) — pushed Travelmite items render **two marks**: a small dark
+square plus the new "•".
+**Depends on:** Task 10I(B) (which introduced the per-marker covers). **Same `bullet-stage-2` branch.**
+
+**Root cause — `src/lib/edit/columnPush.ts`, `bulletShiftGroup`.** Each original painted dot is hidden with:
+```ts
+const markerCovers = list.items.map<CoverEdit>((item) => ({ ..., rect: item.markerRect, sampleBackground: true }));
+```
+A `sampleBackground` cover takes its colour from `sampleDominantColor`, which samples **inside its own rect**.
+That rect **is** the dot — so the dominant colour is the **dot's dark colour**, and the cover paints a dark
+square *over* the dot instead of erasing it. Result: dark square + redrawn "•" = two marks.
+*(Stage 1 doesn't hit this because `coverRectForBulletList` spans the whole list, where the dominant colour is
+the white page.)*
+
+**The fix — cover the bullet strip once, not each dot.** Replace the per-marker covers with a **single** cover
+spanning the marker column across the list, so the sampled area is mostly page background:
+```ts
+// in bulletShiftGroup, replacing markerCovers
+const markerRects = list.items.map((item) => item.markerRect);
+const left = Math.min(...markerRects.map((r) => r.x));
+const right = Math.max(...markerRects.map((r) => r.x + r.w));
+const bottom = Math.min(...markerRects.map((r) => r.y));
+const top = Math.max(...markerRects.map((r) => r.y + r.h));
+const pad = Math.max(1, list.block.style.fontSizePt * 0.15);
+const stripCover: CoverEdit = {
+  id: id(), kind: 'cover', pageIndex: list.block.pageIndex,
+  rect: {
+    x: left - pad,
+    y: bottom - pad,
+    // stop short of the text column so the strip never clips the first glyph
+    w: Math.max(1, Math.min(right + pad, list.textX - 0.5) - (left - pad)),
+    h: (top - bottom) + pad * 2,
+  },
+  z: 0, sampleBackground: true,
+};
+```
+Use `[...textGroup.covers, stripCover]` in the returned group. The redrawn `markerTexts` stay exactly as they
+are — they already work.
+
+**Key decisions**
+- **One tall strip, not per-dot patches** — a rect large enough that the page background dominates the sample.
+- **Clamped to `list.textX`** so the cover can never eat into the item text.
+- Only the cover geometry changes; the "•" redraw, the faithful text shift (10I(B)) and Stage 2's push maths are
+  untouched.
+
+**Tests** — in `columnPush.test.ts`: after a push, `bulletShiftGroup` emits **one** marker-strip cover (not one
+per item); its rect **contains every** `item.markerRect`; its right edge is `<= list.textX`; and there is still
+exactly **one** `•` text edit per item.
+
+**Verify (live, on `bullet-stage-2`):** edit Firgun so Travelmite is pushed down → each pushed item shows a
+**single** bullet, no dark square, and the original painted dots are gone.
+
+**Commit (on `bullet-stage-2`):** cover the pushed bullet strip once so the original dots are erased, not
+repainted.
 
 ### Task 11 — Tap popover shell + Search Google / Maps  ✅
 **⚠ Correction (superseded by Task 11A):** block-level **Search Google / Open in Maps** search the *whole
