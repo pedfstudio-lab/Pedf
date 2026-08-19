@@ -21,6 +21,7 @@ import {
 import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 import {
@@ -83,9 +84,23 @@ const DEFAULT_TEXT_STYLE: TextStyle = {
 const DEFAULT_FREE_TEXT_WIDTH_PT = 180;
 const DEFAULT_FREE_TEXT_HEIGHT_PT = 18;
 const MIN_FREE_TEXT_DRAW_PX = 8;
+const SNAP_TARGET_DEDUPE_PX = 1;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
+}
+
+function dedupeSnapTargets(targets: readonly SnapTarget[]): SnapTarget[] {
+  const unique: SnapTarget[] = [];
+  for (const target of targets) {
+    if (!unique.some((existing) => (
+      existing.edge === target.edge &&
+      Math.abs(existing.pos - target.pos) <= SNAP_TARGET_DEDUPE_PX
+    ))) {
+      unique.push(target);
+    }
+  }
+  return unique;
 }
 
 function sameRect(left: PdfRect, right: PdfRect): boolean {
@@ -95,6 +110,16 @@ function sameRect(left: PdfRect, right: PdfRect): boolean {
     Math.abs(left.y - right.y) < epsilon &&
     Math.abs(left.w - right.w) < epsilon &&
     Math.abs(left.h - right.h) < epsilon
+  );
+}
+
+function containsRect(outer: PdfRect, inner: PdfRect): boolean {
+  const epsilon = 0.01;
+  return (
+    outer.x <= inner.x + epsilon &&
+    outer.y <= inner.y + epsilon &&
+    outer.x + outer.w >= inner.x + inner.w - epsilon &&
+    outer.y + outer.h >= inner.y + inner.h - epsilon
   );
 }
 
@@ -237,6 +262,7 @@ export function OverlayLayer({
   const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
   const [freeTextSession, setFreeTextSession] = useState<FreeTextSession | null>(null);
   const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
+  const [moveGuideState, setMoveGuideState] = useState<MoveGuideState | null>(null);
   const { edits, addEdits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
 
@@ -415,6 +441,84 @@ export function OverlayLayer({
     window.addEventListener('pointerup', finish);
     window.addEventListener('pointercancel', cancel);
   };
+
+  const activeSnapScreenRect = (() => {
+    if (freeTextSession) {
+      return pdfRectToScreenRect(freeTextSession.block.rect, viewport, dpr);
+    }
+    if (!activeBlock) return undefined;
+    const existing = activeBulletList
+      ? findExistingBulletList(activeBulletList)
+      : findExisting(activeBlock);
+    const sourceRect = existing && existing.texts.length > 0
+      ? textBoxRect(existing.texts)
+      : activeBulletList?.coverRect ?? activeBlock.rect;
+    return pdfRectToScreenRect(sourceRect, viewport, dpr);
+  })();
+  const activeSnapLeft = activeSnapScreenRect?.left;
+  const activeSnapTop = activeSnapScreenRect?.top;
+
+  const { verticalTargets, horizontalTargets } = useMemo(() => {
+    if (activeSnapLeft === undefined || activeSnapTop === undefined) {
+      return { verticalTargets: [], horizontalTargets: [] };
+    }
+
+    const pageWidth = viewport.width / dpr;
+    const pageHeight = viewport.height / dpr;
+    const activeSource = activeBulletList?.sourceBlock ?? (
+      activeBlock
+        ? blocks.find((block) => (
+            block === activeBlock ||
+            sameRect(block.rect, activeBlock.rect) ||
+            containsRect(block.rect, activeBlock.rect)
+          )) ?? activeBlock
+        : null
+    );
+    const blockRects = blocks.map((block) => ({
+      block,
+      rect: pdfRectToScreenRect(block.rect, viewport, dpr),
+    }));
+    const otherRects = blockRects.filter(({ block }) => (
+      !activeSource || (block !== activeSource && !sameRect(block.rect, activeSource.rect))
+    ));
+    const contentLeft = blockRects.length > 0
+      ? Math.min(...blockRects.map(({ rect }) => rect.left))
+      : 0;
+    const contentRight = blockRects.length > 0
+      ? Math.max(...blockRects.map(({ rect }) => rect.left + rect.width))
+      : pageWidth;
+
+    return {
+      verticalTargets: dedupeSnapTargets([
+        { pos: activeSnapLeft, edge: 'min', label: 'original position' },
+        { pos: pageWidth / 2, edge: 'mid', label: 'page center' },
+        { pos: contentLeft, edge: 'min', label: 'left column' },
+        { pos: contentRight, edge: 'max', label: 'right margin' },
+        ...otherRects.flatMap(({ rect }) => [
+          { pos: rect.left, edge: 'min' as const, label: 'left column' },
+          { pos: rect.left + rect.width / 2, edge: 'mid' as const, label: 'block center' },
+          { pos: rect.left + rect.width, edge: 'max' as const, label: 'right edge' },
+        ]),
+      ]),
+      horizontalTargets: dedupeSnapTargets([
+        { pos: activeSnapTop, edge: 'min', label: 'original position' },
+        { pos: pageHeight / 2, edge: 'mid', label: 'page center' },
+        ...otherRects.flatMap(({ rect }) => [
+          { pos: rect.top, edge: 'min' as const, label: 'top edge' },
+          { pos: rect.top + rect.height / 2, edge: 'mid' as const, label: 'block middle' },
+          { pos: rect.top + rect.height, edge: 'max' as const, label: 'bottom edge' },
+        ]),
+      ]),
+    };
+  }, [
+    activeBlock,
+    activeBulletList,
+    activeSnapLeft,
+    activeSnapTop,
+    blocks,
+    dpr,
+    viewport,
+  ]);
 
   if (peek) return null;
 
@@ -677,6 +781,9 @@ export function OverlayLayer({
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
               backgroundColor={colorCss(sampleBackground(activeBulletList?.coverRect ?? activeBlock.rect))}
+              verticalTargets={verticalTargets}
+              horizontalTargets={horizontalTargets}
+              onMoveStateChange={setMoveGuideState}
               bulletMode={activeBulletList ? {
                 items: activeBulletList.items.map((item) => item.text),
                 maxHeightPt: availableBulletListHeight(
@@ -753,6 +860,9 @@ export function OverlayLayer({
             zoom={zoom}
             pageWidthPt={viewport.width / (zoom * dpr)}
             backgroundColor="transparent"
+            verticalTargets={verticalTargets}
+            horizontalTargets={horizontalTargets}
+            onMoveStateChange={setMoveGuideState}
             onCancel={() => setFreeTextSession(null)}
             onDone={(next) => {
               if (next.text.trim() === '') {
@@ -777,6 +887,54 @@ export function OverlayLayer({
           />
         );
       })()}
+
+      {moveGuideState && (
+        <div
+          className="pointer-events-none absolute inset-0 z-[60] overflow-hidden"
+          aria-label="Move alignment guides"
+        >
+          <div
+            className="absolute inset-y-0 border-l border-dashed border-neutral-500/70"
+            style={{ left: moveGuideState.crosshair.x }}
+          />
+          <div
+            className="absolute inset-x-0 border-t border-dashed border-neutral-500/70"
+            style={{ top: moveGuideState.crosshair.y }}
+          />
+          {moveGuideState.vertical && (
+            <>
+              <div
+                className="absolute inset-y-0 border-l-2 border-dashed border-fuchsia-500"
+                style={{ left: moveGuideState.vertical.pos }}
+              />
+              <span
+                className="absolute top-2 rounded bg-fuchsia-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
+                style={{
+                  left: clamp(moveGuideState.vertical.pos + 5, 4, Math.max(4, viewport.width / dpr - 110)),
+                }}
+              >
+                {moveGuideState.vertical.label}
+              </span>
+            </>
+          )}
+          {moveGuideState.horizontal && (
+            <>
+              <div
+                className="absolute inset-x-0 border-t-2 border-dashed border-fuchsia-500"
+                style={{ top: moveGuideState.horizontal.pos }}
+              />
+              <span
+                className="absolute left-2 rounded bg-fuchsia-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
+                style={{
+                  top: clamp(moveGuideState.horizontal.pos + 5, 4, Math.max(4, viewport.height / dpr - 22)),
+                }}
+              >
+                {moveGuideState.horizontal.label}
+              </span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -16,6 +16,11 @@ import {
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
+import {
+  SNAP_THRESHOLD_PX,
+  snapAxis,
+} from '@/lib/edit/moveSnap';
+import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
 
 const FAMILY_KEYWORD = {
@@ -82,11 +87,14 @@ interface TextEditOverlayProps {
   readonly zoom: number;
   readonly pageWidthPt: number;
   readonly backgroundColor: string;
+  readonly verticalTargets: readonly SnapTarget[];
+  readonly horizontalTargets: readonly SnapTarget[];
   readonly bulletMode?: {
     readonly items: readonly string[];
     readonly maxHeightPt: number;
   };
   readonly externalError?: string;
+  onMoveStateChange(state: MoveGuideState | null): void;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
 }
@@ -98,8 +106,11 @@ export function TextEditOverlay({
   zoom,
   pageWidthPt,
   backgroundColor,
+  verticalTargets,
+  horizontalTargets,
   bulletMode,
   externalError,
+  onMoveStateChange,
   onDone,
   onCancel,
 }: TextEditOverlayProps) {
@@ -168,17 +179,55 @@ export function TextEditOverlay({
     const startY = event.clientY;
     const startOffset = moveOffset;
     event.currentTarget.setPointerCapture(event.pointerId);
+    onMoveStateChange({
+      crosshair: {
+        x: screenRect.left + startOffset.x,
+        y: screenRect.top + startOffset.y,
+      },
+    });
 
     const move = (moveEvent: PointerEvent) => {
-      setMoveOffset({
+      const rawOffset = {
         x: startOffset.x + moveEvent.clientX - startX,
         y: startOffset.y + moveEvent.clientY - startY,
+      };
+      const rawLeft = screenRect.left + rawOffset.x;
+      const rawTop = screenRect.top + rawOffset.y;
+      const boxWidth = width * zoom;
+      const boxHeight = height * zoom;
+      const xSnap = snapAxis(
+        rawLeft,
+        rawLeft + boxWidth / 2,
+        rawLeft + boxWidth,
+        verticalTargets,
+        SNAP_THRESHOLD_PX,
+      );
+      const ySnap = snapAxis(
+        rawTop,
+        rawTop + boxHeight / 2,
+        rawTop + boxHeight,
+        horizontalTargets,
+        SNAP_THRESHOLD_PX,
+      );
+      const snappedOffset = {
+        x: rawOffset.x + (xSnap?.delta ?? 0),
+        y: rawOffset.y + (ySnap?.delta ?? 0),
+      };
+      setMoveOffset(snappedOffset);
+      onMoveStateChange({
+        crosshair: {
+          x: screenRect.left + snappedOffset.x,
+          y: screenRect.top + snappedOffset.y,
+        },
+        ...(xSnap ? { vertical: xSnap.guide } : {}),
+        ...(ySnap ? { horizontal: ySnap.guide } : {}),
       });
     };
     const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
+      onMoveStateChange(null);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
@@ -266,6 +315,8 @@ export function TextEditOverlay({
     window.document.addEventListener('selectionchange', refreshSelectionStyle);
     return () => window.document.removeEventListener('selectionchange', refreshSelectionStyle);
   }, [refreshSelectionStyle]);
+
+  useEffect(() => () => onMoveStateChange(null), [onMoveStateChange]);
 
   const applyInlineStyle = (command: 'bold' | 'italic') => {
     const editable = editableRef.current;
