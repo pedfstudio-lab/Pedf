@@ -2,6 +2,7 @@ import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PdfRect, TextStyle } from '@/lib/export/types';
 import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
+import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
 
 export interface TextRun {
   readonly pageIndex: number;
@@ -33,6 +34,7 @@ export type FontFamilyClass = 'serif' | 'sans' | 'mono';
 
 /** Reduce arbitrary PDF font names to the three families both renderers support. */
 export function classifyFontFamily(fontName: string): FontFamilyClass {
+  if (/sans[-_\s]*serif/i.test(fontName)) return 'sans';
   if (/times|georgia|serif|cambria|garamond|minion|book[-_\s]*antiqua|palatino|baskerville|bodoni|constantia|merriweather/i.test(fontName)) return 'serif';
   if (/courier|mono|consolas/i.test(fontName)) return 'mono';
   return 'sans';
@@ -309,6 +311,14 @@ export async function extractTextRuns(
   pageIndex: number,
 ): Promise<TextRun[]> {
   const content = await page.getTextContent();
+  const fontRefs = new Set(
+    content.items.flatMap((item) => ('fontName' in item ? [item.fontName] : [])),
+  );
+  if ([...fontRefs].some((fontRef) => !page.commonObjs.has(fontRef))) {
+    // Text extraction does not always hydrate the public font objects. The
+    // operator list does, and is cached by pdf.js for the page render itself.
+    await page.getOperatorList();
+  }
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const runs: TextRun[] = [];
 
@@ -336,7 +346,11 @@ export async function extractTextRuns(
       apply(localWidth, localHeight),
     ].map((point) => viewportToPdf(viewport, point));
 
-    const fontName = content.styles[item.fontName]?.fontFamily ?? item.fontName;
+    const fontRef = item.fontName;
+    const fontName = content.styles[fontRef]?.fontFamily ?? fontRef;
+    if (page.commonObjs.has(fontRef)) {
+      registerPdfJsFontReference(fontRef, page.commonObjs.get(fontRef));
+    }
     runs.push({
       pageIndex,
       text: item.str,
@@ -347,6 +361,7 @@ export async function extractTextRuns(
         ...classifyFontStyle(fontName),
         // PDF.js text content does not expose fill color reliably.
         color: { r: 0, g: 0, b: 0 },
+        fontRef,
       },
     });
   }

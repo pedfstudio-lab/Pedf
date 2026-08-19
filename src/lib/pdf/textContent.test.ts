@@ -46,6 +46,7 @@ describe('classifyFontFamily', () => {
     ['Consolas', 'mono'],
     ['ABCDEE+Helvetica', 'sans'],
     ['Helvetica', 'sans'],
+    ['sans-serif', 'sans'],
   ] as const)('classifies %s as %s', (fontName, family) => {
     expect(classifyFontFamily(fontName)).toBe(family);
   });
@@ -83,6 +84,7 @@ describe('extractTextRuns', () => {
     expect(run?.style.bold).toBe(false);
     expect(run?.style.italic).toBe(false);
     expect(run?.style.color).toEqual({ r: 0, g: 0, b: 0 });
+    expect(run?.style.fontRef).toMatch(/^g_d\d+_f\d+$/);
   });
 });
 

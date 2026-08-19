@@ -40,6 +40,35 @@ export interface BulletList {
 
 export const BULLET_NO_ROOM_MESSAGE = 'No room — the next section is in the way';
 
+/** Bullet-list source blocks are owned exclusively by the bullet editor target. */
+export function isBulletListBlock(
+  block: TextBlock,
+  lists: readonly BulletList[],
+): boolean {
+  return lists.some((list) => list.sourceBlock === block);
+}
+
+/**
+ * The heading lines that precede the first bullet in a source block (e.g. a job
+ * title above its bullets). Returns a standalone editable block, or null when the
+ * list starts at the very first line. The bullet suffix keeps its own editor.
+ */
+export function bulletListHeadingBlock(list: BulletList): TextBlock | null {
+  const headingCount = list.sourceBlock.lines.length - list.block.lines.length;
+  if (headingCount <= 0) return null;
+  const headingLines = list.sourceBlock.lines.slice(0, headingCount);
+  const first = headingLines[0];
+  if (!first) return null;
+  return {
+    ...list.sourceBlock,
+    text: headingLines.map((line) => line.text).join('\n'),
+    rect: unionRects(headingLines.map((line) => line.rect)),
+    topBaselineY: Math.max(...headingLines.map((line) => line.baselineY)),
+    style: first.style,
+    lines: headingLines,
+  };
+}
+
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);

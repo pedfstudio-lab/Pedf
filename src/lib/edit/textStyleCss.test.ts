@@ -20,4 +20,12 @@ describe('serif screen/export font parity', () => {
     expect(textStyleToCanvasFont(serifStyle))
       .toBe('normal 400 12px "Times New Roman", Times, serif');
   });
+
+  it('puts the pdf.js embedded face first for preview and width measurement', () => {
+    const embedded = { ...serifStyle, fontRef: 'g_d0_f2' };
+    expect(textStyleToCss(embedded, 1).fontFamily)
+      .toBe('"g_d0_f2", "Times New Roman", Times, serif');
+    expect(textStyleToCanvasFont(embedded))
+      .toBe('normal 400 12px "g_d0_f2", "Times New Roman", Times, serif');
+  });
 });

@@ -305,7 +305,11 @@ export function TextEditOverlay({
           value={classifyFontFamily(style.fontName)}
           onChange={(event) => {
             const family = event.target.value as keyof typeof FAMILY_KEYWORD;
-            setStyle((value) => ({ ...value, fontName: FAMILY_KEYWORD[family] }));
+            setStyle((value) => ({
+              ...value,
+              fontName: FAMILY_KEYWORD[family],
+              fontRef: undefined,
+            }));
           }}
           className="rounded border border-neutral-200 bg-white px-1 py-1 text-sm"
         >

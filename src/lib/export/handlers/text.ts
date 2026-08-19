@@ -2,6 +2,7 @@ import { rgb } from 'pdf-lib';
 import { isIndicRun } from '../scriptRouting';
 import { drawIndicTextPatch } from '../pathA';
 import { resolveEnglishFont } from '../englishFont';
+import { drawTextWithPageFont } from '../embeddedFont';
 import type { TextEdit } from '../types';
 import type { EditHandler } from '../registry';
 
@@ -33,6 +34,8 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
     }
     return;
   }
+
+  if (drawTextWithPageFont(edit.text, edit.style, edit.rect, context)) return;
 
   const font = await resolveEnglishFont(edit.style, context);
   context.page.drawText(edit.text, {

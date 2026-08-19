@@ -8,9 +8,15 @@ const CSS_FAMILIES = {
   mono: '"Courier New", Courier, monospace',
 } as const;
 
+function fontFamily(style: TextStyle): string {
+  const fallback = CSS_FAMILIES[classifyFontFamily(style.fontName)];
+  if (!style.fontRef) return fallback;
+  const embedded = style.fontRef.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  return `"${embedded}", ${fallback}`;
+}
+
 export function textStyleToCanvasFont(style: TextStyle): string {
-  const family = CSS_FAMILIES[classifyFontFamily(style.fontName)];
-  return `${style.italic ? 'italic' : 'normal'} ${style.bold ? 700 : 400} ${style.fontSizePt}px ${family}`;
+  return `${style.italic ? 'italic' : 'normal'} ${style.bold ? 700 : 400} ${style.fontSizePt}px ${fontFamily(style)}`;
 }
 
 function colorCss(style: TextStyle): string {
@@ -21,7 +27,7 @@ function colorCss(style: TextStyle): string {
 export function textStyleToCss(style: TextStyle, zoom: number): CSSProperties {
   return {
     color: colorCss(style),
-    fontFamily: CSS_FAMILIES[classifyFontFamily(style.fontName)],
+    fontFamily: fontFamily(style),
     fontSize: `${style.fontSizePt * zoom}px`,
     fontWeight: style.bold ? 700 : 400,
     fontStyle: style.italic ? 'italic' : 'normal',

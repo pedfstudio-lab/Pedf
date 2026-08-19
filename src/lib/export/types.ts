@@ -26,6 +26,8 @@ export interface TextStyle {
   readonly bold: boolean;
   readonly italic: boolean;
   readonly color: Rgb;
+  /** pdf.js loaded font id used by its browser FontFace and the embedded-font export lookup. */
+  readonly fontRef?: string;
 }
 
 /** Inline weight/style override; family, size, and color inherit from the containing TextEdit. */

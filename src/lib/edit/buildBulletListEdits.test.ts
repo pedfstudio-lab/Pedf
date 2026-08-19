@@ -86,7 +86,14 @@ describe('buildBulletListEdits', () => {
     const bodies = built.texts.filter((edit) => edit.text !== '•');
     expect(bullets).toHaveLength(2);
     expect(bullets.map((edit) => edit.rect.x)).toEqual([20, 20]);
-    expect(bullets.map((edit) => edit.rect.y)).toEqual(bodies.map((edit) => edit.rect.y));
+    // The "•" is sized to the measured original dot (not the text size) and drawn
+    // with a standard font, and stays aligned to its item's baseline.
+    bullets.forEach((edit, index) => {
+      expect(edit.style.fontSizePt).toBeGreaterThan(list.bulletSizePt);
+      expect(edit.rect.h).toBeCloseTo(edit.style.fontSizePt, 5);
+      expect(edit.style.fontRef).toBeUndefined();
+      expect(edit.rect.y).toBeCloseTo(bodies[index]!.rect.y, 0);
+    });
   });
 
   it('adds approximately one line height for a new one-line item', () => {

@@ -208,6 +208,10 @@ export function coverRectForBulletList(list: BulletList): PdfRect {
   };
 }
 
+/** A "•" glyph's dot is ~this fraction of its font size, centred ~this fraction above the baseline. */
+const BULLET_GLYPH_DOT_RATIO = 0.31;
+const BULLET_GLYPH_DOT_RISE = 0.31;
+
 /** Render a list entirely through the existing cover + text export seam. */
 export function buildBulletListEdits(
   list: BulletList,
@@ -251,6 +255,16 @@ export function buildBulletListEdits(
   const textWidth = Math.max(1, next.width - indent);
   const bulletX = list.bulletX + next.dx;
   const textX = list.textX + next.dx;
+  // Size the redrawn "•" to the measured original dot (bulletSizePt) rather than the
+  // text size, and use a standard font — the "•" glyph isn't in the embedded subset.
+  const bulletGlyphSizePt = list.bulletSizePt > 0
+    ? Math.min(
+        next.style.fontSizePt * 1.8,
+        Math.max(next.style.fontSizePt * 0.75, list.bulletSizePt / BULLET_GLYPH_DOT_RATIO),
+      )
+    : next.style.fontSizePt;
+  const bulletGlyphStyle: TextStyle = { ...next.style, fontSizePt: bulletGlyphSizePt, fontRef: undefined };
+  const bulletGlyphDy = BULLET_GLYPH_DOT_RISE * (bulletGlyphSizePt - next.style.fontSizePt);
   baseline = firstBaseline;
 
   // Retain a non-painting session anchor when every item is removed so the
@@ -282,13 +296,13 @@ export function buildBulletListEdits(
       pageIndex: list.block.pageIndex,
       rect: {
         x: bulletX,
-        y: baseline,
+        y: baseline - bulletGlyphDy,
         w: next.width,
-        h: next.style.fontSizePt,
+        h: bulletGlyphSizePt,
       },
       z: z + 1 + texts.length,
       text: '•',
-      style: next.style,
+      style: bulletGlyphStyle,
       boxText,
       boxHeight: usedHeightPt,
     });

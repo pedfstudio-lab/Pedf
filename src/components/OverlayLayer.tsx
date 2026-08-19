@@ -26,6 +26,7 @@ import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 import {
   availableBulletListHeight,
   bulletEditorBlock,
+  bulletListHeadingBlock,
   detectBulletListFromRegions,
   formatBulletEditorText,
   parseBulletEditorItems,
@@ -501,12 +502,15 @@ export function OverlayLayer({
       )}
 
       {editMode && blocks.map((block, index) => {
-        const rect = pdfRectToScreenRect(block.rect, viewport, dpr);
-        const labelText = block.text.replace(/\s+/g, ' ').trim();
-        const existing = findExisting(block);
+        const list = bulletLists.find((entry) => entry.sourceBlock === block);
+        const target = list ? bulletListHeadingBlock(list) : block;
+        if (!target) return null;
+        const rect = pdfRectToScreenRect(target.rect, viewport, dpr);
+        const labelText = target.text.replace(/\s+/g, ' ').trim();
+        const existing = findExisting(target);
         const actionText = existing && existing.texts.length > 0
           ? sourceText(existing.texts)
-          : block.text;
+          : target.text;
         return (
           <button
             key={`${block.pageIndex}-${index}-${block.rect.x}-${block.rect.y}`}
@@ -516,7 +520,7 @@ export function OverlayLayer({
             onClick={() => {
               setActiveBlock(null);
               setActiveBulletList(null);
-              setPopoverTarget({ block, text: actionText, screenRect: rect });
+              setPopoverTarget({ block: target, text: actionText, screenRect: rect });
             }}
             className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
@@ -583,7 +587,10 @@ export function OverlayLayer({
       })}
 
       {editMode && blocks.map((block, index) => {
-        const existing = findExisting(block);
+        const list = bulletLists.find((entry) => entry.sourceBlock === block);
+        const target = list ? bulletListHeadingBlock(list) : block;
+        if (!target) return null;
+        const existing = findExisting(target);
         if (!existing || existing.texts.length === 0) return null;
         const rect = pdfRectToScreenRect(
           textBoxRect(existing.texts),
@@ -598,7 +605,7 @@ export function OverlayLayer({
             onClick={() => {
               setActiveBlock(null);
               setActiveBulletList(null);
-              setPopoverTarget({ block, text: sourceText(existing.texts), screenRect: rect });
+              setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
             }}
             className="absolute z-[25] cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
             style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
