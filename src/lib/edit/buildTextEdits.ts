@@ -95,12 +95,15 @@ export function coverRectForTextBlock(block: TextBlock): PdfRect {
   return { x: left, y: bottom, w: right - left, h: top - bottom };
 }
 
+const MIN_LINE_HEIGHT_RATIO = 1.0;
+const MAX_LINE_HEIGHT_RATIO = 1.5;
+
 export function textBlockLineHeight(block: TextBlock, style: TextStyle): number {
   const scale = style.fontSizePt / Math.max(1, block.style.fontSizePt);
   const detected = block.lineHeightPt * scale;
   return Math.min(
-    style.fontSizePt * 1.35,
-    Math.max(style.fontSizePt * 1.15, detected),
+    style.fontSizePt * MAX_LINE_HEIGHT_RATIO,
+    Math.max(style.fontSizePt * MIN_LINE_HEIGHT_RATIO, detected),
   );
 }
 

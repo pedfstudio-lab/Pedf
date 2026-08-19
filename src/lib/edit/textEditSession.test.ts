@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { TextEditSessionValue } from './textEditSession';
-import { calculateInitialEditorWidth, finishTextEdit } from './textEditSession';
+import {
+  calculateBulletRoomPt,
+  calculateInitialEditorWidth,
+  finishTextEdit,
+} from './textEditSession';
 
 const initial: TextEditSessionValue = {
   text: 'Boarding at 03:00 PM',
@@ -88,5 +92,17 @@ describe('calculateInitialEditorWidth', () => {
     });
 
     expect(width).toBe(86);
+  });
+});
+
+describe('calculateBulletRoomPt', () => {
+  it('turns an upward move into additional room below the list', () => {
+    const height = 18;
+    const atRest = calculateBulletRoomPt(15, 0, 2);
+    const movedUp = calculateBulletRoomPt(15, -8, 2);
+
+    expect(height).toBeGreaterThan(atRest + 0.5);
+    expect(height).toBeLessThanOrEqual(movedUp + 0.5);
+    expect(movedUp).toBe(19);
   });
 });

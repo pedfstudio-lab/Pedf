@@ -1543,6 +1543,100 @@ keep adding until it reaches Travelmite → clean **"no room"** stop, no overlap
 **Commit (on `bullet-editing`):** Stage-1 bullet-aware editing — detect, own, and reflow bullets within a list.
 Merge to `main` only after the live check passes; otherwise delete the branch (main is untouched).
 
+### Task 10J — WYSIWYG editor: match the original line spacing (fixes the inflated edit box + false "no room")  🔲 TODO → lands on `main` (via short branch)
+> **This is a live fix for `main`, not a parked experiment.** It is unrelated to the parked Stage-2 reflow
+> (Task 10I below). Follow the same safe-staging flow that already put Task 10H and the Amendment A + Bucket 1
+> bundle **on `main`**: work on the short `editor-box-sizing` branch, run tests + one live check, then **merge to
+> `main`** and delete the branch. The branch is scaffolding, not a destination — the endpoint is `main`.
+**Goal:** the edit box opens at the **original text's real size** — same line spacing as the PDF — so it no
+longer balloons when you click Edit, and the "no room" check stops false-firing (including when you nudge a list
+up to close a gap).
+**Why:** live testing on RAHUL's résumé (2026-08-19) — opening a bullet list makes the edit box **taller than the
+original**, which (a) looks loose/unprofessional and (b) trips the Stage-1 "no room" error even for **unchanged**
+content and even when moving the list **up** (the check ignores position). Sejda is WYSIWYG — it draws at the
+exact original metrics, so its box never resizes and never false-alarms.
+**Depends on:** Task 10 (edit/export), Task 10E (auto-height), Task 10H (bullet editing).
+
+**Root cause — `textBlockLineHeight` in `src/lib/edit/buildTextEdits.ts`:**
+```ts
+return Math.min(style.fontSizePt * 1.35, Math.max(style.fontSizePt * 1.15, detected));
+```
+The **`1.15×` floor** forces spacing looser than the résumé's tight bullets. And it's **shared by three callers**
+— the editor (`TextEditOverlay.tsx:207`) *and* both committed builders (`buildTextBlockEdits:161`,
+`buildBulletListEdits:223`) — so it inflates both the on-screen box **and** the exported layout.
+
+**Step 0 — Safe-staging branch (endpoint is `main`).** Work on the `editor-box-sizing` branch cut from the latest
+`main` (Codex has already created it via `git switch -c editor-box-sizing`; it is `main` @ `569e2f5` + this
+uncommitted TASKS.md). The branch exists only to verify; the fix **merges to `main`** as soon as tests + the live
+check pass.
+
+**Step 1 — Honor the measured original spacing → `textBlockLineHeight`.**
+`detected = block.lineHeightPt * scale` is the *measured* original spacing. Lower the floor so a tight original
+passes through, keeping just enough to prevent overlap:
+```ts
+const MIN_LINE_HEIGHT_RATIO = 1.0;   // floor — never let lines overlap (tunable)
+const MAX_LINE_HEIGHT_RATIO = 1.5;   // ceiling — honour loose originals too (was 1.35, tunable)
+return Math.min(
+  style.fontSizePt * MAX_LINE_HEIGHT_RATIO,
+  Math.max(style.fontSizePt * MIN_LINE_HEIGHT_RATIO, detected),
+);
+```
+Editor and export now reproduce the original → WYSIWYG. Both ratios are single-number tunables if any doc
+overlaps or looks off.
+
+**Step 2 — Make "no room" account for the move → `src/components/TextEditOverlay.tsx`.**
+The overflow check (`height > bulletMode.maxHeightPt`, at **line 190** commit-guard and **line 208** display)
+ignores the box's vertical move, so nudging a list up never gains room. Add the move:
+```ts
+const bulletMovePt = -moveOffset.y / zoom;                          // + = moved up = more room below
+const bulletRoomPt = bulletMode ? bulletMode.maxHeightPt + bulletMovePt : Number.POSITIVE_INFINITY;
+// use bulletRoomPt in BOTH the commit guard (line 190) and the display flag (line 208):
+const bulletOverflow = Boolean(bulletMode && height > bulletRoomPt + 0.5);
+```
+(`height`, `maxHeightPt`, and `bulletMovePt` are all in PDF points — consistent.)
+
+**⚠ Impact audit — every file that shares `textBlockLineHeight`, and the fix for each:**
+1. **`TextEditOverlay.tsx`** — the editor renders tighter, so its measured `height` shrinks and the "no room"
+   check becomes accurate. **This is the intended effect** — no fix needed beyond Step 2.
+2. **`buildTextBlockEdits` / `buildBulletListEdits`** (`buildTextEdits.ts`) — committed line positions get tighter,
+   so the **exported** layout now matches the original. Intended, but it changes output → **re-run the suite and
+   update any test asserting a committed line `rect.y` or `usedHeightPt`** (see 4–5).
+3. **`buildTextEdits.test.ts:225`** (`textBlockLineHeight(...) ≈ 16.2`) — this case has `lineHeightPt 40`, font
+   `12` → `detected 40` hits the **max** clamp (12 × 1.35 = 16.2). Lowering the **min** leaves it unchanged; but
+   **raising the max to 1.5 changes it to 18** (12 × 1.5). **Fix:** update that assertion to `18` if you raise
+   the max (or keep the max at 1.35 and leave this test as-is — decide one and be consistent).
+4. **`buildBulletListEdits.test.ts`** — fixture `lineHeightPt 12`, font `10` → `detected 12` is already above the
+   new floor (10), so its line heights/`usedHeightPt` are **unchanged**; **confirm** the "adds ~one line height"
+   and "no room" tests still pass, and adjust the numbers only if they shift.
+5. **`buildTextEdits.test.ts` block/free-text tests** — any fixture whose `lineHeightPt` is **below 1.15× its
+   font** will now render tighter; **re-run and update** the affected `rect.y`/height expectations to the new
+   (correct) values.
+6. **`columnPush.ts` + `columnPush.test.ts`** — also call `textBlockLineHeight`, **but they're PARKED on
+   `origin/bullet-stage-2`, not on `main`** → **no action here.** (When Stage 2 is ever revived, re-audit there.)
+7. **`freeTextLineHeight`** (`= fontSize × 1.2`) is a **separate** function for free text — **not affected.**
+8. **`/verify` round-trip** (zero-edit) touches no text layout → **stays green.**
+
+**Key decisions**
+- **One line-height for editor + export** keeps it WYSIWYG — what you see in the box equals what's committed.
+- **Floor 1.0× / ceiling 1.5×** honour the measured original both ways while preventing overlap; both are single
+  tunable numbers, not per-document logic.
+- **Move-aware fit** is the *only* positional input added to "no room"; nothing else about Stage-1 fit changes.
+
+**Tests**
+- `textBlockLineHeight`: tight detected (font × 1.05) → returns ~1.05× (no longer clamped up to 1.15×); loose
+  (× 1.6) → caps at 1.5×; huge (× 4) → still caps.
+- "no room": with `moveOffset` moving the box up, `bulletRoomPt` grows and a list that read "no room" at rest now
+  fits.
+- **Run the full suite; update any committed-position assertion that shifts** (expected — the export now matches
+  the original).
+
+**Verify (live, on the branch):** open a bullet list on RAHUL's résumé → the edit box opens at the **same height**
+as the original (not ballooned) → nudge the list up to close the heading gap → it **moves**, no false "no room"
+→ Done → the committed spacing matches the original.
+
+**Land it:** once the full suite + typecheck + lint + the live check are all green, **merge `editor-box-sizing` →
+`main`** and delete the branch. Commit message: `WYSIWYG editor line-height + move-aware bullet fit`.
+
 ### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
 > **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
 > (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.

@@ -12,6 +12,15 @@ export interface TextEditSessionValue {
 
 const HEIGHT_EPSILON_PT = 0.5;
 
+/** Upward screen movement increases the PDF-point room available below a bullet list. */
+export function calculateBulletRoomPt(
+  maxHeightPt: number,
+  moveOffsetYPx: number,
+  zoom: number,
+): number {
+  return maxHeightPt - moveOffsetYPx / zoom;
+}
+
 function normalizeText(text: string): string {
   return text.replace(/\r\n?/g, '\n');
 }

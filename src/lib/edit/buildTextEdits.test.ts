@@ -222,7 +222,7 @@ describe('buildTextEdits', () => {
       lines: [],
     };
 
-    expect(textBlockLineHeight(block, run.style)).toBeCloseTo(16.2, 5);
+    expect(textBlockLineHeight(block, run.style)).toBeCloseTo(18, 5);
     const result = buildTextBlockEdits(
       block,
       { text: '', style: run.style, width: 12, height: 12, dx: 0, dy: 0 },
@@ -231,5 +231,23 @@ describe('buildTextEdits', () => {
     );
     expect(result.covers).toHaveLength(1);
     expect(result.texts).toEqual([]);
+  });
+
+  it.each([
+    ['tight measured spacing', 12.6, 12.6],
+    ['loose measured spacing', 19.2, 18],
+    ['extreme measured spacing', 48, 18],
+  ])('honors %s within the 1.0x to 1.5x clamps', (_label, lineHeightPt, expected) => {
+    const block: TextBlock = {
+      pageIndex: run.pageIndex,
+      text: 'First\nSecond',
+      rect: { x: 40, y: 480, w: 120, h: 32 },
+      topBaselineY: 500,
+      lineHeightPt,
+      style: run.style,
+      lines: [],
+    };
+
+    expect(textBlockLineHeight(block, run.style)).toBeCloseTo(expected, 5);
   });
 });

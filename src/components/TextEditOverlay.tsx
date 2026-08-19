@@ -8,7 +8,11 @@ import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
 import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
-import { calculateInitialEditorWidth, finishTextEdit } from '@/lib/edit/textEditSession';
+import {
+  calculateBulletRoomPt,
+  calculateInitialEditorWidth,
+  finishTextEdit,
+} from '@/lib/edit/textEditSession';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
@@ -103,7 +107,14 @@ export function TextEditOverlay({
     (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
     block.text;
-  const initialStyle = existing?.[0]?.style ?? block.style;
+  // Re-opening a bullet list must seed its font from a body line, not the "•" marker
+  // (whose style deliberately drops fontRef); recover a lost fontRef from the block so a
+  // list damaged by an earlier re-edit heals its embedded font on the next edit.
+  const initialStyle = (() => {
+    if (!bulletMode) return existing?.[0]?.style ?? block.style;
+    const body = existing?.find((edit) => edit.text !== '•')?.style ?? block.style;
+    return body.fontRef ? body : { ...body, fontRef: block.style.fontRef };
+  })();
   const initialSpans = existing?.[0]?.boxSpans ?? (existing?.length === 1 ? existing[0]?.spans : undefined);
   const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
@@ -174,6 +185,11 @@ export function TextEditOverlay({
     window.addEventListener('pointercancel', stop);
   };
 
+  const bulletRoomPt = bulletMode
+    ? calculateBulletRoomPt(bulletMode.maxHeightPt, moveOffset.y, zoom)
+    : Number.POSITIVE_INFINITY;
+  const bulletOverflow = Boolean(bulletMode && height > bulletRoomPt + 0.5);
+
   const commit = () => {
     const editable = editableRef.current;
     if (!editable) return;
@@ -187,7 +203,7 @@ export function TextEditOverlay({
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
     };
-    if (bulletMode && height > bulletMode.maxHeightPt + 0.5) return;
+    if (bulletOverflow) return;
     finishTextEdit(
       {
         text: initialText,
@@ -205,9 +221,6 @@ export function TextEditOverlay({
   };
   const controlsAbove = screenRect.top + moveOffset.y > 52;
   const lineHeight = textBlockLineHeight(block, style);
-  const bulletOverflow = Boolean(
-    bulletMode && height > bulletMode.maxHeightPt + 0.5,
-  );
   const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
