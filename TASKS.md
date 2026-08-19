@@ -1637,6 +1637,95 @@ as the original (not ballooned) → nudge the list up to close the heading gap �
 **Land it:** once the full suite + typecheck + lint + the live check are all green, **merge `editor-box-sizing` →
 `main`** and delete the branch. Commit message: `WYSIWYG editor line-height + move-aware bullet fit`.
 
+### Task 10L — Smart alignment guides + snapping while moving a box  🔲 TODO — on `main` directly
+> **Live UI feature, built on `main`.** Pure editor interaction — no export/handler changes — so it's safe on
+> `main`; commit once tests + the live check are green. Inspired by Sejda's move guides.
+**Goal:** when the user drags an editable box, show alignment guides so they *know* where it lands — a live gray
+crosshair the moment they move, and a pink line + magnetic snap when an edge lines up with another block, the page
+center/margins, or the box's original spot. No more "is this aligned?" guesswork.
+**Why:** users can move a box today (Task 10H/10J) but get no alignment feedback, so they nudge repeatedly. Sejda
+shows guides + snaps; this matches it, and paired with the voice reader it's a standout in one PDF tool.
+**Depends on:** Task 10H/10J (box move via `moveOffset` in `TextEditOverlay`).
+
+**Two visual layers (both cleared the instant the drag ends):**
+1. **Live crosshair (gray):** faint dashed vertical line at the box's current left edge + horizontal at its top,
+   shown the moment a drag starts — the "you are here" reference (this is the "see a line the moment I move" ask).
+2. **Snap guide (pink) + magnetic snap:** when a box edge comes within ~6px of a *real* target, lock `moveOffset`
+   exactly onto it, draw a pink dashed line spanning the page at the target, and label it ("left column", "page
+   center", "original position", …). Pink lines only ever mark real targets — never empty space.
+
+**Targets (all in screen px, page-container space):**
+- **Vertical (x):** every *other* text block's left / center-x / right; page content left margin, page horizontal
+  center, right margin; the box's **original left** ("original position").
+- **Horizontal (y):** every other block's top / middle / bottom; page vertical center; the box's **original top**.
+- Dedup targets within ~1px so lines don't stack.
+
+**Architecture (where each piece lives):** the drag owns `moveOffset` inside `TextEditOverlay`, but guide lines
+must span the whole page → they render in `OverlayLayer`. So: `OverlayLayer` builds the target list from `blocks`
++ page geometry and passes it down; `TextEditOverlay` does the snap (it owns `moveOffset`) and reports guide state
+up via a callback; `OverlayLayer` renders the crosshair + pink lines over the page.
+
+**Step 1 — pure snap helper → `src/lib/edit/moveSnap.ts` (new, unit-tested):**
+```ts
+export interface SnapTarget { pos: number; edge: 'min' | 'mid' | 'max'; label: string; }
+export interface AxisSnap { delta: number; guide: { pos: number; label: string }; }
+export const SNAP_THRESHOLD_PX = 6;
+
+/** Nearest target within threshold for a box whose edges are [min, mid, max] on this axis
+ *  (min/mid/max = left/center/right on x, top/middle/bottom on y — one helper, both axes). */
+export function snapAxis(min: number, mid: number, max: number,
+  targets: readonly SnapTarget[], threshold: number): AxisSnap | null {
+  let best: (AxisSnap & { d: number }) | null = null;
+  for (const t of targets) {
+    const edge = t.edge === 'min' ? min : t.edge === 'max' ? max : mid;
+    const delta = t.pos - edge;
+    const d = Math.abs(delta);
+    if (d <= threshold && (!best || d < best.d)) best = { d, delta, guide: { pos: t.pos, label: t.label } };
+  }
+  return best ? { delta: best.delta, guide: best.guide } : null;
+}
+```
+
+**Step 2 — build targets in `OverlayLayer.tsx`:** from the page's `blocks` (skip the active one), convert each
+rect via `pdfRectToScreenRect` and emit `{pos, edge, label}` for left/center/right (vertical) and top/middle/bottom
+(horizontal); add page margins + centers and the active box's original screen left/top ("original position"). Pass
+`verticalTargets` / `horizontalTargets` into `TextEditOverlay` as props.
+
+**Step 3 — snap in the drag → `TextEditOverlay.tsx` `beginMoveDrag`:** on each pointer move, compute the raw box
+screen rect (`screenRect` + raw offset; box size `width*zoom` × `height*zoom`); run `snapAxis` per axis; if it
+hits, add `delta` to that axis's offset. `setMoveOffset` the snapped value and call
+`onMoveStateChange({ crosshair: { x: boxLeft, y: boxTop }, vertical: xSnap?.guide, horizontal: ySnap?.guide })`.
+On pointerup/pointercancel, call `onMoveStateChange(null)`.
+
+**Step 4 — render guides in `OverlayLayer.tsx`:** a sibling overlay of the editor, absolutely positioned over the
+page. While move state is set: gray dashed lines at `crosshair.x` / `crosshair.y`; pink dashed lines (+ a small
+label chip) at `vertical.pos` / `horizontal.pos`. Lines span the full page box; render nothing when state is null.
+
+**⚠ Impact audit:**
+- **Commit path:** snapping only adjusts `moveOffset`, which already feeds `dx/dy` at commit — the box commits
+  exactly where the guides showed. Intended; nothing else changes.
+- **Export/handlers:** untouched — on-screen only.
+- **Bullet "no room" (10J):** independent; the room check still governs whether a bullet commit is allowed. A
+  vertical snap that would overflow still blocks on commit exactly as today.
+- **Tap popover / edit targets / free text:** untouched — the callback + targets are wired only for the active
+  move drag.
+- **Perf:** targets built once per active-box render (blocks don't move); snap is O(targets) per pointer move —
+  trivial.
+
+**Tests (unit, on `snapAxis`):**
+- edge within threshold → returns the delta that lands the edge exactly on the target, with the right label.
+- nearest of several competing targets wins.
+- nothing within threshold → null (no snap, no guide).
+- `mid` / `max` edges snap too (center-to-page-center, right-to-right-margin), not just `min`.
+
+**Verify (live):** on RAHUL's résumé, drag the "Master of Business Management" line → a gray crosshair follows
+immediately → drag its left toward the column → pink "left column" line + snap → drag toward center → "page
+center" snap → release → guides vanish and it commits exactly where it snapped → drag back near start → "original
+position" snap.
+
+**Land it:** commit to `main` once the unit tests + typecheck + lint + the live check pass. Commit message:
+`Smart alignment guides + magnetic snapping while moving a box`.
+
 ### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
 > **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
 > (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.
