@@ -7,7 +7,7 @@ import {
   screenRectToPdfRect,
 } from '@/lib/export/coordinates';
 import type { ScreenRect } from '@/lib/export/coordinates';
-import type { CoverEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
+import type { CoverEdit, LineEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import { sampleDominantColor } from '@/lib/export/colorSample';
 import {
   buildBulletListEdits,
@@ -22,6 +22,12 @@ import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdi
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
+import {
+  buildLineDelete,
+  buildLineMove,
+  coverRectForRuleLine,
+  ruleLineRect,
+} from '@/lib/edit/buildLineEdits';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 import {
@@ -35,6 +41,8 @@ import {
 import type { BulletList } from '@/lib/pdf/bulletList';
 import { detectImages } from '@/lib/pdf/images';
 import type { ImageRegion } from '@/lib/pdf/images';
+import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import type { RuleLine } from '@/lib/pdf/ruleLines';
 import { detectDates } from '@/lib/smart/dateDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
@@ -42,6 +50,7 @@ import { SmartSpanLayer } from './SmartSpanLayer';
 import { TapPopover } from './TapPopover';
 import { TextEditOverlay } from './TextEditOverlay';
 import { ImageOverlay } from './ImageOverlay';
+import { LineEditOverlay } from './LineEditOverlay';
 
 interface OverlayLayerProps {
   readonly page: PDFPageProxy;
@@ -71,6 +80,12 @@ interface FreeTextSession {
   readonly block: TextBlock;
   readonly existing?: readonly TextEdit[];
   readonly boxId?: string;
+}
+
+interface EditableRuleLine {
+  readonly source: RuleLine;
+  readonly current: RuleLine;
+  readonly removeIds: readonly string[];
 }
 
 const WHITE_BACKGROUND: Rgb = { r: 1, g: 1, b: 1 };
@@ -242,6 +257,21 @@ function colorCss(color: Rgb): string {
   return `rgb(${Math.round(color.r * 255)} ${Math.round(color.g * 255)} ${Math.round(color.b * 255)})`;
 }
 
+function ruleLineFromEdit(edit: LineEdit): RuleLine {
+  return {
+    pageIndex: edit.pageIndex,
+    orientation: Math.abs(edit.x2 - edit.x1) >= Math.abs(edit.y2 - edit.y1)
+      ? 'horizontal'
+      : 'vertical',
+    x1: edit.x1,
+    y1: edit.y1,
+    x2: edit.x2,
+    y2: edit.y2,
+    thicknessPt: edit.thicknessPt,
+    color: edit.color,
+  };
+}
+
 export function OverlayLayer({
   page,
   pageIndex,
@@ -256,6 +286,7 @@ export function OverlayLayer({
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [imageRegions, setImageRegions] = useState<ImageRegion[]>([]);
+  const [ruleLines, setRuleLines] = useState<RuleLine[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
   const [activeBulletList, setActiveBulletList] = useState<BulletList | null>(null);
   const [bulletCommitError, setBulletCommitError] = useState<string>();
@@ -263,6 +294,7 @@ export function OverlayLayer({
   const [freeTextSession, setFreeTextSession] = useState<FreeTextSession | null>(null);
   const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
   const [moveGuideState, setMoveGuideState] = useState<MoveGuideState | null>(null);
+  const [activeRuleLine, setActiveRuleLine] = useState<EditableRuleLine | null>(null);
   const { edits, addEdits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
 
@@ -271,11 +303,13 @@ export function OverlayLayer({
     void Promise.all([
       extractTextRuns(page, pageIndex),
       detectImages(page, pageIndex),
-    ]).then(([nextRuns, nextImageRegions]) => {
+      detectRuleLines(page, pageIndex),
+    ]).then(([nextRuns, nextImageRegions, nextRuleLines]) => {
       if (!cancelled) {
         setRuns(nextRuns);
         setBlocks(groupRunsIntoBlocks(nextRuns));
         setImageRegions(nextImageRegions);
+        setRuleLines(nextRuleLines);
       }
     });
     return () => {
@@ -286,6 +320,7 @@ export function OverlayLayer({
   useEffect(() => {
     if (!textAddMode) setFreeDrawRect(undefined);
     if (!textAddMode && !editMode) setFreeTextSession(null);
+    if (!editMode) setActiveRuleLine(null);
   }, [editMode, textAddMode]);
 
   const detectedDates = useMemo(() => detectDates(runs), [runs]);
@@ -308,6 +343,23 @@ export function OverlayLayer({
     ),
     [edits, pageIndex],
   );
+  const pageLineEdits = useMemo(
+    () => edits.filter(
+      (edit): edit is LineEdit => edit.kind === 'line' && edit.pageIndex === pageIndex,
+    ),
+    [edits, pageIndex],
+  );
+  const editableRuleLines = useMemo(() => ruleLines.flatMap((source): EditableRuleLine[] => {
+    const expectedCover = coverRectForRuleLine(source);
+    const cover = pageCoverEdits.find((edit) => (
+      edit.sampleBackground && sameRect(edit.rect, expectedCover)
+    ));
+    if (!cover) return [{ source, current: source, removeIds: [] }];
+    const line = pageLineEdits.find((edit) => edit.z === cover.z + 1);
+    return line
+      ? [{ source, current: ruleLineFromEdit(line), removeIds: [cover.id, line.id] }]
+      : [];
+  }), [pageCoverEdits, pageLineEdits, ruleLines]);
   const freeTextGroups = useMemo(() => {
     const grouped = new Map<string, TextEdit[]>();
     for (const edit of pageTextEdits) {
@@ -391,6 +443,7 @@ export function OverlayLayer({
   const beginFreeTextPlacement = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || freeTextSession) return;
     event.preventDefault();
+    setActiveRuleLine(null);
     const surface = event.currentTarget;
     const bounds = surface.getBoundingClientRect();
     const start = {
@@ -443,6 +496,9 @@ export function OverlayLayer({
   };
 
   const activeSnapScreenRect = (() => {
+    if (activeRuleLine) {
+      return pdfRectToScreenRect(ruleLineRect(activeRuleLine.source), viewport, dpr);
+    }
     if (freeTextSession) {
       return pdfRectToScreenRect(freeTextSession.block.rect, viewport, dpr);
     }
@@ -574,6 +630,23 @@ export function OverlayLayer({
         );
       })}
 
+      {pageLineEdits.map((edit) => {
+        const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
+        return (
+          <div
+            key={edit.id}
+            className="pointer-events-none absolute z-10"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: Math.max(1, rect.width),
+              height: Math.max(1, rect.height),
+              backgroundColor: colorCss(edit.color),
+            }}
+          />
+        );
+      })}
+
       <ImageOverlay
         page={page}
         pageIndex={pageIndex}
@@ -605,6 +678,34 @@ export function OverlayLayer({
         </div>
       )}
 
+      {editMode && editableRuleLines.map((editable, index) => {
+        const rect = pdfRectToScreenRect(ruleLineRect(editable.current), viewport, dpr);
+        const hitWidth = Math.max(12, rect.width);
+        const hitHeight = Math.max(12, rect.height);
+        return (
+          <button
+            key={`rule-${editable.source.pageIndex}-${index}-${editable.source.x1}-${editable.source.y1}`}
+            type="button"
+            aria-label={`Edit ${editable.current.orientation} divider line`}
+            title="Edit divider line"
+            onClick={() => {
+              setActiveBlock(null);
+              setActiveBulletList(null);
+              setPopoverTarget(null);
+              setFreeTextSession(null);
+              setActiveRuleLine(editable);
+            }}
+            className="absolute z-[29] cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none"
+            style={{
+              left: rect.left - (hitWidth - rect.width) / 2,
+              top: rect.top - (hitHeight - rect.height) / 2,
+              width: hitWidth,
+              height: hitHeight,
+            }}
+          />
+        );
+      })}
+
       {editMode && blocks.map((block, index) => {
         const list = bulletLists.find((entry) => entry.sourceBlock === block);
         const target = list ? bulletListHeadingBlock(list) : block;
@@ -622,6 +723,7 @@ export function OverlayLayer({
             aria-label={`Text actions: ${labelText}`}
             title={labelText}
             onClick={() => {
+              setActiveRuleLine(null);
               setActiveBlock(null);
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: actionText, screenRect: rect });
@@ -650,6 +752,7 @@ export function OverlayLayer({
             aria-label={`Bullet list actions: ${label}`}
             title={label}
             onClick={() => {
+              setActiveRuleLine(null);
               setActiveBlock(null);
               setActiveBulletList(null);
               setPopoverTarget({
@@ -675,6 +778,7 @@ export function OverlayLayer({
             aria-label={`Edit added text: ${label}`}
             title={label}
             onClick={() => {
+              setActiveRuleLine(null);
               setActiveBlock(null);
               setActiveBulletList(null);
               setPopoverTarget(null);
@@ -707,6 +811,7 @@ export function OverlayLayer({
             type="button"
             aria-label={`Text actions for edited text: ${sourceText(existing.texts).replace(/\s+/g, ' ').trim()}`}
             onClick={() => {
+              setActiveRuleLine(null);
               setActiveBlock(null);
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
@@ -736,6 +841,34 @@ export function OverlayLayer({
           onClose={() => setPopoverTarget(null)}
         />
       )}
+
+      {activeRuleLine && (() => {
+        const screenRect = pdfRectToScreenRect(ruleLineRect(activeRuleLine.current), viewport, dpr);
+        return (
+          <LineEditOverlay
+            screenRect={screenRect}
+            zoom={zoom}
+            verticalTargets={verticalTargets}
+            horizontalTargets={horizontalTargets}
+            onMoveStateChange={setMoveGuideState}
+            onCancel={() => setActiveRuleLine(null)}
+            onDelete={() => {
+              const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
+              const built = buildLineDelete(activeRuleLine.source, nextZ);
+              replaceEdits(activeRuleLine.removeIds, [built.cover]);
+              setActiveRuleLine(null);
+            }}
+            onMove={(dxPt, dyPt) => {
+              const totalDx = activeRuleLine.current.x1 + dxPt - activeRuleLine.source.x1;
+              const totalDy = activeRuleLine.current.y1 + dyPt - activeRuleLine.source.y1;
+              const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
+              const built = buildLineMove(activeRuleLine.source, totalDx, totalDy, nextZ);
+              replaceEdits(activeRuleLine.removeIds, [built.cover, built.line]);
+              setActiveRuleLine(null);
+            }}
+          />
+        );
+      })()}
 
       {activeBlock && (() => {
         const existing = activeBulletList

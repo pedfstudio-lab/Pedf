@@ -1,5 +1,6 @@
 import { drawCover } from './handlers/cover';
 import { drawImage } from './handlers/image';
+import { drawLine } from './handlers/line';
 import { drawText } from './handlers/text';
 import type { PageExportContext } from './context';
 import type { Edit } from './types';
@@ -18,4 +19,5 @@ export const HANDLERS: HandlerRegistry = {
   text: drawText,
   cover: drawCover,
   image: drawImage,
+  line: drawLine,
 };

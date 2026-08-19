@@ -37,7 +37,7 @@ export interface TextSpan {
   readonly italic: boolean;
 }
 
-export type EditKind = 'text' | 'cover' | 'image';
+export type EditKind = 'text' | 'cover' | 'image' | 'line';
 
 export interface BaseEdit {
   readonly id: string;
@@ -77,8 +77,18 @@ export interface ImageEdit extends BaseEdit {
   readonly bytes: Uint8Array;
 }
 
+export interface LineEdit extends BaseEdit {
+  readonly kind: 'line';
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly thicknessPt: number;
+  readonly color: Rgb;
+}
+
 /** The closed union consumed exhaustively by the export-handler registry. */
-export type Edit = TextEdit | CoverEdit | ImageEdit;
+export type Edit = TextEdit | CoverEdit | ImageEdit | LineEdit;
 
 export interface EditDocument {
   /** Pristine source bytes. Only pdf-lib may consume this copy. */

@@ -1726,6 +1726,92 @@ position" snap.
 **Land it:** commit to `main` once the unit tests + typecheck + lint + the live check pass. Commit message:
 `Smart alignment guides + magnetic snapping while moving a box`.
 
+### Task 10M — Detect and edit divider / rule lines: move + delete (horizontal + vertical) · Stage 1  🔲 TODO → new branch `line-editing`
+> **Build on a NEW branch `line-editing`, not on `main`.** Detection is the only real risk, so it gets a spike
+> first; merge to `main` only after the live check. v1 = move + delete, horizontal + vertical rules.
+**Goal:** make the résumé's separator/divider lines editable — click a rule, then move it (with 10L snapping) or
+delete it — the same way text and boxes are editable.
+**Why:** the horizontal rules between sections (About me / Education / Work experience …) and any vertical rules
+are baked-in vector graphics today; after moving text around, users need to reposition or remove them. (User ask,
+2026-08-19, with the "About me" divider as the example.)
+**Depends on:** Task 10 (cover/redraw export seam), Task 10L (move snapping — reused for the line move).
+
+**The pattern (same as bullets):** detect the line → own it (cover the original) → edit (select + move/delete) →
+export (cover + redraw via a new `line` edit). Delete = cover only; move = cover + redraw at the new spot.
+
+**Step 0 — new branch.** `git checkout main && git checkout -b line-editing`. Everything below runs here; merge to
+`main` only after the live check.
+
+**Step 1 — Detection spike (throwaway, DELETE after).** Before any UI, prove detection works. A temp node script
+(like the bullet/font spikes): load RAHUL's résumé + GOA 2026 via pdf.js, read each page's operator list, and list
+candidate rule lines (orientation, x1/y1/x2/y2 in pts, thickness). **Success = it finds RAHUL's ~4–5 section
+divider rules and does NOT flag text underlines, table borders, or the page frame.** Tune the thresholds here,
+report the counts, then delete the script before writing real code.
+
+**Step 2 — Detection module → `src/lib/pdf/ruleLines.ts` (new):**
+```ts
+export interface RuleLine {
+  readonly pageIndex: number;
+  readonly orientation: 'horizontal' | 'vertical';
+  readonly x1: number; readonly y1: number;   // PDF points
+  readonly x2: number; readonly y2: number;
+  readonly thicknessPt: number;
+  readonly color: { r: number; g: number; b: number };
+}
+export async function detectRuleLines(page: PDFPageProxy, pageIndex: number): Promise<RuleLine[]>;
+```
+Walk the operator list tracking graphics state (line width, stroke/fill color, CTM). Emit a rule when a path is a
+single dominant-axis segment (or a thin filled rect): horizontal = length ≥ MIN_LEN and thickness ≤ MAX_THICK
+(~3pt); vertical = the transpose. Reject: 4-sided rectangles/boxes (a rule is ONE segment), segments shorter than
+MIN_LEN (text underlines), and page-frame edges. Merge collinear overlapping segments. Constants tuned in Step 1.
+
+**Step 3 — `line` export edit + handler:**
+- `src/lib/export/types.ts`: add `LineEdit` (`kind: 'line'`, pageIndex, x1/y1/x2/y2, thicknessPt, color, z) to the
+  `Edit` union.
+- `src/lib/export/handlers/line.ts` (new): draw with pdf-lib's native `context.page.drawLine({ start, end,
+  thickness, color })`. Register it in the export registry beside text / cover / image.
+- **Move** = a cover over the original line's padded bounding box (`sampleBackground`) + a `line` edit at the moved
+  coordinates. **Delete** = the cover only.
+- Builder `src/lib/edit/buildLineEdits.ts` (new): `buildLineMove(line, dx, dy, z)` → `{ cover, line }`;
+  `buildLineDelete(line, z)` → `{ cover }`.
+
+**Step 4 — Edit UI (select + move / delete) in `OverlayLayer`:**
+- A new detected-lines pass (`useRuleLines`, alongside `blocks` / `bulletLists`). In edit mode, render a thin
+  **clickable hit target** over each rule (a few px around the line).
+- Click a rule → a small **line toolbar** (Move handle · Delete · Cancel) and make the rule draggable.
+- **Move** reuses Task 10L: feed the rule's screen-rect edges into the same snap targets so it snaps to block
+  edges / page center / margins; on release commit `buildLineMove`. **Delete** commits `buildLineDelete`.
+- Keep an already-moved rule owned on re-open by matching its cover anchor (same idea as the text/bullet
+  `findExisting`).
+
+**⚠ Impact audit:**
+- **`Edit` union grows (`line`):** update the export registry + any exhaustive `switch (edit.kind)` (types.ts,
+  registry, `exportPdf`). The edits store treats edits opaquely → fine. The `/verify` round-trip has no line edits
+  → unaffected.
+- **Detection cost:** one extra operator-list read per page — pdf.js already triggers/caches it for text
+  extraction, so negligible.
+- **10L snapping:** reused read-only; the rule just becomes another snap *source*, no change to `snapAxis`.
+- **Covers over thin lines:** must pad enough to erase the full stroke (thickness + antialias) — verify no ghost
+  sliver remains after a move/delete.
+- **Bullets / text editing:** untouched — rules are a separate detected layer with their own hit targets.
+
+**Tests:**
+- `detectRuleLines` on RAHUL: finds the section dividers (assert count + horizontal + spanning most of the content
+  width); flags none of the body text. Synthetic page: one horizontal + one vertical rule detected with correct
+  orientation/thickness; a drawn rectangle is NOT reported as 4 rules.
+- `buildLineMove` / `buildLineDelete`: move → one cover at the original + one `line` at `+dx/+dy`; delete → cover
+  only, no line.
+- Export round-trip: move a rule → reopen the exported PDF → the line sits at the new position, old spot clean.
+
+**Verify (live, on the branch):** RAHUL's résumé in edit mode → click the rule under "About me" → drag it down, it
+snaps to the paragraph below (10L guide) → release, it commits there, old position clean → click another rule →
+Delete → gone, background intact → Undo restores it.
+
+**Land it:** merge `line-editing` → `main` once the spike is validated and tests + typecheck + lint + the live
+check pass; delete the branch. Commit message: `Detect and edit divider rules — move and delete (Task 10M Stage 1)`.
+
+**Later stages (not now):** resize (drag ends), thickness / color, additional line kinds.
+
 ### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
 > **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
 > (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.

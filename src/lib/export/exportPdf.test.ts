@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { degrees, PDFDocument } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
-import type { CoverEdit, EditDocument, PdfRect, TextEdit } from './types';
+import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import type { CoverEdit, EditDocument, LineEdit, PdfRect, TextEdit } from './types';
 
 async function makeTwoPageDocument(): Promise<EditDocument> {
   const pdf = await PDFDocument.create({ updateMetadata: false });
@@ -144,6 +145,42 @@ describe('exportPdf', () => {
         .map((item) => item.str)
         .join('');
       expect(extracted).toContain('Plain bold italic');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('writes a native divider line that reopens at the edited position', async () => {
+    const doc = await makeTwoPageDocument();
+    const line: LineEdit = {
+      id: 'line-1',
+      kind: 'line',
+      pageIndex: 0,
+      rect: { x: 20, y: 249.5, w: 260, h: 1 },
+      z: 20,
+      x1: 20,
+      y1: 250,
+      x2: 280,
+      y2: 250,
+      thicknessPt: 1,
+      color: { r: 0.2, g: 0.3, b: 0.4 },
+    };
+    doc.edits = [line];
+
+    const result = await exportPdf(doc);
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const detected = await detectRuleLines(await reopened.getPage(1), 0);
+      expect(detected).toEqual([
+        expect.objectContaining({
+          orientation: 'horizontal',
+          x1: 20,
+          y1: 250,
+          x2: 280,
+          y2: 250,
+          thicknessPt: 1,
+        }),
+      ]);
     } finally {
       await reopened.destroy();
     }
