@@ -1543,7 +1543,7 @@ keep adding until it reaches Travelmite → clean **"no room"** stop, no overlap
 **Commit (on `bullet-editing`):** Stage-1 bullet-aware editing — detect, own, and reflow bullets within a list.
 Merge to `main` only after the live check passes; otherwise delete the branch (main is untouched).
 
-### Task 10J — WYSIWYG editor: match the original line spacing (fixes the inflated edit box + false "no room")  🔲 TODO → lands on `main` (via short branch)
+### Task 10J — WYSIWYG editor: match the original line spacing (fixes the inflated edit box + false "no room")  ✅ MERGED TO MAIN (2026-08-20, `f309e10`)
 > **This is a live fix for `main`, not a parked experiment.** It is unrelated to the parked Stage-2 reflow
 > (Task 10I below). Follow the same safe-staging flow that already put Task 10H and the Amendment A + Bucket 1
 > bundle **on `main`**: work on the short `editor-box-sizing` branch, run tests + one live check, then **merge to
@@ -1637,7 +1637,7 @@ as the original (not ballooned) → nudge the list up to close the heading gap �
 **Land it:** once the full suite + typecheck + lint + the live check are all green, **merge `editor-box-sizing` →
 `main`** and delete the branch. Commit message: `WYSIWYG editor line-height + move-aware bullet fit`.
 
-### Task 10L — Smart alignment guides + snapping while moving a box  🔲 TODO — on `main` directly
+### Task 10L — Smart alignment guides + snapping while moving a box  ✅ MERGED TO MAIN (2026-08-20, `e1af523`)
 > **Live UI feature, built on `main`.** Pure editor interaction — no export/handler changes — so it's safe on
 > `main`; commit once tests + the live check are green. Inspired by Sejda's move guides.
 **Goal:** when the user drags an editable box, show alignment guides so they *know* where it lands — a live gray
@@ -1726,7 +1726,7 @@ position" snap.
 **Land it:** commit to `main` once the unit tests + typecheck + lint + the live check pass. Commit message:
 `Smart alignment guides + magnetic snapping while moving a box`.
 
-### Task 10M — Detect and edit divider / rule lines: move + delete (horizontal + vertical) · Stage 1  🔲 TODO → new branch `line-editing`
+### Task 10M — Detect and edit divider / rule lines: move + delete (horizontal + vertical) · Stage 1  ✅ MERGED TO MAIN (2026-08-20, `5fdcc4a`)
 > **Build on a NEW branch `line-editing`, not on `main`.** Detection is the only real risk, so it gets a spike
 > first; merge to `main` only after the live check. v1 = move + delete, horizontal + vertical rules.
 **Goal:** make the résumé's separator/divider lines editable — click a rule, then move it (with 10L snapping) or
@@ -1812,7 +1812,7 @@ check pass; delete the branch. Commit message: `Detect and edit divider rules �
 
 **Later stages (not now):** resize (drag ends), thickness / color, additional line kinds.
 
-### Task 10N — Fix: re-editing a moved bullet list jumps (anchor to current position, not original)  🔲 TODO
+### Task 10N — Fix: re-editing a moved bullet list jumps (anchor to current position, not original)  ✅ MERGED TO MAIN (2026-08-20, `e3503e3`)
 > Small targeted bug fix — mirrors how text blocks already work. Do it on a short branch or `main`; verify, then
 > commit on the user's go (no proactive commit).
 **Symptom (user-confirmed, 2026-08-19):** moving a bullet list's edit box a *little* sends it *far* — symmetric in
