@@ -887,6 +887,18 @@ export function OverlayLayer({
               topBaselineY: Math.max(...existing.texts.map((edit) => edit.rect.y)),
             }
           : undefined;
+        const bulletBase = activeBulletList && existing && existing.texts.length > 0
+          ? (() => {
+              const body = existing.texts.filter((edit) => edit.text !== '•' && edit.text !== '');
+              const glyphs = existing.texts.filter((edit) => edit.text === '•');
+              if (body.length === 0 || glyphs.length === 0) return undefined;
+              return {
+                bulletX: Math.min(...glyphs.map((edit) => edit.rect.x)),
+                textX: Math.min(...body.map((edit) => edit.rect.x)),
+                topBaselineY: Math.max(...body.map((edit) => edit.rect.y)),
+              };
+            })()
+          : undefined;
         return (
           <>
             {activeCovers.map((cover, index) => {
@@ -944,6 +956,7 @@ export function OverlayLayer({
                       blocks,
                       page.view[1] ?? 0,
                     ),
+                    bulletBase,
                   );
                   if (built.overflow) {
                     setBulletCommitError('No room — the next section is in the way');

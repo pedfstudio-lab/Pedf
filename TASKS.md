@@ -1812,6 +1812,98 @@ check pass; delete the branch. Commit message: `Detect and edit divider rules �
 
 **Later stages (not now):** resize (drag ends), thickness / color, additional line kinds.
 
+### Task 10N — Fix: re-editing a moved bullet list jumps (anchor to current position, not original)  🔲 TODO
+> Small targeted bug fix — mirrors how text blocks already work. Do it on a short branch or `main`; verify, then
+> commit on the user's go (no proactive commit).
+**Symptom (user-confirmed, 2026-08-19):** moving a bullet list's edit box a *little* sends it *far* — symmetric in
+every direction (left/right/up). It only misbehaves **after the list has already been moved once**; the very first
+move is fine, and **plain text blocks are unaffected**.
+**Depends on:** Task 10H (bullet editing), Task 10J (box move).
+
+**Root cause (traced end-to-end):** on re-open, the commit must know where the box *currently* is. Text blocks do
+this — `OverlayLayer.tsx` computes a `base` (current top-left) from the existing edits and passes it to
+`buildTextBlockEdits`:
+```ts
+const base = !activeBulletList && existing && existing.texts.length > 0   // ← built for TEXT blocks only
+  ? { x: Math.min(...existing.texts.map((e) => e.rect.x)),
+      topBaselineY: Math.max(...existing.texts.map((e) => e.rect.y)) }
+  : undefined;
+```
+The `!activeBulletList` gate means **bullets never get a `base`**, so `buildBulletListEdits` always rebuilds the
+list from its **original detected geometry** (`list.bulletX`, `list.textX`, `list.block.topBaselineY`) + *this*
+drag's `dx/dy`. So re-editing a list you'd already moved **discards the previous move** and re-applies only the new
+nudge from the original spot → it jumps back by the old move distance. First move works (original == current); the
+2nd+ move jumps. Bullets only, because text blocks already carry `base`.
+
+**Step 1 — give `buildBulletListEdits` a current-position anchor → `src/lib/edit/buildTextEdits.ts`:**
+```ts
+export interface BulletListBase {
+  readonly bulletX: number;
+  readonly textX: number;
+  readonly topBaselineY: number;
+}
+export function buildBulletListEdits(
+  list: BulletList,
+  next: NextTextEdit,
+  items: readonly BulletListItemLayout[],
+  z: number,
+  availableHeightPt: number,
+  base: BulletListBase = {                       // default = original geometry (first edit)
+    bulletX: list.bulletX,
+    textX: list.textX,
+    topBaselineY: list.block.topBaselineY,
+  },
+): BuiltBulletListEdits {
+  // ...anchor the redraw on `base` instead of `list.*`:
+  const firstBaseline = base.topBaselineY + next.dy;
+  const bulletX = base.bulletX + next.dx;
+  const textX = base.textX + next.dx;
+  // spacing/lineHeight/itemSpacing stay as-is (relative to the anchor).
+  // KEEP the cover at coverRectForBulletList(list) — the ORIGINAL spot — it must still erase the baked-in
+  // original dots; the previous redraw is removed by the replace action, so no ghosting.
+}
+```
+
+**Step 2 — compute the bullet base on re-edit → `src/components/OverlayLayer.tsx`:** alongside the existing text
+`base`, build one for bullets from the committed edits, and pass it to `buildBulletListEdits`:
+```ts
+const bulletBase = activeBulletList && existing && existing.texts.length > 0
+  ? (() => {
+      const body = existing.texts.filter((e) => e.text !== '•' && e.text !== '');
+      const glyphs = existing.texts.filter((e) => e.text === '•');
+      if (body.length === 0 || glyphs.length === 0) return undefined;   // empty/degenerate → original anchor
+      return {
+        bulletX: Math.min(...glyphs.map((e) => e.rect.x)),
+        textX: Math.min(...body.map((e) => e.rect.x)),
+        topBaselineY: Math.max(...body.map((e) => e.rect.y)),
+      };
+    })()
+  : undefined;
+// buildBulletListEdits(activeBulletList, next, wrapBulletItems(...), nextZ, availableHeight, bulletBase)
+```
+
+**⚠ Impact audit:**
+- **First bullet edit (no existing / never moved):** `bulletBase` is `undefined` → `buildBulletListEdits` uses its
+  default (original geometry) → **identical to today**. No regression.
+- **Cover:** unchanged — still `coverRectForBulletList(list)` at the original spot (erases the baked-in dots). The
+  replace action removes the prior redraw, so the moved bullets don't linger (this should also clear the doubled/
+  ghosted bullet seen after a move).
+- **Text blocks:** untouched — they already had `base`.
+- **10L snapping:** already uses `textBoxRect(existing)` (current position) for a re-edit's `screenRect`/targets, so
+  the box and guides were already at the current spot — this fix just makes the **commit** land where the box shows.
+- **`usedHeightPt` / "no room":** unchanged — height math is anchor-relative, so it still measures the same.
+
+**Tests (`buildBulletListEdits.test.ts`):**
+- with an explicit `base` offset from the original, the redrawn bullet/text x and first baseline anchor on
+  `base + dx/dy`, **not** `list.* + dx/dy`.
+- with no `base` (default), output is unchanged from today (guards the first-edit path).
+
+**Verify (live):** RAHUL's résumé → move a bullet list right by a visible amount, Done → **re-open it and nudge it
+a little** → it moves a little (no jump back to the original spot), and lands exactly where the box showed → repeat
+a few times, it stays put. Text blocks still behave.
+
+**Commit message (when the user says go):** `Fix bullet re-edit jump — anchor redraw to current position, not original`.
+
 ### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
 > **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
 > (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.

@@ -192,4 +192,44 @@ describe('buildBulletListEdits', () => {
       expect(edit.rect.y).toBeCloseTo(original.rect.y - 8, 5);
     });
   });
+
+  it('anchors a re-edited list to its current bullet, text, and baseline positions', () => {
+    const list = fixtureList();
+    const built = buildBulletListEdits(
+      list,
+      { ...next, dx: 4, dy: -6 },
+      [
+        { text: 'First item', lines: ['First item'] },
+        { text: 'Second item', lines: ['Second item'] },
+      ],
+      7,
+      100,
+      { bulletX: 72, textX: 91, topBaselineY: 150 },
+    );
+    const bullets = built.texts.filter((edit) => edit.text === '•');
+    const bodies = built.texts.filter((edit) => edit.text !== '•' && edit.text !== '');
+
+    expect(Math.min(...bullets.map((edit) => edit.rect.x))).toBe(76);
+    expect(Math.min(...bodies.map((edit) => edit.rect.x))).toBe(95);
+    expect(Math.max(...bodies.map((edit) => edit.rect.y))).toBe(144);
+    expect(bodies[0]?.rect.x).not.toBe(list.textX + 4);
+    expect(bodies[0]?.rect.y).not.toBe(list.block.topBaselineY - 6);
+  });
+
+  it('defaults to the original list geometry for a first edit', () => {
+    const list = fixtureList();
+    const built = buildBulletListEdits(
+      list,
+      { ...next, dx: 5, dy: -8 },
+      [{ text: 'First item', lines: ['First item'] }],
+      7,
+      100,
+    );
+    const bullet = built.texts.find((edit) => edit.text === '•');
+    const body = built.texts.find((edit) => edit.text !== '•' && edit.text !== '');
+
+    expect(bullet?.rect.x).toBe(list.bulletX + 5);
+    expect(body?.rect.x).toBe(list.textX + 5);
+    expect(body?.rect.y).toBe(list.block.topBaselineY - 8);
+  });
 });

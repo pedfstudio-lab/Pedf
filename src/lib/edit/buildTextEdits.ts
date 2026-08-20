@@ -200,6 +200,12 @@ export interface BuiltBulletListEdits {
   readonly overflow: boolean;
 }
 
+export interface BulletListBase {
+  readonly bulletX: number;
+  readonly textX: number;
+  readonly topBaselineY: number;
+}
+
 /** One sampled patch owns both the original text and its painted bullet strip. */
 export function coverRectForBulletList(list: BulletList): PdfRect {
   const padding = Math.max(0.75, list.block.style.fontSizePt * 0.08);
@@ -222,11 +228,16 @@ export function buildBulletListEdits(
   items: readonly BulletListItemLayout[],
   z: number,
   availableHeightPt: number,
+  base: BulletListBase = {
+    bulletX: list.bulletX,
+    textX: list.textX,
+    topBaselineY: list.block.topBaselineY,
+  },
 ): BuiltBulletListEdits {
   const lineHeight = textBlockLineHeight(list.block, next.style);
   const spacingScale = next.style.fontSizePt / Math.max(1, list.block.style.fontSizePt);
   const itemSpacing = list.itemSpacingPt * spacingScale;
-  const firstBaseline = list.block.topBaselineY + next.dy;
+  const firstBaseline = base.topBaselineY + next.dy;
   let baseline = firstBaseline;
   let lastBaseline = firstBaseline;
 
@@ -256,8 +267,8 @@ export function buildBulletListEdits(
   const boxText = formatBulletEditorText(items.map((item) => item.text));
   const indent = Math.max(1, list.textX - list.bulletX);
   const textWidth = Math.max(1, next.width - indent);
-  const bulletX = list.bulletX + next.dx;
-  const textX = list.textX + next.dx;
+  const bulletX = base.bulletX + next.dx;
+  const textX = base.textX + next.dx;
   // Size the redrawn "•" to the measured original dot (bulletSizePt) rather than the
   // text size, and use a standard font — the "•" glyph isn't in the embedded subset.
   const bulletGlyphSizePt = list.bulletSizePt > 0
