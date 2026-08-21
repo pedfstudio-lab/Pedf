@@ -23,10 +23,16 @@ export interface TranscribeInput {
   readonly language?: LanguageCode;
 }
 
+export interface DiscussHistoryMessage {
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
 export interface DiscussInput {
   readonly question: string;
   readonly documentText: string;
   readonly language?: LanguageCode;
+  readonly history?: readonly DiscussHistoryMessage[];
 }
 
 export interface TextResult {

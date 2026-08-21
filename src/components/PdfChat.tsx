@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentText } from '@/lib/pdf/documentText';
 import { defaultProviders } from '@/lib/providers';
+import { recentChatHistory } from '@/lib/providers/chatHistory';
 import { getSarvamKey } from '@/lib/providers/keys';
 import { startRecording } from '@/lib/speech/recordQuestion';
 import type { Recording } from '@/lib/speech/recordQuestion';
@@ -171,6 +172,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const ask = async (questionText: string, options: AskOptions) => {
     const nextQuestion = questionText.trim();
     if (!doc || !nextQuestion || thinking || keyMissing) return;
+    const history = recentChatHistory(entries);
     const request = askRequest.current + 1;
     askRequest.current = request;
     const answerLanguage = preferredLanguage;
@@ -191,6 +193,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         question: nextQuestion,
         documentText: documentText.full,
         language: answerLanguage,
+        history,
       });
       if (askRequest.current !== request) return;
       nextId.current += 1;

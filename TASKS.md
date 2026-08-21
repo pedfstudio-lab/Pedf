@@ -3374,6 +3374,69 @@ clearly labeled.`**
 
 **Commit:** conversational upgrade — feature-side (prompt policy + tag relabel). No export-seam, no voice.
 
+### Task 24B — Conversation memory: the bot remembers the chat (real back-and-forth)  ✅ MERGED TO MAIN (2026-08-21)
+> The chat answers each question well (grounded + labeled general knowledge), but it **forgets the previous turns**,
+> so follow-ups that refer back ("is *that* included?", "what about *there*?") break. This adds memory so it becomes
+> a proper conversation. Small change to existing chat files; on `main`, commit on the user's go.
+**Gap (the user's ask from day one):** Goa PDF — "When are we leaving?" → "22nd July" → then "How's the weather
+*then*?" fails, because the bot doesn't remember "July." A real conversation carries context.
+**Depends on:** Task 24 / 24A (grounded, 3-way chat brain).
+
+**Root cause:** `discuss` sends only `{ question, documentText, language }` — no prior turns.
+`buildDiscussMessages` emits `system` + one `user` message, and `ChatMessage` has no `assistant` role. So every
+question is answered fresh, with zero memory.
+
+**Step 1 — carry history in the types.**
+- `src/lib/providers/types.ts`: add to `DiscussInput` an optional
+  `history?: readonly { role: 'user' | 'assistant'; content: string }[]` (optional → backward-compatible).
+- `src/lib/providers/discussPrompt.ts`: extend `ChatMessage['role']` to `'system' | 'user' | 'assistant'` and add
+  the same optional `history` to `DiscussPromptInput`.
+
+**Step 2 — build a real conversation → `buildDiscussMessages`.** Restructure so the DOCUMENT is the *constant*
+context and the turns flow:
+1. `system` — the existing 3-way instructions (grounded / small-talk / labeled-general-knowledge), **unchanged**,
+   plus the `<DOCUMENT>…</DOCUMENT>` block moved here (sent once, not re-appended each turn).
+2. `…history` — the prior turns as alternating `{ role: 'user' }` / `{ role: 'assistant' }` messages.
+3. `user` — the current `<QUESTION>…</QUESTION>`.
+Keep the `[Page N]` citation + `NOT_IN_DOCUMENT` marker rules exactly as-is.
+
+**Step 3 — pass the recent chat → `src/components/PdfChat.tsx` `ask`.** Capture the recent thread **before** adding
+the new user entry, and pass it:
+```ts
+const history = entries
+  .slice(-CHAT_HISTORY_TURNS)                    // bound it, e.g. last 8 messages
+  .map((e) => ({ role: e.role, content: e.text }));
+// ...discuss({ question: nextQuestion, documentText: documentText.full, language: answerLanguage, history });
+```
+Bound the window (`CHAT_HISTORY_TURNS ≈ 8`) so the request stays small and within the model's context (the DOCUMENT
+is already truncated upstream).
+
+**Step 4 — provider passes it through.** `src/lib/providers/sarvam.ts` `discuss` already does
+`messages: buildDiscussMessages(input)` — with `input.history` populated, **no change needed** there.
+
+**⚠ Impact audit:**
+- **`DiscussInput.history` optional** → all existing callers/tests compile unchanged; only PdfChat starts sending it.
+- **`buildDiscussMessages` layout changes** (DOCUMENT → `system`; history added) → **`discussPrompt.test.ts` asserts
+  the old shape and must be updated** to the new order (system+document, history, question).
+- **Grounded/label logic (24/24A):** unchanged — `sarvam.ts` still parses `NOT_IN_DOCUMENT` on the *current* answer,
+  so the grounded flag + small-talk + labeled-general-knowledge keep working, now with context.
+- **Voice loop (Task 25):** free win — spoken questions also go through `ask`, so voice follow-ups get memory too.
+- **Voice proxy (Task 28):** unaffected — it forwards the chat request regardless of content; history rides along.
+- **Token size:** bounded by `CHAT_HISTORY_TURNS` + the already-truncated document → no unbounded growth.
+
+**Tests:**
+- `buildDiscussMessages` with a 2-turn history → `[system(+DOCUMENT), user(prev), assistant(prev), user(current)]`,
+  roles + order correct.
+- without history → `[system(+DOCUMENT), user(current)]` (update the existing test to the new layout).
+- `PdfChat` passes the last ≤ `CHAT_HISTORY_TURNS` entries as history, excluding the just-typed question.
+
+**Verify (live):** Goa PDF → "When are we leaving for Goa?" → "22nd July" → then "How's the weather there **then**?"
+→ it answers about **July in Goa** (labeled general info), proving it remembered. A grounded follow-up ("what's on
+**that** day?") resolves against the earlier answer.
+
+**Land it (on the user's go):** commit to `main`. Commit message:
+`Conversation memory — the chat bot remembers prior turns (multi-turn)`.
+
 #### Stage 2 — the mouth (speak the answer)
 
 ### Task 23 — Speech output: speak the answer aloud (TTS · the mouth)  ⏳
@@ -3856,10 +3919,55 @@ end-to-end voice-through-proxy is validated once deployed with the env key — T
 `Sarvam voice proxy — holds the key server-side, with path/origin/size guards`. Deploy + env secret + durable
 per-IP rate limit = **Task 29** (the public-link step, later).
 
-### Task 29 — Pages deploy + CI  🔲
-**Goal:** auto-deployed public PWA.
-**Deliverables:** `wrangler` config for Cloudflare Pages; GitHub Action on push to `main`.
-**Depends on:** Task 26.
+### Task 29 — Deploy the app + voice proxy live (Cloudflare Pages) · the public link  🔲 TODO → on `main`
+> The "go live" step: put the app + proxy online, set our Sarvam key as a **server secret**, wire the durable
+> per-IP rate limit, and get the public link. Part **code** (Codex, on `main`), part **dashboard setup** (you).
+> After this, anyone with the link gets voice with **no key of their own**. **Work on `main`** (config + a small
+> rate-limit hookup — no branch); commit on the user's go.
+**Goal:** a live public URL (e.g. `desipdf.pages.dev`) where the editor works for everyone and voice runs on our key.
+**Depends on:** Task 28 (proxy code). **Host = Cloudflare Pages** — matches the Pages Function already built (Task
+28), free + generous, same-origin functions so `/api/sarvam` just works. Swappable to Vercel/Netlify by changing
+the one adapter file.
+
+**Part A — code (Codex, on `main`):**
+1. **Build/serve config** — confirm the Vite build (`npm run build` → `dist/`) is Pages-ready and `functions/` is
+   picked up (Pages does this by convention). Add a `_redirects` so `/api/*` reaches the Function and everything
+   else falls back to the app: `/* /index.html 200` (with `/api/*` left for the Function). Keep the DEV-only
+   `/verify` route out of prod (already gated by `import.meta.env.DEV`).
+2. **Durable per-IP rate limit** — implement the `rateLimit(ip)` hook that Task 28 left injectable, backed by a
+   Cloudflare **KV** namespace: a simple fixed-window counter (≤ N requests / 60s per IP) → return false when
+   exceeded (proxy replies **429**). Wire it into `functions/api/sarvam/[[path]].ts` from an env KV binding, and
+   make it a **no-op when the binding is absent** so dev + existing tests are unaffected. Unit-test the counter.
+3. **`wrangler.toml`** (repo-committed) declaring the Pages project + the KV binding, so config lives in git.
+
+**Part B — your one-time dashboard setup (you, ~10 min, no coding; the key never touches code/chat/repo):**
+1. Create a free **Cloudflare** account.
+2. **Workers & Pages → Pages → Connect to Git** → pick `pedfstudio-lab/Pedf`. Build command `npm run build`,
+   output directory `dist`.
+3. **Settings → Environment variables (Production):**
+   - `SARVAM_API_KEY` = your Sarvam key, marked **secret**. ← the key going "on the server."
+   - `APP_ORIGINS` = your Pages URL (e.g. `https://desipdf.pages.dev`) for the origin allowlist.
+4. **Create a KV namespace** (e.g. `RATE_LIMIT`) and **bind** it to the Pages project under the name the code
+   expects.
+5. **Deploy** → Cloudflare builds it and gives the public link, and **re-deploys automatically on every push to
+   `main`** (native git integration — no GitHub Action needed).
+
+**Part C — verify (live):**
+- Open the public link → open a PDF → editing / bold / lines / alignment work with **no key**.
+- Try **voice** (read-aloud / mic / chat) → works **without entering any key** (server key powers it).
+- Hammer the endpoint → rate limit returns **429** (bill protected).
+- **Security (Task 30):** grep the built `dist/` bundle → the Sarvam key is **absent** (only in the Function env).
+
+**⚠ Impact audit:**
+- **App code:** unchanged — deploy config + the rate-limit hookup only. No client files change.
+- **Dev:** unchanged — dev stays `direct` mode; the KV rate-limit is a no-op without its binding, so local dev +
+  tests are unaffected.
+- **The Function** already reads `SARVAM_API_KEY` / `APP_ORIGINS` (Task 28); Part A only adds the KV binding + the
+  limiter.
+- **No key in the client bundle** — it lives only in Cloudflare's server env (verified in Part C / Task 30).
+
+**Land it (on the user's go):** commit the config + rate-limit code to `main` (the deploy itself is Part B in the
+dashboard). Commit message: `Cloudflare Pages deploy config + durable per-IP rate limit (Task 29)`.
 
 ### Task 30 — Production acceptance  🔲
 **Goal:** verify the deploy is safe and functional.

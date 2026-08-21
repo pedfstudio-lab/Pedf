@@ -54,7 +54,7 @@ describe('SarvamProvider.discuss', () => {
       model: string;
       temperature: number;
       max_tokens: number;
-      messages: readonly { content: string }[];
+      messages: readonly { role: string; content: string }[];
     };
     expect(request).toMatchObject({
       model: 'sarvam-105b-conversations',
@@ -62,8 +62,10 @@ describe('SarvamProvider.discuss', () => {
       max_tokens: 600,
     });
     expect(request.messages[0]?.content).toContain('Answer concisely in Hindi');
-    expect(request.messages[1]?.content).toContain(input.documentText);
+    expect(request.messages[0]?.content).toContain(input.documentText);
+    expect(request.messages[1]).toMatchObject({ role: 'user' });
     expect(request.messages[1]?.content).toContain(input.question);
+    expect(request.messages[1]?.content).not.toContain('<DOCUMENT>');
   });
 
   it('marks an explicit not-in-document response as ungrounded and strips the marker', async () => {
