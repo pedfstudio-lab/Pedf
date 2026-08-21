@@ -348,9 +348,13 @@ export async function extractTextRuns(
 
     const fontRef = item.fontName;
     const fontName = content.styles[fontRef]?.fontFamily ?? fontRef;
-    if (page.commonObjs.has(fontRef)) {
-      registerPdfJsFontReference(fontRef, page.commonObjs.get(fontRef));
-    }
+    const fontObject = page.commonObjs.has(fontRef)
+      ? page.commonObjs.get(fontRef)
+      : undefined;
+    if (fontObject) registerPdfJsFontReference(fontRef, fontObject);
+    const weightSource = typeof fontObject?.name === 'string' && fontObject.name.trim() !== ''
+      ? fontObject.name
+      : fontName;
     runs.push({
       pageIndex,
       text: item.str,
@@ -358,7 +362,7 @@ export async function extractTextRuns(
       style: {
         fontName,
         fontSizePt: verticalScale,
-        ...classifyFontStyle(fontName),
+        ...classifyFontStyle(weightSource),
         // PDF.js text content does not expose fill color reliably.
         color: { r: 0, g: 0, b: 0 },
         fontRef,

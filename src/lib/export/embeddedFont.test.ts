@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import { extractTextRuns } from '@/lib/pdf/textContent';
 import type { PageExportContext } from './context';
 import {
+  drawSpanWithPageFont,
   drawTextWithPageFont,
   registerPdfJsFontReference,
   resolvePageFontResource,
@@ -130,5 +131,47 @@ describe('page-owned embedded fonts', () => {
       { x: 20, y: 20, w: 100, h: 10 },
       context,
     )).toBe(false);
+  });
+
+  it('returns embedded widths and emits synthetic bold/italic operators per span', async () => {
+    const originalBytes = new Uint8Array(
+      await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'),
+    );
+    const browserDocument = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+    openDocuments.push(browserDocument);
+    const runs = await extractTextRuns(await browserDocument.getPage(1), 0);
+    const pdf = await PDFDocument.load(originalBytes, { updateMetadata: false });
+    const context = makeContext(pdf);
+    const sourceRun = runs.find((run) => (
+      resolvePageFontResource(context, run.style)?.name.decodeText() === 'F2'
+    ));
+    if (!sourceRun) throw new Error('Résumé F2 body font was not resolved');
+    const pushed = vi.spyOn(context.page, 'pushOperators');
+
+    const advance = drawSpanWithPageFont(
+      'Embedded span',
+      sourceRun.style,
+      40,
+      40,
+      true,
+      true,
+      context,
+    );
+    const operators = pushed.mock.calls.flat().map((operator) => operator.toString()).join('\n');
+
+    expect(advance).not.toBeNull();
+    expect(advance).toBeGreaterThan(0);
+    expect(operators).toContain('2 Tr');
+    expect(operators).toContain('0.21');
+    expect(operators).toContain(' w');
+    expect(drawSpanWithPageFont(
+      'Unsupported • glyph',
+      sourceRun.style,
+      40,
+      20,
+      true,
+      false,
+      context,
+    )).toBeNull();
   });
 });

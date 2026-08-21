@@ -1,5 +1,6 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfRect } from '@/lib/export/types';
+import type { PdfRect, TextSpan } from '@/lib/export/types';
+import { normalizeTextSpans, textFromSpans } from '@/lib/edit/richText';
 import { detectImages } from './images';
 import type { ImageRegion } from './images';
 import type { TextBlock, TextLine } from './textContent';
@@ -168,6 +169,71 @@ export function parseBulletEditorItems(text: string): string[] {
     .split('\n')
     .map((line) => line.replace(/^\s*•\s?/, '').trim())
     .filter(Boolean);
+}
+
+export interface BulletEditorItemSpans {
+  readonly text: string;
+  readonly spans: readonly TextSpan[];
+}
+
+function sliceTextSpans(
+  spans: readonly TextSpan[],
+  start: number,
+  end: number,
+): TextSpan[] {
+  const sliced: TextSpan[] = [];
+  let offset = 0;
+  for (const span of spans) {
+    const spanStart = offset;
+    const spanEnd = spanStart + span.text.length;
+    const from = Math.max(start, spanStart);
+    const to = Math.min(end, spanEnd);
+    if (from < to) {
+      sliced.push({
+        text: span.text.slice(from - spanStart, to - spanStart),
+        bold: span.bold,
+        italic: span.italic,
+      });
+    }
+    offset = spanEnd;
+  }
+  return normalizeTextSpans(sliced);
+}
+
+/** Split the editor's rich value into marker-free bullet items without losing inline styles. */
+export function parseBulletEditorItemSpans(
+  text: string,
+  spans: readonly TextSpan[],
+): BulletEditorItemSpans[] {
+  const normalizedText = text.replace(/\r\n?/g, '\n');
+  const normalizedSpans = normalizeTextSpans(spans);
+  const sourceSpans = textFromSpans(normalizedSpans) === normalizedText
+    ? normalizedSpans
+    : normalizedText
+      ? [{ text: normalizedText, bold: false, italic: false }]
+      : [];
+  const lines: TextSpan[][] = [[]];
+
+  for (const span of sourceSpans) {
+    const parts = span.text.split('\n');
+    parts.forEach((part, index) => {
+      if (part) lines.at(-1)?.push({ ...span, text: part });
+      if (index < parts.length - 1) lines.push([]);
+    });
+  }
+
+  return lines.flatMap((lineSpans) => {
+    const normalizedLine = normalizeTextSpans(lineSpans);
+    const lineText = textFromSpans(normalizedLine);
+    const markerLength = lineText.match(/^\s*•\s?/)?.[0].length ?? 0;
+    const markerless = lineText.slice(markerLength);
+    const leadingWhitespace = markerless.length - markerless.trimStart().length;
+    const start = markerLength + leadingWhitespace;
+    const end = lineText.length - lineText.slice(start).length + lineText.slice(start).trimEnd().length;
+    if (start >= end) return [];
+    const itemSpans = sliceTextSpans(normalizedLine, start, end);
+    return [{ text: textFromSpans(itemSpans), spans: itemSpans }];
+  });
 }
 
 /** The editor includes the bullet strip; the extracted list block starts at the text column. */

@@ -190,7 +190,7 @@ export function buildTextBlockEdits(
 
 export interface BulletListItemLayout {
   readonly text: string;
-  readonly lines: readonly string[];
+  readonly lines: readonly (string | WrappedTextLine)[];
 }
 
 export interface BuiltBulletListEdits {
@@ -318,9 +318,12 @@ export function buildBulletListEdits(
       text: '•',
       style: bulletGlyphStyle,
       boxText,
+      ...(next.spans ? { boxSpans: next.spans } : {}),
       boxHeight: usedHeightPt,
     });
-    for (const [lineIndex, text] of lines.entries()) {
+    for (const [lineIndex, line] of lines.entries()) {
+      const text = typeof line === 'string' ? line : line.text;
+      const spans = typeof line === 'string' ? undefined : line.spans;
       texts.push({
         id: id(),
         kind: 'text',
@@ -334,7 +337,9 @@ export function buildBulletListEdits(
         z: z + 1 + texts.length,
         text,
         style: next.style,
+        ...(spans && spans.length > 0 ? { spans } : {}),
         boxText,
+        ...(next.spans ? { boxSpans: next.spans } : {}),
         boxHeight: usedHeightPt,
       });
     }

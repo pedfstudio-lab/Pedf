@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { buildBulletListEdits } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
@@ -14,6 +14,7 @@ import {
   formatBulletEditorText,
   isBulletListBlock,
   nextBlockBelowBulletList,
+  parseBulletEditorItemSpans,
   parseBulletEditorItems,
 } from './bulletList';
 import { extractTextRuns, groupRunsIntoBlocks } from './textContent';
@@ -89,21 +90,19 @@ describe('RAHUL résumé bullet detection', () => {
     expect(detectBulletListFromRegions(block, imageRegions)).toBeNull();
   });
 
-  it('splits a job-title heading above a bullet list into its own editable block', () => {
-    const headings = blocks.flatMap((block) => {
+  it('keeps bold job titles separate from normal bullet-list blocks', () => {
+    const lists = blocks.flatMap((block) => {
       const list = detectBulletListFromRegions(block, imageRegions);
-      if (!list) return [];
-      const heading = bulletListHeadingBlock(list);
-      return heading ? [{ list, heading }] : [];
+      return list ? [list] : [];
     });
+    const boldJobTitles = blocks.filter((block) => (
+      block.style.bold && /Firgun Travels|Travelmite|WANDERON/.test(block.text)
+    ));
 
-    // At least one résumé list (e.g. Firgun) has its job title grouped above the bullets.
-    expect(headings.length).toBeGreaterThan(0);
-    for (const { list, heading } of headings) {
-      expect(heading.lines).toEqual(list.sourceBlock.lines.slice(0, heading.lines.length));
-      expect(list.block.lines).toEqual(list.sourceBlock.lines.slice(heading.lines.length));
-      expect(heading.text).not.toContain('•');
-    }
+    expect(lists.length).toBeGreaterThan(0);
+    expect(boldJobTitles.length).toBeGreaterThan(0);
+    expect(lists.every((list) => bulletListHeadingBlock(list) === null)).toBe(true);
+    expect(lists.every((list) => !list.sourceBlock.style.bold)).toBe(true);
   });
 
   it('bounds Firgun at the untouched Travelmite section', () => {
@@ -190,12 +189,156 @@ describe('RAHUL résumé bullet detection', () => {
       await reopened.destroy();
     }
   });
+
+  it('round-trips a partially bold bullet without losing bullets or text', async () => {
+    const firgun = detectBulletListFromRegions(
+      fixtureBlock('Joined Firgun Travels', 'vendor communication, planning, and execution'),
+      imageRegions,
+    );
+    if (!firgun) throw new Error('Firgun bullet list was not detected');
+    const firstText = 'Bold word survives';
+    const itemTexts = [firstText, ...firgun.items.slice(1).map((item) => item.text)];
+    const editorText = formatBulletEditorText(itemTexts);
+    const editorSpans = [
+      { text: '• ', bold: false, italic: false },
+      { text: 'Bold', bold: true, italic: false },
+      { text: editorText.slice('• Bold'.length), bold: false, italic: false },
+    ];
+    const itemLayouts = [
+      {
+        text: firstText,
+        lines: [{
+          text: firstText,
+          spans: [
+            { text: 'Bold', bold: true, italic: false },
+            { text: ' word survives', bold: false, italic: false },
+          ],
+        }],
+      },
+      ...firgun.items.slice(1).map((item) => ({
+        text: item.text,
+        lines: item.lines.map((line) => line.text),
+      })),
+    ];
+    const built = buildBulletListEdits(
+      firgun,
+      {
+        text: editorText,
+        spans: editorSpans,
+        style: firgun.block.style,
+        width: firgun.coverRect.w,
+        height: firgun.coverRect.h,
+        dx: 0,
+        dy: 0,
+      },
+      itemLayouts,
+      1,
+      500,
+    );
+    const pages: PageGeometry[] = [];
+    for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
+      const page = await documentProxy.getPage(pageNumber);
+      const [left = 0, bottom = 0, right = 0, top = 0] = page.view;
+      const rotation = ((page.rotate % 360) + 360) % 360 as PageGeometry['rotation'];
+      pages.push({
+        pageIndex: pageNumber - 1,
+        widthPt: right - left,
+        heightPt: top - bottom,
+        rotation,
+        boxOffset: { x: left, y: bottom },
+      });
+    }
+
+    const originalOperators = await firstPage.getOperatorList();
+    const result = await exportPdf({
+      originalBytes: resumeBytes,
+      edits: [...built.covers, ...built.texts],
+      pages,
+    });
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const reopenedPage = await reopened.getPage(1);
+      const content = await reopenedPage.getTextContent();
+      const strings = content.items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str);
+      expect(strings.filter((text) => text === '•')).toHaveLength(firgun.items.length);
+      expect(strings.join(' ')).toContain('Bold');
+      expect(strings.join(' ')).toContain('word survives');
+      const boldItem = content.items.find((item) => 'str' in item && item.str === 'Bold');
+      const boldFontRef = boldItem && 'fontName' in boldItem ? boldItem.fontName : undefined;
+      const reopenedOperators = await reopenedPage.getOperatorList();
+      const boldFont = boldFontRef && reopenedPage.commonObjs.has(boldFontRef)
+        ? reopenedPage.commonObjs.get(boldFontRef)
+        : undefined;
+      const originalFillAndStrokeCount = originalOperators.fnArray.filter(
+        (operator) => operator === OPS.setTextRenderingMode,
+      ).length;
+      const reopenedFillAndStrokeCount = reopenedOperators.fnArray.filter(
+        (operator) => operator === OPS.setTextRenderingMode,
+      ).length;
+
+      expect(boldFont?.name).toMatch(/Lucida Sans Unicode/i);
+      expect(boldFont?.name).not.toMatch(/Helvetica/i);
+      expect(reopenedFillAndStrokeCount).toBeGreaterThan(originalFillAndStrokeCount);
+    } finally {
+      await reopened.destroy();
+    }
+  });
 });
 
 it('formats editor bullets and drops an emptied item on parse', () => {
   const formatted = formatBulletEditorText(['First', 'Second']);
   expect(formatted).toBe('• First\n• Second');
   expect(parseBulletEditorItems('• First\n•   \nSecond')).toEqual(['First', 'Second']);
+});
+
+describe('parseBulletEditorItemSpans', () => {
+  it('strips the marker while preserving a partially bold item', () => {
+    expect(parseBulletEditorItemSpans(
+      '• Led and coordinated',
+      [
+        { text: '• ', bold: false, italic: false },
+        { text: 'Led', bold: true, italic: false },
+        { text: ' and coordinated', bold: false, italic: false },
+      ],
+    )).toEqual([{
+      text: 'Led and coordinated',
+      spans: [
+        { text: 'Led', bold: true, italic: false },
+        { text: ' and coordinated', bold: false, italic: false },
+      ],
+    }]);
+  });
+
+  it('splits multiple items and drops an empty marker line', () => {
+    expect(parseBulletEditorItemSpans(
+      '• First\n•   \n• Second',
+      [
+        { text: '• First\n', bold: false, italic: false },
+        { text: '•   \n• Second', bold: true, italic: false },
+      ],
+    )).toEqual([
+      {
+        text: 'First',
+        spans: [{ text: 'First', bold: false, italic: false }],
+      },
+      {
+        text: 'Second',
+        spans: [{ text: 'Second', bold: true, italic: false }],
+      },
+    ]);
+  });
+
+  it('keeps a uniform item as one normalized span', () => {
+    expect(parseBulletEditorItemSpans(
+      '• Uniform item',
+      [{ text: '• Uniform item', bold: false, italic: true }],
+    )).toEqual([{
+      text: 'Uniform item',
+      spans: [{ text: 'Uniform item', bold: false, italic: true }],
+    }]);
+  });
 });
 
 function line(index: number, text: string): TextLine {

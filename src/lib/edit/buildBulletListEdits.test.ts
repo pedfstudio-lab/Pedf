@@ -232,4 +232,43 @@ describe('buildBulletListEdits', () => {
     expect(body?.rect.x).toBe(list.textX + 5);
     expect(body?.rect.y).toBe(list.block.topBaselineY - 8);
   });
+
+  it('carries mixed spans onto body edits and the full box value onto every line', () => {
+    const boxSpans = [
+      { text: '• ', bold: false, italic: false },
+      { text: 'Led', bold: true, italic: false },
+      { text: ' and coordinated', bold: false, italic: false },
+    ];
+    const bodySpans = boxSpans.slice(1);
+    const built = buildBulletListEdits(
+      fixtureList(),
+      { ...next, text: '• Led and coordinated', spans: boxSpans },
+      [{
+        text: 'Led and coordinated',
+        lines: [{ text: 'Led and coordinated', spans: bodySpans }],
+      }],
+      7,
+      100,
+    );
+    const bullet = built.texts.find((edit) => edit.text === '•');
+    const body = built.texts.find((edit) => edit.text !== '•' && edit.text !== '');
+
+    expect(bullet?.boxSpans).toEqual(boxSpans);
+    expect(body?.spans).toEqual(bodySpans);
+    expect(body?.boxSpans).toEqual(boxSpans);
+  });
+
+  it('leaves uniform body edits on the legacy span-free path', () => {
+    const built = buildBulletListEdits(
+      fixtureList(),
+      next,
+      [{ text: 'First item', lines: ['First item'] }],
+      7,
+      100,
+    );
+    const body = built.texts.find((edit) => edit.text !== '•' && edit.text !== '');
+
+    expect(body).not.toHaveProperty('spans');
+    expect(body).not.toHaveProperty('boxSpans');
+  });
 });

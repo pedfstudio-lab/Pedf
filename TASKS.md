@@ -1904,6 +1904,212 @@ a few times, it stays put. Text blocks still behave.
 
 **Commit message (when the user says go):** `Fix bullet re-edit jump — anchor redraw to current position, not original`.
 
+### Task 10O — Bullet lists: keep partial bold / italic on commit (span-aware)  🔲 TODO → new branch `bullet-spans`
+> **Build on a NEW branch `bullet-spans`, not on `main`.** Moderate fix — mirrors the span path text blocks already
+> have. Implement + verify on the branch, then merge to `main` (commit on the user's go — no proactive commit).
+**Symptom (user-confirmed, 2026-08-20):** bolding (or italicising) *part* of a bullet — a word, a sentence, or one
+item among several — shows while editing but **disappears after Done**. Bolding the *entire* box works; plain text
+blocks work.
+**Depends on:** Task 10H (bullet editing), Task 11B (rich spans on text blocks).
+
+**Root cause (traced end-to-end):** the whole bullet path is **span-unaware**.
+- `wrapBulletItems` (OverlayLayer) uses `parseBulletEditorItems(next.text)` — plain strings — and `wrapTextToLines`,
+  so bold/italic runs never reach the items.
+- `buildBulletListEdits` draws each body line with a single uniform `style: next.style` and **no `spans`**
+  (`buildTextEdits.ts` ~line 336).
+
+Mixed formatting lives in `next.spans`, which both drop → the commit redraws every bullet in one weight.
+Bolding the whole box survives only because it collapses to uniform `next.style.bold`. Text blocks keep partial
+bold because their path IS span-aware (`wrapTextSpansToLines` + emitting `spans`); bullets never got it.
+
+**Step 0 — new branch.** `git checkout main && git checkout -b bullet-spans`. Everything below runs here; merge to
+`main` only after the live check.
+
+**Step 1 — span-aware item parse → `src/lib/pdf/bulletList.ts`:** add
+`parseBulletEditorItemSpans(text, spans): { text: string; spans: TextSpan[] }[]` mirroring `parseBulletEditorItems`
+but in span space: split `spans` at each `'\n'` into per-line span groups, strip the leading `"• "` marker from the
+first span of each line, trim edge whitespace, drop empty lines. Reuse `normalizeTextSpans` / `textFromSpans` from
+`richText.ts`. When `spans` is undefined, callers keep the existing plain path.
+
+**Step 2 — carry spans on the item layout → `src/lib/edit/buildTextEdits.ts`:** widen
+`BulletListItemLayout.lines` from `readonly string[]` to `readonly (string | WrappedTextLine)[]` (same shape
+`buildTextBlockEdits` already consumes).
+
+**Step 3 — wrap items with spans → `wrapBulletItems` (OverlayLayer):** when `next.spans` is present, build each
+item from `parseBulletEditorItemSpans` and wrap it with `wrapTextSpansToLines` (span-measured, like `wrapNextText`);
+otherwise keep today's `parseBulletEditorItems` + `wrapTextToLines` path unchanged.
+
+**Step 4 — emit spans on the body edits → `buildBulletListEdits`:** in the body-line loop, pull text + spans out of
+each line exactly like `buildTextBlockEdits`:
+```ts
+const text = typeof line === 'string' ? line : line.text;
+const spans = typeof line === 'string' ? undefined : line.spans;
+// ...on the pushed edit:
+...(spans && spans.length > 0 ? { spans } : {}),
+...(next.spans ? { boxSpans: next.spans } : {}),
+```
+Also set `boxSpans: next.spans` on the `"•"` glyph edit (it already carries `boxText`), so re-opening restores the
+formatting — `TextEditOverlay`'s `initialSpans` reads `existing[0].boxSpans`, and `existing[0]` is the glyph.
+
+**⚠ Impact audit:**
+- **Uniform formatting (no `next.spans`):** every path stays on the plain-string branch → **byte-identical to
+  today**. No regression to normal bullets.
+- **Export handler:** `handlers/text.ts` already renders `edit.spans` per run, so no handler change. **Known
+  trade-off:** that spans branch draws through `resolveEnglishFont` (a standard font), so a **bolded word renders in
+  a standard bold font, not the embedded face** — identical to how partial bold already behaves on text blocks
+  (the PDF has no bold variant of the résumé face to reuse). Bold *appears*; matching the embedded look for bold is
+  a separate, harder problem.
+- **`"•"` glyph edits / cover / positions:** unchanged — only the body lines gain spans.
+- **10N re-edit anchor & 10L snapping:** untouched (geometry is unchanged).
+
+**Tests:**
+- `parseBulletEditorItemSpans`: `"• Led and coordinated"` with a bold `"Led"` run → one item
+  `{ text: 'Led and coordinated', spans: [bold 'Led', normal ' and coordinated'] }`; multiple `"• …\n• …"` items
+  split correctly; a uniform item yields a single-span item.
+- `buildBulletListEdits`: a mixed-span item → its body edit carries `spans`; a uniform item (no `next.spans`) →
+  **no** `spans` on the edit (guards the unchanged path).
+- Round-trip: bold a word in a bullet → export → reopen → `"•"` count intact and the bold word present in the text.
+
+**Verify (live):** RAHUL's résumé → edit a Firgun bullet, bold one word → Done → the word **stays bold** in the
+committed list → reopen → still bold. Whole-item bold still works; plain text blocks unaffected.
+
+**Land it (on the user's go):** hold the `bullet-spans` merge until **Task 10P** below also passes, then merge
+`bullet-spans` → `main` together (10O keeps the bold *you apply*; 10P restores the PDF's *own* bold) and delete the
+branch. Commit message for this part: `Keep partial bold/italic in bullet lists (span-aware commit)`.
+
+### Task 10P — Detect the PDF's original bold / italic so editing doesn't flatten it  🔲 TODO → same `bullet-spans` branch
+> **Continue on the existing `bullet-spans` branch** (lands with 10O). This is the real fix for "editing a box
+> removes its bold" — NOT the earlier faux-bold idea (that aimed at the wrong problem and is dropped).
+**Symptom (user-confirmed, 2026-08-20):** a box that already has bold text (headings, job titles) opens in the
+editor as **normal** weight, and Done bakes in the un-bolded version — the original bold is lost.
+**Depends on:** Task 10 Amendment A (embedded-font export), Task 10O (bullet spans).
+
+**Root cause (proven with the résumé's own data):** in `src/lib/pdf/textContent.ts` `extractTextRuns`, each run's
+`style.fontName` is set from `content.styles[fontRef]?.fontFamily`, which pdf.js reports as the generic
+`"sans-serif"` for **every** run. Bold/italic is then detected by `classifyFontStyle(fontName)` — which searches
+the *name* for `bold`/`black`/`italic` — so with `"sans-serif"` it **never** fires. Every run comes out
+`bold: false, italic: false`, even though the headings are **Arial Black** and the job titles are **Tahoma Bold**.
+(Verified: reading the real BaseFont names, exactly the headings + titles come back bold.)
+
+**Step 1 — detect weight/style from the real BaseFont name → `textContent.ts` `extractTextRuns`.** The loaded font
+object (`page.commonObjs.get(fontRef)`, already fetched for `registerPdfJsFontReference`) carries the real name
+(e.g. `"ABCDEE+Tahoma,Bold"`). Use it for `classifyFontStyle`, and leave `fontName` (the family) unchanged:
+```ts
+const fontObject = page.commonObjs.has(fontRef) ? page.commonObjs.get(fontRef) : undefined;
+if (fontObject) registerPdfJsFontReference(fontRef, fontObject);
+const weightSource = typeof fontObject?.name === 'string' && fontObject.name.trim() !== ''
+  ? fontObject.name                          // real BaseFont — carries Bold / Black / Italic
+  : fontName;
+// ...
+style: {
+  fontName,                                  // unchanged — grouping + editor CSS still use this
+  fontSizePt: verticalScale,
+  ...classifyFontStyle(weightSource),        // was classifyFontStyle(fontName)
+  color: { r: 0, g: 0, b: 0 },
+  fontRef,
+},
+```
+**Do NOT change `fontName`** — `canJoinBlock` / `classifyFontFamily` and the editor CSS depend on it.
+
+**Why this is the whole fix for this résumé:** the bold text is drawn in **real embedded bold fonts** (Arial Black,
+Tahoma Bold), and each is a whole line/box (uniformly bold). So once detected: the block's style is bold → the
+editor opens bold → Done commits with `style.bold` and **no spans** → the export's `drawTextWithPageFont` matches
+the page's own Tahoma Bold / Arial Black resource → **renders in the exact original font, still bold. No
+font-swap.**
+
+**⚠ Impact audit:**
+- **`fontName` untouched** (CSS family + grouping input unchanged in kind), **but the bold/italic values flip for
+  the heading/title runs**, and `canJoinBlock` compares `style.bold` / `style.italic` — so bold lines will no longer
+  merge into normal-text paragraphs. That's **more correct**, but it moves some block boundaries → **re-run the full
+  suite and update any block-grouping / bullet-detection / `textContent` test whose expected counts or styles shift**
+  (expected fallout, not a regression).
+- **Editor:** a bold box now opens bold (representative style is bold) and Done keeps it. Uniform-bold boxes carry
+  **no spans**, so export uses the embedded bold font — correct.
+- **Export:** unchanged code; bold headings/titles now route through `drawTextWithPageFont` with their bold
+  `fontRef` → the real embedded bold. Italic likewise where the doc embeds an italic face.
+- **Mixed bold within a single line** (some words bold, some not, same line): not present in this résumé (bold lines
+  are uniform). If it ever occurs, that line's representative style picks one weight; showing per-word bold there
+  would need span reconstruction from runs (routes through the spans path → the standard-font trade-off). Out of
+  scope here — note only.
+- **10O:** complementary and untouched — it still carries user-applied partial bold on the bullet commit.
+
+**Tests:**
+- `extractTextRuns` on RAHUL: the "Sales and Operations" / "Master of Business Management" / section-heading runs
+  come back `bold: true`; the body-bullet runs stay `bold: false`.
+- Re-run the suite; update block-grouping / bullet fixtures that shift because bold no longer merges with normal.
+- Round-trip: open a bold heading box → it shows bold → Done → export → reopen → still bold, drawn through the
+  page's **own** bold font resource (assert it's the résumé's font, not Helvetica).
+
+**Verify (live):** RAHUL's résumé → click Edit on a bold box (e.g. "Sales and Operations" or a section heading) →
+it shows **bold**, not flattened → Done → it **stays bold**, same font → reopen → still bold. Normal text is
+unaffected.
+
+**Land it (on the user's go):** merge `bullet-spans` → `main` **together with 10O and 10Q** once tests + typecheck +
+lint + the live check pass, then delete the branch. Commit message: `Detect the PDF's own bold/italic (read the real font name)`.
+
+### Task 10Q — Bold / italic you apply keeps the résumé's own font (synthetic weight & slant) · Situation B  🔲 TODO → same `bullet-spans` branch
+> **Continue on the existing `bullet-spans` branch** (merges with 10O + 10P). This is "Situation B" — the
+> Sejda-style workflow: after editing you re-apply bold and it renders in your **own** font instead of swapping to a
+> substitute. NOT auto-preserving the original stroked bold ("Situation A" — dropped; even Sejda skips it).
+**Symptom (user-confirmed, 2026-08-20):** when you bold a word it appears bold but renders in a **standard** bold
+font — the letters change shape (font-swap) instead of staying in the résumé's face.
+**Depends on:** Task 10O (bullet spans), Task 10 Amendment A (embedded-font export via `drawTextWithPageFont`).
+
+**Root cause:** `src/lib/export/handlers/text.ts` — the spans branch draws **every** run with `resolveEnglishFont`
+(a standard font) and advances the cursor with that font's widths. The embedded font (`drawTextWithPageFont`) is
+only used for uniform, un-spanned text. So any bold/italic you apply swaps fonts.
+
+**Why this is the right fix (not the "rough faux-bold" set aside earlier):** the résumé itself fakes its body bold
+by **stroking** the regular font (confirmed: 16 fill+stroke ops, ~0.26–0.32pt pen). So reproducing bold the same
+way — stroking the résumé's own embedded font — looks **identical to the original**, not rough. Synthetic weight is
+exactly what this document already does.
+
+**Step 0 — continue on `bullet-spans`** (do NOT branch again). 10O + 10P + 10Q merge to `main` together.
+
+**Step 1 — `src/lib/export/embeddedFont.ts`: add `drawSpanWithPageFont(text, style, x, y, bold, italic, context): number | null`.**
+Like `drawTextWithPageFont`, but for one span, and:
+- **Returns the advance width** — Σ glyph widths from the font's `/Widths` + `/FirstChar` (× `fontSizePt / 1000`),
+  or `null` when the embedded path can't render this text (same `isSafePdfString` gate). Reuse the FirstChar/Widths
+  lookup already in `isSafePdfString`.
+- **Faux-bold** (when `bold`): text rendering mode Fill+Stroke (Tr 2) + line width ≈ `fontSizePt * 0.03` (matches
+  the résumé's own ~0.3pt stroke) + stroke color = fill color. Put the ratio in a named constant so it's tunable.
+- **Faux-italic** (when `italic`): skew the text matrix — `setTextMatrix(1, 0, 0.21, 1, x, y)` (~12°).
+
+**Step 2 — `handlers/text.ts` spans branch: try the embedded font per span first.**
+```ts
+for (const span of edit.spans) {
+  if (!span.text) continue;
+  const advance = drawSpanWithPageFont(span.text, edit.style, cursorX, edit.rect.y, span.bold, span.italic, context);
+  if (advance !== null) { cursorX += advance; continue; }        // kept the résumé's font (synthetic weight/slant)
+  const font = await resolveEnglishFont({ ...edit.style, bold: span.bold, italic: span.italic }, context);  // fallback
+  context.page.drawText(span.text, { x: cursorX, y: edit.rect.y, size: edit.style.fontSizePt, font, color: rgb(...) });
+  cursorX += font.widthOfTextAtSize(span.text, edit.style.fontSizePt);
+}
+```
+Leave the non-spans path unchanged (it already uses the embedded font).
+
+**⚠ Impact audit:**
+- **Uniform text (no spans):** untouched. No regression.
+- **Bold/italic you apply, where the embedded font can render it:** now keeps the **exact face** (stroked/skewed)
+  **and correct spacing** (embedded widths). Fixes both bullets (10O) and text blocks — same handler.
+- **Spans the embedded font can't render** (special chars / non-WinAnsi): fall back per-span to `resolveEnglishFont`
+  — today's behavior, graceful, no regression.
+- **10O / 10P:** complementary and untouched.
+
+**Tests:**
+- `drawSpanWithPageFont`: returns a positive advance width for in-subset text; `null` for out-of-subset text.
+- Round-trip: bold a word in a bullet → export → reopen → the word is drawn through the page's **own** font
+  resource (assert it's the résumé's font, not Helvetica), and the fill+stroke (bold) operators are present.
+- `handlers/text.ts`: an embeddable bold span uses the page font (no `resolveEnglishFont` call); a non-embeddable
+  span falls back.
+
+**Verify (live):** bold a word in a Firgun bullet **and** in the "About me" paragraph → Done → the word stays in
+the résumé's own font, just bold (no font-swap), spacing looks right, and it matches the weight of the original's
+stroked bold.
+
+**Land it (on the user's go):** merge `bullet-spans` → `main` with 10O + 10P, delete the branch. Commit message:
+`Applied bold/italic keeps the embedded font (synthetic weight & slant)`.
+
 ### Task 10I — Bullet-aware editing · Stage 2: push the page down when a list runs out of room  ⏸️ PARKED (2026-08-18)
 > **Built, then parked — not on `main`.** Code is archived on the **`origin/bullet-stage-2`** branch
 > (commit `f098425`); recover with `git checkout -b bullet-stage-2 origin/bullet-stage-2`.

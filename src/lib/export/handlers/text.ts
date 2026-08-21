@@ -2,7 +2,7 @@ import { rgb } from 'pdf-lib';
 import { isIndicRun } from '../scriptRouting';
 import { drawIndicTextPatch } from '../pathA';
 import { resolveEnglishFont } from '../englishFont';
-import { drawTextWithPageFont } from '../embeddedFont';
+import { drawSpanWithPageFont, drawTextWithPageFont } from '../embeddedFont';
 import type { TextEdit } from '../types';
 import type { EditHandler } from '../registry';
 
@@ -18,6 +18,19 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
     let cursorX = edit.rect.x;
     for (const span of edit.spans) {
       if (!span.text) continue;
+      const advance = drawSpanWithPageFont(
+        span.text,
+        edit.style,
+        cursorX,
+        edit.rect.y,
+        span.bold,
+        span.italic,
+        context,
+      );
+      if (advance !== null) {
+        cursorX += advance;
+        continue;
+      }
       const font = await resolveEnglishFont({
         ...edit.style,
         bold: span.bold,

@@ -10,8 +10,12 @@ import {
   pushGraphicsState,
   setFillingRgbColor,
   setFontAndSize,
+  setLineWidth,
+  setStrokingRgbColor,
   setTextMatrix,
+  setTextRenderingMode,
   showText,
+  TextRenderingMode,
 } from 'pdf-lib';
 import type { PageExportContext } from './context';
 import type { PdfRect, TextStyle } from './types';
@@ -36,6 +40,8 @@ export interface PageFontResource {
 }
 
 const pdfJsFonts = new Map<string, PdfJsFontReference>();
+const SYNTHETIC_BOLD_STROKE_RATIO = 0.03;
+const SYNTHETIC_ITALIC_SKEW = 0.21;
 
 /** Retain the BaseFont identity that pdf.js keeps beside its browser FontFace. */
 export function registerPdfJsFontReference(fontRef: string, value: unknown): void {
@@ -127,6 +133,22 @@ function isSafePdfString(text: string, font: PDFDict): boolean {
   });
 }
 
+function pageFontAdvanceWidth(
+  text: string,
+  font: PDFDict,
+  fontSizePt: number,
+): number | null {
+  const firstChar = font.lookupMaybe(PDFName.of('FirstChar'), PDFNumber)?.asNumber();
+  const widths = font.lookupMaybe(PDFName.of('Widths'), PDFArray);
+  if (firstChar === undefined || !widths || !isSafePdfString(text, font)) return null;
+
+  const widthUnits = [...text].reduce((total, character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return total + (widths.lookupMaybe(code - firstChar, PDFNumber)?.asNumber() ?? 0);
+  }, 0);
+  return widthUnits * fontSizePt / 1000;
+}
+
 /** Draw through a page-owned WinAnsi font. Returns false when the strict path is unsupported. */
 export function drawTextWithPageFont(
   text: string,
@@ -153,4 +175,39 @@ export function drawTextWithPageFont(
     popGraphicsState(),
   );
   return true;
+}
+
+/** Draw one rich span through the page's own font, applying synthetic weight/slant. */
+export function drawSpanWithPageFont(
+  text: string,
+  style: TextStyle,
+  x: number,
+  y: number,
+  bold: boolean,
+  italic: boolean,
+  context: PageExportContext,
+): number | null {
+  if (!text) return null;
+  const resource = resolvePageFontResource(context, style);
+  if (!resource) return null;
+  const advance = pageFontAdvanceWidth(text, resource.dictionary, style.fontSizePt);
+  if (advance === null) return null;
+
+  const literalText = PDFString.of(text) as unknown as Parameters<typeof showText>[0];
+  context.page.pushOperators(
+    pushGraphicsState(),
+    setFillingRgbColor(style.color.r, style.color.g, style.color.b),
+    ...(bold ? [
+      setStrokingRgbColor(style.color.r, style.color.g, style.color.b),
+      setLineWidth(style.fontSizePt * SYNTHETIC_BOLD_STROKE_RATIO),
+    ] : []),
+    beginText(),
+    setFontAndSize(resource.name, style.fontSizePt),
+    ...(bold ? [setTextRenderingMode(TextRenderingMode.FillAndOutline)] : []),
+    setTextMatrix(1, 0, italic ? SYNTHETIC_ITALIC_SKEW : 0, 1, x, y),
+    showText(literalText),
+    endText(),
+    popGraphicsState(),
+  );
+  return advance;
 }

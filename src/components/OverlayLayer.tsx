@@ -36,6 +36,7 @@ import {
   bulletListHeadingBlock,
   detectBulletListFromRegions,
   formatBulletEditorText,
+  parseBulletEditorItemSpans,
   parseBulletEditorItems,
 } from '@/lib/pdf/bulletList';
 import type { BulletList } from '@/lib/pdf/bulletList';
@@ -241,8 +242,27 @@ function wrapNextText(next: NextTextEdit) {
 function wrapBulletItems(list: BulletList, next: NextTextEdit): BulletListItemLayout[] {
   const canvas = window.document.createElement('canvas');
   const context = canvas.getContext('2d');
-  if (context) context.font = textStyleToCanvasFont(next.style);
   const textWidth = Math.max(1, next.width - Math.max(1, list.textX - list.bulletX));
+  if (next.spans) {
+    return parseBulletEditorItemSpans(next.text, next.spans).map((item) => ({
+      text: item.text,
+      lines: wrapTextSpansToLines(
+        item.spans,
+        textWidth,
+        (value, span) => {
+          if (context) {
+            context.font = textStyleToCanvasFont({
+              ...next.style,
+              bold: span.bold,
+              italic: span.italic,
+            });
+          }
+          return context?.measureText(value).width ?? value.length * next.style.fontSizePt * 0.55;
+        },
+      ),
+    }));
+  }
+  if (context) context.font = textStyleToCanvasFont(next.style);
   return parseBulletEditorItems(next.text).map((text) => ({
     text,
     lines: wrapTextToLines(

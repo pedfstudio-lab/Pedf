@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
+import { exportPdf } from '@/lib/export/exportPdf';
+import type { PageGeometry } from './types';
 import type { TextRun } from './textContent';
 import {
   classifyFontStyle,
@@ -85,6 +89,85 @@ describe('extractTextRuns', () => {
     expect(run?.style.italic).toBe(false);
     expect(run?.style.color).toEqual({ r: 0, g: 0, b: 0 });
     expect(run?.style.fontRef).toMatch(/^g_d\d+_f\d+$/);
+  });
+
+  it('uses the résumé BaseFont names for weight while preserving the public family', async () => {
+    const bytes = new Uint8Array(await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'));
+    const document = await getDocument({ data: bytes, verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+    const educationRuns = runs.filter((run) => (
+      ['Master', 'Business', 'Mana', 'gement'].includes(run.text)
+    ));
+
+    expect(runs.some((run) => run.text === 'WORK EXPERIENCE' && run.style.bold)).toBe(true);
+    expect(runs.some((run) => run.text === 'Sales and Operations' && run.style.bold)).toBe(true);
+    expect(educationRuns.length).toBeGreaterThan(0);
+    expect(educationRuns.every((run) => run.style.bold)).toBe(true);
+    expect(runs.some((run) => (
+      run.text.includes('Managed customer interactions') && !run.style.bold && !run.style.italic
+    ))).toBe(true);
+    expect(runs.find((run) => run.text === 'WORK EXPERIENCE')?.style.fontName).toBe('sans-serif');
+  });
+
+  it('round-trips an edited heading through the résumé own bold font resource', async () => {
+    const originalBytes = new Uint8Array(
+      await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'),
+    );
+    const document = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const firstPage = await document.getPage(1);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(firstPage, 0));
+    const heading = blocks.find((block) => block.text === 'WORK EXPERIENCE');
+    if (!heading) throw new Error('WORK EXPERIENCE heading was not extracted');
+    expect(heading.style.bold).toBe(true);
+    expect(heading.style.fontRef).toBeDefined();
+
+    const replacement = 'WORK EXPERIENCE UPDATED';
+    const built = buildTextBlockEdits(
+      heading,
+      {
+        text: replacement,
+        style: heading.style,
+        width: heading.rect.w,
+        height: heading.rect.h,
+        dx: 0,
+        dy: 0,
+      },
+      [replacement],
+      1,
+    );
+    const pages: PageGeometry[] = [];
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const [left = 0, bottom = 0, right = 0, top = 0] = page.view;
+      pages.push({
+        pageIndex: pageNumber - 1,
+        widthPt: right - left,
+        heightPt: top - bottom,
+        rotation: ((page.rotate % 360) + 360) % 360 as PageGeometry['rotation'],
+        boxOffset: { x: left, y: bottom },
+      });
+    }
+
+    const exported = await exportPdf({
+      originalBytes,
+      edits: [...built.covers, ...built.texts],
+      pages,
+    });
+    const reopened = await getDocument({ data: exported.bytes.slice(), verbosity: 0 }).promise;
+    openDocuments.push(reopened);
+    const reopenedPage = await reopened.getPage(1);
+    const reopenedRuns = await extractTextRuns(reopenedPage, 0);
+    const replacementRun = reopenedRuns.find((run) => run.text === replacement);
+    expect(replacementRun?.style.bold).toBe(true);
+    expect(replacementRun?.style.fontName).toBe('sans-serif');
+    expect(replacementRun?.style.fontRef).toBeDefined();
+    const fontObject = replacementRun?.style.fontRef && reopenedPage.commonObjs.has(replacementRun.style.fontRef)
+      ? reopenedPage.commonObjs.get(replacementRun.style.fontRef)
+      : undefined;
+    expect(fontObject?.name).toMatch(/Arial Black/i);
+    expect(fontObject?.name).not.toMatch(/Helvetica/i);
   });
 });
 
