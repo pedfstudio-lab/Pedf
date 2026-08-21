@@ -3758,11 +3758,103 @@ stages the file, loads it through the normal Loader path.
 **Depends on:** Task 26.
 **Done when:** share a PDF from WhatsApp → ask by voice → grounded spoken answer → commit `Phase 5 ✓`.
 
-### Task 28 — Cloudflare Worker proxy  🔲
-**Goal:** move all secrets server-side.
-**Deliverables:** Worker holding Sarvam + Anthropic keys, per-IP rate limiting, translate/tts/asr/discuss
-endpoints; provider base-URL switch (dev = direct+localStorage, prod = proxy).
-**Depends on:** Task 19, Task 23, Task 24.
+### Task 28 — Sarvam voice proxy: serve voice through our OWN key (no user key) · CODE  ✅ MERGED TO MAIN (2026-08-21) — deploy = Task 29
+> Build the server proxy that holds **our** Sarvam key and forwards the voice calls, so users get voice with
+> **zero setup** — they never need their own key, and the key never reaches the browser or the repo. The **client
+> is already proxy-ready** (verified below); this task is the **server half + abuse guard** only. Hosting + the env
+> secret + durable rate-limit = **Task 29** (the "public link" step, later). **Safe on `main`** — it's all new,
+> isolated files the running app doesn't import (dev stays direct mode), so nothing live changes; commit once the
+> unit tests + typecheck + lint are green, on the user's go.
+**Goal:** in production the app's 3 voice calls (read-aloud, mic, chat) hit our own `/api/sarvam/*`, which adds our
+secret key and forwards to Sarvam.
+**Depends on:** Task 20 (config seam), Tasks 23 / 24 / 25 (the voice calls).
+
+**✅ Already done — the CLIENT needs NO changes (verified in code):**
+- `src/lib/providers/config.ts`: prod → `mode: 'proxy'`, `sarvamBaseUrl: '/api/sarvam'`, `getSarvamKey → ''`.
+- `src/lib/providers/sarvam.ts`: in proxy mode all three methods **omit** the key header and call the base URL —
+  `speak → /api/sarvam/text-to-speech`, `transcribe → /api/sarvam/speech-to-text`, `discuss → /api/sarvam/v1/chat/completions`.
+- `SettingsPanel.tsx`: the Sarvam-key field is `import.meta.env.DEV`-only → **hidden in prod**.
+- `PdfChat.tsx`: `keyMissing` is `import.meta.env.DEV`-only → **prod never blocks** on a missing key.
+So the app already expects a same-origin proxy at `/api/sarvam`. This task supplies it. (Scope = Sarvam's 3 live
+endpoints; translate/Anthropic aren't used yet — add later if those features land.)
+
+**Step 0 — work on `main`** (no branch) — all new isolated files, nothing existing is touched. Commit only after
+the unit tests + typecheck + lint are green, on the user's go.
+
+**Step 1 — portable proxy core → `src/server/sarvamProxy.ts` (new, unit-tested).** Web-standard `Request`/`Response`
+only, so it runs on Cloudflare Pages Functions / Vercel / Netlify / a test:
+```ts
+const ALLOWED = new Set(['text-to-speech', 'speech-to-text', 'v1/chat/completions']);
+const MAX_BODY_BYTES = 12_000_000;                 // STT audio upload ceiling
+const UPSTREAM = 'https://api.sarvam.ai';
+export interface SarvamProxyOptions { readonly apiKey: string; readonly allowedOrigins?: readonly string[]; }
+
+export async function handleSarvamProxy(request: Request, opts: SarvamProxyOptions): Promise<Response> {
+  if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  const path = new URL(request.url).pathname.replace(/^.*\/api\/sarvam\//, '');
+  if (!ALLOWED.has(path)) return new Response('Not found', { status: 404 });           // NOT an open proxy
+  const origin = request.headers.get('origin');
+  if (opts.allowedOrigins?.length && (!origin || !opts.allowedOrigins.includes(origin)))
+    return new Response('Forbidden', { status: 403 });
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES)
+    return new Response('Payload too large', { status: 413 });
+  const upstream = await fetch(`${UPSTREAM}/${path}`, {
+    method: 'POST',
+    headers: forwardHeaders(request.headers, opts.apiKey),   // keep content-type; add api-subscription-key; drop host/origin/cookie
+    body: request.body,
+    // @ts-expect-error runtime option for streaming request bodies
+    duplex: 'half',
+  });
+  return new Response(upstream.body, { status: upstream.status, headers: passThroughHeaders(upstream.headers) });
+}
+```
+`forwardHeaders`: **preserve `content-type`** (JSON for TTS/chat; for STT multipart, pass the original through so
+the boundary survives — never re-set it by hand), set `api-subscription-key: apiKey`, strip hop-by-hop/identifying
+headers. `passThroughHeaders`: copy `content-type`/length, drop upstream set-cookie etc.
+
+**Step 2 — abuse guard.** Already in Step 1: **path whitelist** (only the 3 endpoints), **POST only**, **origin
+allowlist**, **body-size cap**. Plus a **per-IP rate limit** as an injectable `rateLimit(ip): Promise<boolean>`
+hook — default allow (tests/local); the host adapter wires it to a durable store (Cloudflare KV / Rate-Limit
+binding) in **Task 29**. The whitelist + origin + size guards work everywhere now; the *durable* per-IP limit lands
+with the host.
+
+**Step 3 — host adapter (thin; final host settled in Task 29).** Provide the Cloudflare Pages Function (matches the
+existing plan + the `/api/sarvam` path):
+```ts
+// functions/api/sarvam/[[path]].ts
+import { handleSarvamProxy } from '../../../src/server/sarvamProxy';
+export const onRequest: PagesFunction<{ SARVAM_API_KEY: string; APP_ORIGINS?: string }> = ({ request, env }) =>
+  handleSarvamProxy(request, { apiKey: env.SARVAM_API_KEY, allowedOrigins: env.APP_ORIGINS?.split(',') });
+```
+A Vercel/Netlify adapter is the same ~3 lines against their signature — swap in Task 29 if the host changes. **The
+key is read from a server env var the user sets in the host dashboard — never in code/chat/repo** (keeps the
+[[sarvam-key-security]] rule).
+
+**⚠ Impact audit — what changes vs stays:**
+- **Client (`config.ts`, `sarvam.ts`, `SettingsPanel`, `PdfChat`):** **no changes** — already proxy-ready. Only
+  confirm the 3 proxy paths equal `ALLOWED` (they do).
+- **New files only:** `src/server/sarvamProxy.ts` (+ test) and `functions/api/sarvam/[[path]].ts`. Nothing existing
+  is refactored.
+- **Client bundle:** the proxy is server code, imported only by the Function, **not** by the app graph → it must
+  NOT enter the Vite client bundle (keep it under `src/server` / `functions`). Task 30's "grep dist for the key"
+  check still passes.
+- **Dev:** unchanged — dev stays `mode: 'direct'` with the localStorage key; local dev never needs the proxy.
+- **CORS:** none — proxy is same-origin (`/api/sarvam`).
+- **`/verify` harness + all existing tests:** untouched.
+
+**Tests (`src/server/sarvamProxy.test.ts`, vitest, mocked `fetch`):**
+- allowed path → forwards to `api.sarvam.ai/<path>` with `api-subscription-key` set + body passed through; returns
+  upstream status/body.
+- disallowed path → 404 (proves it's not an open proxy); non-POST → 405; oversized `content-length` → 413;
+  disallowed origin (when `allowedOrigins` set) → 403.
+- the key never appears in the returned response headers.
+
+**Verify:** unit tests green; typecheck + lint clean; the client's 3 proxy paths match `ALLOWED`. (True
+end-to-end voice-through-proxy is validated once deployed with the env key — Task 29.)
+
+**Land it (on the user's go):** commit to `main`. Commit message:
+`Sarvam voice proxy — holds the key server-side, with path/origin/size guards`. Deploy + env secret + durable
+per-IP rate limit = **Task 29** (the public-link step, later).
 
 ### Task 29 — Pages deploy + CI  🔲
 **Goal:** auto-deployed public PWA.
