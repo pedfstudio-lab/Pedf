@@ -4008,6 +4008,107 @@ aloud" starts within ~1s.
 **Land it (on the user's go):** commit to `main`, stage by stage. Commit messages — Stage 1:
 `Voice: instant spoken acknowledgment so there's no dead air`; Stage 2: `Voice: speak the answer as it streams (chunked TTS)`.
 
+### Task 25C — Streaming TTS: play each clip's audio as it synthesizes (kill the batch-TTS wait)  🔬 EXPERIMENT → branch `voice-streaming-tts`
+> Our `speak()` uses Sarvam's **batch** `/text-to-speech`: it renders a whole clip before returning, so a long
+> sentence waits seconds before any sound plays (the 6s gaps). Sarvam also has a **streaming TTS over WebSocket**
+> (same `bulbul:v3`, 11 languages) that begins audio at ~180ms and streams it as it's generated. This task swaps
+> the **mouth** to streaming — **on a throwaway branch**, so `main` (today's working voice) is untouched until we
+> decide. This is the AUDIO-stage equivalent of the answer-text streaming we already have: today we start the
+> *first sentence* early but still wait for that sentence's *whole clip*; streaming TTS removes that wait too.
+
+**Why a branch + the rollback promise:** this rewires how audio is both **fetched** (WebSocket) and **played**
+(progressive), riskier than the text-side refinements. **All changes in this task are committed to the new branch
+`voice-streaming-tts` — `main` is NEVER modified.** The branch just starts as an exact copy of `main` at `cae525d`
+(that is all "from `main`" means). If we don't like it: `git branch -D voice-streaming-tts` and **`main` is exactly as it is now —
+the current voice is untouched, nothing to restore, and prior tasks are unaffected** (none of their files change on
+`main`).
+
+**Depends on:** Task 25B. **Keeps** the LLM grounding (`discuss`), STT, chat, and memory **exactly as-is** — only
+the TTS stage changes.
+
+**Step 0 — branch.** `git switch -c voice-streaming-tts` from `main`.
+
+**Step 1 — a streaming `speak()` → `src/lib/providers/sarvam.ts`.** Add `speakStream(input, onAudioChunk)` that
+opens Sarvam's **TTS WebSocket** (per their JS SDK / `wss://` docs), sends the config once (`bulbul:v3`,
+`target_language_code`, speaker, pace), then the text, and calls `onAudioChunk(bytes)` per chunk as it arrives,
+resolving when the stream closes. Key handling identical to today (direct sends the key, proxy omits it — Step 5);
+reuse `providerConfig`. **Keep the batch `speak()` untouched as the fallback.**
+
+**Step 2 — progressive playback → `src/lib/speech/speakAnswer.ts` + `speechQueue.ts`.** Today `playSpeechBlob`
+plays one finished Blob. Add a player that appends chunks to a live buffer via **`MediaSource`/SourceBuffer** (or
+Web Audio scheduling) and starts on the **first** chunk. Expose the same `StopSpeech` handle so the queue's
+`skipCurrent()`/`stop()` still work. `enqueueSpeech` uses the streaming path when available; on any WS error, **fall
+back** to batch `speak()` → then browser speech (today's chain). No regression if streaming fails.
+
+**Step 3 — let the chunker relax (optional, measure first).** With audio streaming, the tight first-clip/coalesce
+logic (Refinements 5–7) matters far less. After Step 2 works, try **larger** chunks (or feeding the sentence
+stream more directly) and confirm it's still smooth. Do NOT delete the chunking yet — widen targets behind a flag
+and compare.
+
+**Step 4 — verify (live, on the branch).** Several voice questions → **first audio within a fraction of a second**,
+**no multi-second mid-answer stalls** even on long sentences; the `[voice timing]` log shows no more 6s single-clip
+waits. Interrupt / new question mid-answer → `stop()` cuts audio cleanly. Kill network / bad key → falls back to
+batch, then browser speech (no crash). `npm run test` / `typecheck` / `lint` green.
+
+**Step 5 — production/proxy follow-up (NOTE, not in this task).** Streaming TTS is a **WebSocket**; Task 28's proxy
+is REST-only, so prod (proxy mode) needs WS proxying (Cloudflare supports it) — a separate task before deploy.
+**Dev (direct key) works now**, which is enough to test and decide.
+
+**⚠ Impact audit / rollback:**
+- **`main`:** untouched while this lives on the branch; merging is a separate, explicit step.
+- **Delete the branch → the current voice returns exactly as-is** (it never left `main`); zero impact on Tasks
+  23/24/25/28.
+- **Grounding, chat, memory, STT:** unchanged — only the TTS stage is swapped. **Fallback preserved:** batch TTS +
+  browser speech remain the safety net.
+
+**Land it (only if we like it, on your go):** merge `voice-streaming-tts` → `main`, then schedule the WS-proxy
+follow-up (Step 5) before the public deploy. Commit message: `Streaming TTS: play each clip as it synthesizes (Task 25C)`.
+
+### Task 25D — Streaming STT: transcribe the question WHILE you speak (fix the "ears" delay)  🔬 EXPERIMENT → same branch `voice-streaming-tts`
+> STT is still **batch**: `startRecording` captures the whole question, then `transcribe()` uploads it and we wait
+> ~1–2s for the text — now the single biggest delay in the loop (see the request logs). Sarvam has a **streaming
+> STT** (`saaras:v3-realtime`, WebSocket) that transcribes **as the user speaks**, so the final transcript is ready
+> almost the instant they stop. This is the audio-IN twin of Task 25C's streaming TTS. **Same throwaway branch, NOT
+> `main`** — we test the whole voice first.
+
+**Why same branch / rollback:** continues on `voice-streaming-tts` (already holds streaming TTS). Nothing lands on
+`main` until we test and decide. `git branch -D voice-streaming-tts` → the current voice returns exactly as-is.
+Only the STT stage changes; LLM grounding, chat, memory, and TTS are untouched.
+
+**Depends on:** Task 25C (same branch). **Keeps the batch `transcribe()` as the fallback.**
+
+**Step 1 — a streaming transcriber → `src/lib/providers/sarvam.ts`.** Add `transcribeStream({ onPartial, signal })`
+(or similar) that opens Sarvam's **STT WebSocket** (`saaras:v3-realtime`), streams mic audio up, emits interim
+transcripts via `onPartial`, and resolves with the **final** transcript when the caller signals end-of-speech. Same
+key handling as streaming TTS (direct sends the key; proxy omits it — prod follow-up). Reuse the browser-native
+WebSocket (no SDK), matching the wire pattern Codex already used for TTS.
+- **Audio-format caveat — verify FIRST:** the STT WebSocket most likely wants **raw PCM (e.g. 16 kHz mono)**, not
+  the WebM/Opus that `MediaRecorder` produces. So `recordQuestion.ts` probably needs a **Web Audio capture path
+  (AudioWorklet)** that emits PCM frames to stream, alongside today's MediaRecorder path. Confirm Sarvam's required
+  encoding + sample rate from their streaming-STT docs before building.
+
+**Step 2 — stream while recording → `recordQuestion.ts` + `finishRecording` in `PdfChat.tsx`.**
+- Add a streaming recorder: on mic start, open the STT WS and push audio frames live. On stop, flush end-of-audio
+  and take the final transcript (fast — most is already transcribed).
+- `finishRecording` uses the streaming transcript when available; the acknowledgment still fires on stop to cover
+  any residual gap. On any WS/format error, **fall back** to today's path (`activeRecording.stop()` → batch
+  `transcribe({ audio })`). No regression if streaming fails.
+- (Optional, nice-to-have) show the interim transcript live in the input box as the user speaks.
+
+**Step 3 — verify (live, on the branch).** Ask several questions by voice → the `[voice timing] STT` number drops
+from ~1–2s toward a few hundred ms (transcript ready ~when you stop); the whole loop feels tighter. Break the WS /
+bad key → falls back to batch STT (no crash). `npm run test` / `typecheck` / `lint` green.
+
+**⚠ Impact audit / rollback:** `main` untouched (branch only). Delete the branch → the current voice returns
+exactly. Only the STT stage changes; grounding/chat/memory/TTS unchanged; **batch STT + today's flow remain the
+fallback.**
+
+**Step 4 — production/proxy follow-up (NOTE).** Like streaming TTS, this is a WebSocket → prod (proxy mode) needs WS
+proxying (fold into the same Task-28 follow-up). Dev (direct key) works now for testing.
+
+**Land it (only if we like the whole voice, on your go):** merge `voice-streaming-tts` → `main` together with 25C.
+Commit message: `Streaming STT: transcribe while the user speaks (Task 25D)`.
+
 ---
 
 ## PWA & deploy
