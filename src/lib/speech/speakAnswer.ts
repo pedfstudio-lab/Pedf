@@ -5,7 +5,7 @@ export type StopSpeech = () => void;
 /** Read ~15% faster than default; matches the Sarvam TTS pace. */
 const PLAYBACK_RATE = 1.15;
 
-function speakWithBrowser(
+export function speakWithBrowser(
   text: string,
   language: string,
   onEnded: () => void,
@@ -36,6 +36,40 @@ function speakWithBrowser(
   };
 }
 
+/** Play an already-generated speech clip without another provider round-trip. */
+export async function playSpeechBlob(
+  audio: Blob,
+  onEnded: () => void = () => undefined,
+): Promise<StopSpeech> {
+  const url = URL.createObjectURL(audio);
+  const element = new Audio(url);
+  let active = true;
+
+  const finish = () => {
+    if (!active) return;
+    active = false;
+    URL.revokeObjectURL(url);
+    onEnded();
+  };
+  element.addEventListener('ended', finish, { once: true });
+  element.addEventListener('error', finish, { once: true });
+
+  try {
+    await element.play();
+  } catch (error) {
+    active = false;
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+
+  return () => {
+    if (!active) return;
+    active = false;
+    element.pause();
+    URL.revokeObjectURL(url);
+  };
+}
+
 /** Plays Sarvam audio when available, with speechSynthesis as the free UI fallback. */
 export async function speakAnswer(
   text: string,
@@ -44,33 +78,7 @@ export async function speakAnswer(
 ): Promise<StopSpeech> {
   try {
     const { audio } = await defaultProviders().speak({ text, language });
-    const url = URL.createObjectURL(audio);
-    const element = new Audio(url);
-    let active = true;
-
-    const finish = () => {
-      if (!active) return;
-      active = false;
-      URL.revokeObjectURL(url);
-      onEnded();
-    };
-    element.addEventListener('ended', finish, { once: true });
-    element.addEventListener('error', finish, { once: true });
-
-    try {
-      await element.play();
-    } catch (error) {
-      active = false;
-      URL.revokeObjectURL(url);
-      throw error;
-    }
-
-    return () => {
-      if (!active) return;
-      active = false;
-      element.pause();
-      URL.revokeObjectURL(url);
-    };
+    return await playSpeechBlob(audio, onEnded);
   } catch {
     return speakWithBrowser(text, language, onEnded);
   }

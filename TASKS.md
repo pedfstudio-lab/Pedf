@@ -3805,6 +3805,209 @@ finishes (grounded answer + spoken back). The failed `speech-to-text` POST shoul
 >   translate the tapped block → `speak` it (Task 23). Enable if/when we want the one-tap reader; no
 >   export-seam change.
 
+### Task 25B — Conversational low-latency voice: no dead air + a fast answer  🔲 TODO → on `main`
+> The voice bot goes **silent for 3–5s** after you speak, which breaks the feel of a conversation. Fill that silence
+> with an **instant, natural acknowledgment** ("sure, let me check that…"), and make the real answer **start fast**
+> by speaking it as it's ready — so the interaction never disconnects. (User ask, 2026-08-21.)
+**Depends on:** Task 23 (TTS), Task 24 / 24A / 24B (chat brain + memory), Task 25 (voice loop).
+
+**Why it's slow now:** a voice reply runs 3 sequential Sarvam round-trips — STT (hear) → chat (think) → TTS (speak)
+— and today we wait for **all three** to finish before any sound plays. `speakAnswer` TTS's the **whole** answer as
+one clip, so nothing is heard until everything is done → 3–5s of silence.
+
+**Stage 1 — Instant acknowledgment (kills the dead air):**
+- `src/lib/speech/acknowledgments.ts` (new): a few short, natural filler phrases **per language** (EN: "Sure, let me
+  check that…", "One moment…", "Give me a second…"; Hindi/etc. equivalents). `preloadAcknowledgments(language)`
+  TTS's them **once** (via the existing `speak` provider) and caches the blobs in memory keyed by language;
+  `takeAcknowledgment(language)` returns a random cached blob (rotate so it's not repetitive), or `null` if unready.
+- **Preload** on chat open and whenever the answer-language changes, so a clip is ready before the first question.
+- **Play it after a natural ~0.6s beat** (tunable, aim 0.5–1s) once recording stops (`PdfChat.finishRecording`),
+  *in parallel* with STT. A real person takes a beat — firing the instant you release the mic feels robotic (user
+  testing, 2026-08-21). If no clip is cached yet, fall back to the browser `speechSynthesis` filler or skip.
+- Route both the ack and the answer through **one sequential audio queue** (Stage 2) so ack → answer plays
+  seamlessly, and a new question / Stop interrupts both.
+
+**Stage 2 — Speak the answer as it's ready (fast; also fixes slow "Read aloud"):**
+- `src/lib/speech/speechQueue.ts` (new): a small queue that plays clips back-to-back with one `stop()`;
+  `enqueue(blob)` + `enqueueSpeech(text, language)` (TTS then enqueue). The chat uses this instead of the one-shot
+  `speakAnswer`.
+- **Chunk the answer into sentences**; TTS + enqueue the **first sentence immediately**, the rest in the background.
+  Audio starts after ~the first sentence's TTS (~0.5–1s) instead of the whole answer's TTS — and this also fixes the
+  slow **Read aloud** button (same chunked path).
+- Queue order: `[acknowledgment] → (spaced bridging fillers while waiting) → [answer sentence 1] → [sentence 2] →
+  …`. **Bridging fillers** = short "thinking" clips ("Just a moment…", "Still looking…", "Almost there…", pre-cached
+  per language) played **one at a time with a ~1–1.5s gap between them**, cycling until the answer's first sentence
+  is ready — **NOT dumped back-to-back**. (User testing 2026-08-21: playing all fillers in the first 2–3s and then
+  going silent is the bug — space them so the wait is covered by an occasional natural "still looking…", never 4–5s
+  of dead air.) The answer interrupts the filler cycle the instant a sentence is ready. Once streaming (Stage 3b)
+  lands, the gap shrinks to ~2s so usually only the ack + at most one bridge is needed.
+
+**Stage 3 — stream the LLM (sets the speed ceiling; do the check FIRST):** the 4–6s gap is dominated by the model
+*writing* the answer over the document — Stage 2's chunked TTS removes the *speaking* wait, but streaming is what
+removes the *writing* wait.
+- **3a — check (simple yes/no):** confirm whether Sarvam's `/v1/chat/completions` supports `stream: true` (SSE).
+- **3b — if yes:** stream the answer and speak the **first sentence as it's generated** — feed each completed
+  sentence straight into the Stage-2 queue. Targets **~2–3s** to the first spoken word (STT ~1s + first sentence
+  written ~1s + first-sentence TTS ~0.5s).
+- **if no:** skip streaming — Stage 2 (chunked TTS) + Part C (short answers) + the bridging filler still remove the
+  TTS wait and the dead air, landing ~3–4s but **never silent**. (~2s is the practical floor for a 3-step
+  STT→LLM→TTS pipeline.)
+While building, add quick **timing logs** to the STT / LLM / TTS steps on one real question, so we optimize the
+actual bottleneck rather than guess.
+
+**Part C — keep spoken answers brief (faster to write + speak):** thread `spoken?: boolean` through `discuss` →
+`buildDiscussMessages`; when spoken, add "Keep it brief and conversational for speech (1–3 short sentences)" and
+lower `max_tokens`. Shorter answer = less LLM + less TTS time. (Typed chat keeps full-length answers.)
+
+**⚠ Impact audit:**
+- **Playback:** the chat switches to `speechQueue`; keep `speakAnswer` for any non-queued caller or route it through
+  the queue. The `speechSynthesis` fallback stays.
+- **Voice proxy (28) / grounding (24A) / memory (24B):** unaffected — just earlier/more TTS + a shorter-answer
+  prompt flag; no change to the proxy or grounded/label logic.
+- **Extra TTS calls:** chunking makes several small TTS calls instead of one big one (more requests, each smaller) —
+  net faster to first word; minor bump in call count (fine for the proxy limits).
+- **Ack pre-gen cost:** a handful of tiny TTS calls per language, cached once — negligible.
+- **Dev vs prod:** ack preload + chunked TTS use the same `speak` provider → direct in dev (your key), proxy in prod.
+
+**Tests:**
+- `acknowledgments`: preload caches per language; `takeAcknowledgment` returns a cached blob + rotates; `null` before
+  preload.
+- `speechQueue`: enqueued clips play in order; `stop()` clears the queue and halts (mock `Audio`).
+- sentence chunking splits on `.`/`?`/`!`, keeps `[Page N]`, handles common abbreviations reasonably.
+- `buildDiscussMessages` with `spoken: true` adds the brevity line; typed path unchanged.
+
+**⚠ Refinement from live timing (2026-08-21) — the bottleneck is TTS length, NOT streaming.** The console
+`[voice timing]` logs proved streaming already works (LLM first token ~300 ms every time). The real cost is **TTS,
+which scales hard with sentence length**: 34 chars → 0.9 s, 63 → 1.7 s, 184 → 3.1 s, **234 chars → 7.4 s**. So a
+long *first* sentence = a long wait ("reads only after the full answer"). When the answer came back short (34–38-
+char sentences) the whole reply was ~3 s and felt snappy — the target is met **when answers are short**. Three
+fixes:
+1. **Enforce short voice answers** — Part C isn't actually limiting length (a 234-char sentence got through). When
+   `spoken`, set `max_tokens` low (~120) and firm up the instruction: "Answer in 1–2 short sentences, ≤40 words."
+2. **Short first chunk** — speak the very first piece as a short clause (~50–60 chars max; split on the first
+   comma/clause boundary when the first sentence is long) so its TTS is ~1 s and the answer is heard fast; normal
+   sentence chunks after.
+3. **Fillers = one starter + rare fallback (not every time)** — keep ONE acknowledgment starter, but only play
+   bridging fillers if the answer isn't ready after ~1.5 s of waiting, spaced ~1.5 s, max 1–2. No spam when the
+   answer is fast. Streaming stays as-is (it works).
+Together → ~2–3 s to the first word (the fast request in the logs), every time, no spam, no dead air.
+
+**⚠ Refinement 2 (2026-08-21) — TTS spells out abbreviations letter-by-letter.** The sentence chunker in
+`sentenceChunking.ts` splits at the period *inside* joined abbreviations (e.g. `PVT.LTD` → `PVT.` + `LTD …`), leaving
+isolated uppercase fragments that Sarvam TTS reads as letters ("P-V-T", "L-T-D"). `protectPeriods` guards `a.m.` /
+`Mr.` / `e.g.` but NOT a period sitting between two letters with no space. Fix (both in `sentenceChunking.ts`):
+1. In `protectPeriods`, protect a period directly between two letters with no surrounding space (e.g.
+   `/([A-Za-z])\.(?=[A-Za-z])/`) so `PVT.LTD` stays in ONE chunk — no false sentence split, no isolated `PVT.`.
+2. In the spoken-text normalization (before TTS), turn that between-letters period into a space (`PVT.LTD` →
+   `PVT LTD`) so it's voiced naturally, not spelled as a lone fragment.
+Applies to streaming AND "Read aloud" (same chunker). Tests: `"…Wanderon. PVT.LTD from Jun'22…"` → chunks
+`"…Wanderon."` + `"PVT.LTD from Jun'22…"` (one chunk, no isolated `"PVT."`); the spoken form has no lone
+`PVT.` / `LTD` fragment.
+
+**⚠ Refinement 3 (2026-08-21) — the REAL cause: words glued to numbers (`generating60+`, `leading80+`,
+`managing5`, `for1500+`).** Proven from the live TTS-text log: the on-screen answer has the spaces ("leading 80+")
+but the TTS chunk is `"leading80+"`. Sarvam can't pronounce a word fused to a number, so it spells the whole token.
+**Cause:** `createSentenceAccumulator.push` rebuilds its buffer through `chunkSentences` (which `.trim()`s), so a
+space that lands on a streaming-delta boundary — a trailing-space delta or a standalone `" "` delta — is trimmed
+away and the next delta glues on. Streaming-only (the assembled on-screen text is fine). **Fix (`sentenceChunking.ts`):**
+1. **Preserve whitespace across delta boundaries** — the accumulator must not lose the buffer's boundary space.
+   Minimal: capture `const trailedSpace = /\s$/.test(buffer)` before re-chunking and re-append one space to the
+   rebuilt buffer when `trailedSpace` and it's non-empty. Better: keep a **raw** buffer and slice off only the
+   released complete sentences, so raw whitespace is never normalized away.
+2. **Protect the abbreviations `Pvt` / `Ltd` / `Inc` / `Corp`** in `protectPeriods` (they're spoken as isolated
+   `"Pvt."` / `"Ltd."` → spelled), alongside the between-letters `PVT.LTD` fix from Refinement 2.
+Tests: streamed deltas `"…leading"`, `" "`, `"80+ trips."` → released sentence is `"…leading 80+ trips."` (space
+intact); `"… Pvt. Ltd. from…"` does NOT split into isolated `"Pvt."`/`"Ltd."`.
+
+**⚠ Refinement 4 (2026-08-23) — two more TTS readability bugs, from the live chunk-text log.**
+**(a) ALL-CAPS proper names are spelled** — chunk `"…MBA at LLOYD BUSINESS SCHOOL ."` → Sarvam spells `LLOYD`
+(L-L-O-Y-D) because it's uppercase. Real acronyms (`MBA`, `HR`, `IITTM`) *should* stay spelled, so DON'T touch a
+lone caps word — only normalize **runs of 2+ consecutive ALL-CAPS words** (institution names). **Fix
+(`sentenceChunking.ts`):** add `normalizeForSpeech(text)` doing
+`text.replace(/\b[A-Z]{2,}(?:\s+[A-Z]{2,})+\b/g, run => run.split(/\s+/).map(w => w[0] + w.slice(1).toLowerCase()).join(' '))`
+→ `"LLOYD BUSINESS SCHOOL"` becomes `"Lloyd Business School"`, while lone `MBA`/`HR`/`IITTM` stay spelled. Apply it
+to every spoken chunk (fold into `chunkSentences`, or call right before `speak`). **Speech-only** — the on-screen
+answer keeps the résumé's caps. (Complementary: nudge `discussPrompt.ts` to prefer normal capitalization for
+institution names, so lone-word caps names read well too.)
+**(b) The first-chunk splitter strands a lone last word** — `"…Indian Institute Of Tourism and Travel"` +
+`"Management ."` split the college name across two clips, so `Management` sounded dropped. **Fix
+(`splitFirstSpeechChunk`):** don't split when the tail would be trivial — after computing `first`/`remainder`, if
+`remainder` has no internal space (a single word) or `remainder.length < 16`, return `[normalized]` (speak the
+whole sentence). Keeps proper-noun tails intact; costs ≈0.3s on the first clip only for short sentences.
+Tests: spoken form of `"…MBA at LLOYD BUSINESS SCHOOL."` contains `"Lloyd Business School"`, not `"LLOYD"`; `"He
+did his BBA at Indian Institute Of Tourism and Travel Management."` → ONE chunk (not split before `Management`).
+Remove the temporary TTS-text debug log in `speechQueue.ts` once Refinements 3 & 4 are verified.
+
+**⚠ Refinement 5 (2026-08-23) — voice stalls mid-answer for 1–2s, intermittently (≈2 of 9 questions).**
+Not a state-machine bug — a **buffering gap**. Playback is strictly in-order and each sentence is a separate
+Sarvam TTS request; occasionally the next clip's audio hasn't returned when the current clip ends, so the queue
+runs dry and waits (`flushPreparedSpeech` only appends the next clip once its `speak()` resolves). Two amplifiers:
+(1) Sarvam's per-request latency is large and **variable** — the live log shows a 57-char clip taking 3.2s vs a
+162-char clip at 4.4s — so **short clips cost more to fetch than they play**, leaving no cushion; (2) in-order
+playback means **one slow clip stalls every clip behind it**, even already-downloaded ones. More clips → more
+chances one is slow.
+
+**Does NOT change speaking time.** Same words, same pace → same audio length. First word arrives just as fast
+(first clip stays short). The only change is the mid-answer silences disappear, so end-to-end the answer *finishes
+sooner* in the stall cases and is unchanged otherwise — never slower.
+
+**Fix — fewer, larger clips after the first (coalesce),** in BOTH the streaming path (`enqueueStreamedSentences`
+in `PdfChat.tsx`) and Read-aloud (`startPlayback`): keep the first clip short via `splitFirstSpeechChunk` (fast
+start), then **merge consecutive sentences into ~150-char chunks** before `enqueueSpeech`, flushing whatever
+remains on stream-end (and on the final `flush()`). Bigger clips amortize Sarvam's fixed latency and each plays
+long enough to cover the next fetch, so the buffer doesn't run dry. Keep the ramp so the START stays snappy:
+clip 1 short (splitFirstSpeechChunk), clip 2 may stay small (the first sentence's `splitFirstSpeechChunk`
+remainder covers this), only clip 3+ grow to the ~150-char target. No change to `speechQueue.ts` playback logic.
+**Verify:** ask several long-answer questions in a row → speech flows clip-to-clip with no mid-answer stall; the
+`[voice timing]` log shows ~2–3 larger chunks per answer instead of 5–7 small ones.
+
+**⚠ Refinement 6 (2026-08-23) — first clip too tiny → startup gap.** Live log: clip 1 was
+`"उनके पास Travel Operations,"` (27 chars, ~1.5s) but clip 2 took 2.9s to fetch → ~1.4s gap. Cause:
+`splitFirstSpeechChunk` splits at the **first** clause boundary past the minimum (the first comma at 27 chars), so
+a long opening sentence yields a tiny first clip that can't cover the next fetch. The rule is: a clip should play
+at least as long as the next clip takes to fetch, so the first clip must not be tiny. **Fix
+(`splitFirstSpeechChunk`):** pick the clause boundary **nearest the limit** (the LAST qualifying match ≤ maxChars),
+not the first — change the `.find(...)` on the clause-boundary line to take the last of the filtered matches. This
+fills the ~60-char budget (`"…Travel Operations, Group Tours, Vendor Management,"` ≈ 59 chars, ~3.5s) so clip 1
+covers clip 2's fetch; it still fetches in ~1.3s, so the start stays snappy AND the gap closes. Refinement 4b's
+"don't strand a lone tail" guard still applies on top. Test: `splitFirstSpeechChunk("उनके पास Travel Operations,
+Group Tours, Vendor Management, Travel Logistics, Customer Service …")` → the first element ends at the LAST comma
+within 60 chars, not the first (≈59 chars, not 27).
+
+**⚠ Refinement 7 (2026-08-23) — second clip held too long → gap after a SHORT first sentence.** Live log: clip 1
+`"इससे पहले उन्होंने Wanderon."` (28 chars, a whole short sentence) → clip 2 `"Pvt. Ltd. …"` **195 chars**, and it
+only started fetching at the very end of the LLM stream (~3.2s) → ~3s gap. Root cause is Refinement 5's fixed
+150-char target: a completed sentence (~118 chars) sits **under 150**, so the coalescer holds it and waits for the
+next sentence — which only finishes at stream-end. So chunk 2's TTS never starts until the whole answer is written.
+(NOTE: we already speak the **first sentence before the answer finishes** — that part works, log proves clip 1 at
+988ms vs LLM done at 3183ms. This is specifically the SECOND clip being held.) **Fix
+(`createSpeechChunkAccumulator`):** **ramp the target instead of fixing it at 150.** Early clips have nothing
+buffered ahead of them, so they must ship fast; later clips can be big to amortize Sarvam's latency:
+
+| clip index | target chars | why |
+| --- | --- | --- |
+| 1 | ~60 (`splitFirstSpeechChunk`) | fast first word |
+| 2 | ~60 | must arrive before clip 1 ends — do NOT wait for 150 |
+| 3 | ~100 | a small buffer exists now |
+| 4+ | 150 | plenty queued; amortize latency |
+
+Track a `releasedCount`; the coalescing branch releases `pending` as soon as it reaches `rampedTarget(releasedCount)`
+(`releasedCount<=1 → 60`, `===2 → 100`, else 150), `flush()` still emits the tail. So a 118-char second sentence
+releases the instant it completes (~1.5s) instead of at stream-end. Keeps every earlier fix intact (the first-
+sentence `splitFirstSpeechChunk` branch, Ref 3 whitespace, Ref 4 normalize). Test: feed `["A." (28ch), "B…" (118ch),
+"C…" (77ch)]` → releases `["A."]`, then `["B…"]` immediately (not held), then `["C…"]` on flush — three clips, not
+one merged 195-char clip.
+
+**→ After Ref 7 lands & verifies: CONSOLIDATION pass** — collapse Refinements 1–7 into one "Voice pipeline — how it
+works" spec (single source of truth) + remove the temporary TTS-text debug log in `speechQueue.ts`.
+
+**Verify (live):** ask by voice → **within ~0.5s** you hear "sure, let me check…" (no dead air) → the first sentence
+follows within ~1–2s and flows sentence-by-sentence → feels like a real conversation, not a 5-second wait. "Read
+aloud" starts within ~1s.
+
+**Land it (on the user's go):** commit to `main`, stage by stage. Commit messages — Stage 1:
+`Voice: instant spoken acknowledgment so there's no dead air`; Stage 2: `Voice: speak the answer as it streams (chunked TTS)`.
+
 ---
 
 ## PWA & deploy

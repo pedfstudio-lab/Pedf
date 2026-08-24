@@ -4,11 +4,29 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentText } from '@/lib/pdf/documentText';
 import { defaultProviders } from '@/lib/providers';
 import { recentChatHistory } from '@/lib/providers/chatHistory';
+import { NOT_IN_DOCUMENT_MARKER } from '@/lib/providers/discussPrompt';
 import { getSarvamKey } from '@/lib/providers/keys';
+import {
+  MAX_BRIDGING_FILLERS,
+  preloadAcknowledgments,
+  takeAcknowledgment,
+  takeAcknowledgmentPhrase,
+  takeBridgingAcknowledgment,
+  waitForAcknowledgmentDelay,
+  waitForBridgingGap,
+  waitForBridgingInitialDelay,
+} from '@/lib/speech/acknowledgments';
 import { startRecording } from '@/lib/speech/recordQuestion';
 import type { Recording } from '@/lib/speech/recordQuestion';
-import { speakAnswer } from '@/lib/speech/speakAnswer';
-import type { StopSpeech } from '@/lib/speech/speakAnswer';
+import {
+  chunkSentences,
+  coalesceSpeechChunks,
+  createSpeechChunkAccumulator,
+  createSentenceAccumulator,
+  normalizeForSpeech,
+} from '@/lib/speech/sentenceChunking';
+import { createSpeechQueue } from '@/lib/speech/speechQueue';
+import type { SpeechQueue, SpeechQueueTicket } from '@/lib/speech/speechQueue';
 import { stripPageMarkers } from '@/lib/speech/stripPageMarkers';
 import {
   SUPPORTED_LANGUAGES,
@@ -38,6 +56,16 @@ interface AskOptions {
   readonly voiceRequest?: number;
 }
 
+interface VoicePlaybackState {
+  readonly voiceRequest: number;
+  readonly language: string;
+  readonly playbackToken: number;
+  firstAnswerReady: boolean;
+  bridgeActive: boolean;
+}
+
+const ACKNOWLEDGMENT_PLAYBACK_ID = -1;
+
 function readableError(error: unknown): string {
   if (error instanceof AggregateError) {
     const cause = error.errors.find((item): item is Error => item instanceof Error);
@@ -66,19 +94,29 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [micState, setMicState] = useState<MicState>('idle');
+  const speechQueue = useRef<SpeechQueue | null>(null);
+  if (!speechQueue.current) {
+    speechQueue.current = createSpeechQueue({
+      onError: (caught) => {
+        setError(`Speech playback is unavailable: ${readableError(caught)}`);
+      },
+    });
+  }
   const nextId = useRef(0);
   const askRequest = useRef(0);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
-  const playback = useRef<{ readonly id: number; readonly stop: StopSpeech } | null>(null);
+  const playback = useRef<{ readonly id: number } | null>(null);
   const playbackRequest = useRef(0);
+  const voicePlayback = useRef<VoicePlaybackState | null>(null);
   const recording = useRef<Recording | null>(null);
   const micRequest = useRef(0);
   const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
 
   const stopPlayback = useCallback(() => {
     playbackRequest.current += 1;
-    playback.current?.stop();
+    speechQueue.current?.stop();
     playback.current = null;
+    voicePlayback.current = null;
     setPlayingId(null);
   }, []);
 
@@ -106,11 +144,17 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     }
   }, [cancelRecording, open, stopPlayback]);
 
+  useEffect(() => {
+    if (!open || keyMissing) return;
+    void preloadAcknowledgments(preferredLanguage);
+  }, [keyMissing, open, preferredLanguage]);
+
   useEffect(() => () => {
     askRequest.current += 1;
     playbackRequest.current += 1;
-    playback.current?.stop();
+    speechQueue.current?.stop();
     playback.current = null;
+    voicePlayback.current = null;
     micRequest.current += 1;
     recording.current?.cancel();
     recording.current = null;
@@ -131,34 +175,72 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
 
   if (!open) return null;
 
-  const startPlayback = async (entry: ChatEntry) => {
-    stopPlayback();
-    const request = playbackRequest.current;
+  const isCurrentVoicePlayback = (state: VoicePlaybackState): boolean => (
+    voicePlayback.current === state
+    && micRequest.current === state.voiceRequest
+    && playbackRequest.current === state.playbackToken
+  );
+
+  const enqueueBridgingFillers = async (state: VoicePlaybackState) => {
+    await waitForBridgingInitialDelay();
+    for (let count = 0; count < MAX_BRIDGING_FILLERS; count += 1) {
+      if (!isCurrentVoicePlayback(state) || state.firstAnswerReady) return;
+      const bridge = takeBridgingAcknowledgment(state.language);
+      if (!bridge) return;
+      state.bridgeActive = true;
+      const ticket = speechQueue.current?.enqueue(bridge, () => {
+        state.bridgeActive = false;
+      });
+      if (!ticket) return;
+      await ticket.done;
+      if (!isCurrentVoicePlayback(state) || state.firstAnswerReady) return;
+      if (count + 1 < MAX_BRIDGING_FILLERS) await waitForBridgingGap();
+    }
+  };
+
+  const startPlayback = async (
+    entry: ChatEntry,
+    voiceState?: VoicePlaybackState,
+  ) => {
+    const continuingVoice = voiceState && isCurrentVoicePlayback(voiceState);
+    if (!continuingVoice) stopPlayback();
+    const request = continuingVoice
+      ? voiceState.playbackToken
+      : playbackRequest.current;
     setPlayingId(entry.id);
     setError(null);
+    playback.current = { id: entry.id };
 
-    try {
-      const stop = await speakAnswer(
-        stripPageMarkers(entry.text),
-        entry.language ?? preferredLanguage,
-        () => {
-          if (playbackRequest.current !== request) return;
-          playbackRequest.current += 1;
-          playback.current = null;
-          setPlayingId(null);
-        },
-      );
-      if (playbackRequest.current !== request) {
-        stop();
-        return;
-      }
-      playback.current = { id: entry.id, stop };
-    } catch (caught) {
-      if (playbackRequest.current !== request) return;
-      playbackRequest.current += 1;
+    const sentenceChunks = chunkSentences(entry.text)
+      .map((chunk) => normalizeForSpeech(stripPageMarkers(chunk)))
+      .filter((chunk) => chunk !== '');
+    const chunks = coalesceSpeechChunks(sentenceChunks);
+    if (chunks.length === 0) {
+      if (continuingVoice) voiceState.firstAnswerReady = true;
+      playback.current = null;
       setPlayingId(null);
-      setError(`Speech playback is unavailable: ${readableError(caught)}`);
+      return;
     }
+
+    const tickets = chunks.map((chunk, index) => speechQueue.current?.enqueueSpeech(
+      chunk,
+      entry.language ?? preferredLanguage,
+      `${continuingVoice ? `request ${voiceState.voiceRequest} ` : ''}TTS sentence ${index + 1}`,
+      continuingVoice && index === 0
+        ? () => {
+          if (!isCurrentVoicePlayback(voiceState)) return;
+          voiceState.firstAnswerReady = true;
+          if (voiceState.bridgeActive) speechQueue.current?.skipCurrent();
+        }
+        : undefined,
+    )).filter((ticket) => ticket !== undefined);
+
+    await tickets[tickets.length - 1]?.done;
+    if (playbackRequest.current !== request) return;
+    playbackRequest.current += 1;
+    playback.current = null;
+    if (continuingVoice && voicePlayback.current === voiceState) voicePlayback.current = null;
+    setPlayingId(null);
   };
 
   const togglePlayback = async (entry: ChatEntry) => {
@@ -169,9 +251,47 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     await startPlayback(entry);
   };
 
+  const stopVoicePlayback = () => {
+    micRequest.current += 1;
+    stopPlayback();
+    setMicState('idle');
+  };
+
+  const startAcknowledgment = async (language: string, voiceRequest: number) => {
+    stopPlayback();
+    const playbackToken = playbackRequest.current;
+    const state: VoicePlaybackState = {
+      voiceRequest,
+      language,
+      playbackToken,
+      firstAnswerReady: false,
+      bridgeActive: false,
+    };
+    voicePlayback.current = state;
+    await waitForAcknowledgmentDelay();
+    if (!isCurrentVoicePlayback(state)) return;
+
+    try {
+      const cached = takeAcknowledgment(language);
+      const ticket = cached
+        ? speechQueue.current?.enqueue(cached)
+        : speechQueue.current?.enqueueBrowserSpeech(
+          takeAcknowledgmentPhrase(language),
+          language,
+        );
+      if (!ticket || !isCurrentVoicePlayback(state)) return;
+      playback.current = { id: ACKNOWLEDGMENT_PLAYBACK_ID };
+      setPlayingId(ACKNOWLEDGMENT_PLAYBACK_ID);
+      void ticket.done.then(() => enqueueBridgingFillers(state));
+    } catch {
+      // An acknowledgment is best-effort; transcription and the real answer must continue.
+    }
+  };
+
   const ask = async (questionText: string, options: AskOptions) => {
     const nextQuestion = questionText.trim();
     if (!doc || !nextQuestion || thinking || keyMissing) return;
+    if (!options.spoken) stopPlayback();
     const history = recentChatHistory(entries);
     const request = askRequest.current + 1;
     askRequest.current = request;
@@ -189,12 +309,90 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     try {
       const documentText = await getDocumentText(doc);
       if (askRequest.current !== request) return;
+      const voiceState = options.spoken && options.voiceRequest !== undefined
+        ? voicePlayback.current
+        : null;
+      const streamingVoiceState = voiceState
+        && voiceState.voiceRequest === options.voiceRequest
+        && isCurrentVoicePlayback(voiceState)
+        ? voiceState
+        : null;
+      const sentenceAccumulator = streamingVoiceState ? createSentenceAccumulator() : null;
+      const speechChunkAccumulator = streamingVoiceState
+        ? createSpeechChunkAccumulator()
+        : null;
+      let sentenceCount = 0;
+      let speechChunkCount = 0;
+      let lastSentenceTicket: SpeechQueueTicket | undefined;
+      let firstTextDeltaAt: number | null = null;
+      const llmStartedAt = performance.now();
+      const enqueueSpeechChunks = (speechChunks: readonly string[]) => {
+        if (!streamingVoiceState || !isCurrentVoicePlayback(streamingVoiceState)) return;
+        for (const speechChunk of speechChunks) {
+          speechChunkCount += 1;
+          const ticket = speechQueue.current?.enqueueSpeech(
+            speechChunk,
+            streamingVoiceState.language,
+            `request ${streamingVoiceState.voiceRequest} TTS chunk ${speechChunkCount}`,
+            speechChunkCount === 1
+              ? () => {
+                if (!isCurrentVoicePlayback(streamingVoiceState)) return;
+                streamingVoiceState.firstAnswerReady = true;
+                if (streamingVoiceState.bridgeActive) speechQueue.current?.skipCurrent();
+              }
+              : undefined,
+          );
+          if (ticket) lastSentenceTicket = ticket;
+        }
+      };
+      const enqueueStreamedSentences = (sentences: readonly string[]) => {
+        if (
+          !streamingVoiceState
+          || !speechChunkAccumulator
+          || !isCurrentVoicePlayback(streamingVoiceState)
+        ) return;
+        for (const sentence of sentences) {
+          const spokenText = normalizeForSpeech(stripPageMarkers(
+            sentence.replace(NOT_IN_DOCUMENT_MARKER, ''),
+          ));
+          if (spokenText === '') continue;
+          sentenceCount += 1;
+          if (sentenceCount === 1) {
+            console.info(
+              `[voice timing] request ${streamingVoiceState.voiceRequest} LLM first sentence: ${Math.round(performance.now() - llmStartedAt)} ms`,
+            );
+          }
+          const speechChunks = speechChunkAccumulator.push(spokenText);
+          enqueueSpeechChunks(speechChunks);
+        }
+      };
       const result = await defaultProviders().discuss({
         question: nextQuestion,
         documentText: documentText.full,
         language: answerLanguage,
         history,
+        spoken: options.spoken,
+        onTextDelta: sentenceAccumulator
+          ? (delta) => {
+            if (firstTextDeltaAt === null) {
+              firstTextDeltaAt = performance.now();
+              console.info(
+                `[voice timing] request ${options.voiceRequest ?? 'unknown'} LLM first token: ${Math.round(firstTextDeltaAt - llmStartedAt)} ms`,
+              );
+            }
+            enqueueStreamedSentences(sentenceAccumulator.push(delta));
+          }
+          : undefined,
       });
+      if (sentenceAccumulator) enqueueStreamedSentences(sentenceAccumulator.flush());
+      if (speechChunkAccumulator) {
+        enqueueSpeechChunks(speechChunkAccumulator.flush());
+      }
+      if (options.spoken) {
+        console.info(
+          `[voice timing] request ${options.voiceRequest ?? 'unknown'} LLM: ${Math.round(performance.now() - llmStartedAt)} ms`,
+        );
+      }
       if (askRequest.current !== request) return;
       nextId.current += 1;
       const answer: ChatEntry = {
@@ -206,14 +404,29 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       };
       setEntries((current) => [...current, answer]);
       if (
-        options.spoken
-        && options.voiceRequest !== undefined
-        && micRequest.current === options.voiceRequest
+        streamingVoiceState
+        && isCurrentVoicePlayback(streamingVoiceState)
       ) {
-        void startPlayback(answer);
+        playback.current = { id: answer.id };
+        setPlayingId(answer.id);
+        const finalTicket = lastSentenceTicket;
+        if (!finalTicket) {
+          void startPlayback(answer, streamingVoiceState);
+        } else {
+          void finalTicket.done.then(() => {
+            if (!isCurrentVoicePlayback(streamingVoiceState)) return;
+            playbackRequest.current += 1;
+            playback.current = null;
+            voicePlayback.current = null;
+            setPlayingId(null);
+          });
+        }
       }
     } catch (caught) {
-      if (askRequest.current === request) setError(readableError(caught));
+      if (askRequest.current === request) {
+        if (options.spoken) stopPlayback();
+        setError(readableError(caught));
+      }
     } finally {
       if (askRequest.current === request) setThinking(false);
     }
@@ -258,11 +471,16 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     const request = micRequest.current;
     setError(null);
     setMicState('transcribing');
+    void startAcknowledgment(preferredLanguage, request);
 
     try {
       const audio = await activeRecording.stop();
       if (micRequest.current !== request) return;
+      const sttStartedAt = performance.now();
       const result = await defaultProviders().transcribe({ audio });
+      console.info(
+        `[voice timing] request ${request} STT: ${Math.round(performance.now() - sttStartedAt)} ms`,
+      );
       if (micRequest.current !== request) return;
       const transcript = result.text.trim();
       if (transcript === '') throw new Error('Sarvam returned an empty transcript.');
@@ -362,6 +580,16 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               {micState === 'recording' && 'Listening… tap Stop when you finish.'}
               {micState === 'transcribing' && 'Transcribing your question…'}
             </div>
+          )}
+          {playingId === ACKNOWLEDGMENT_PLAYBACK_ID && (
+            <button
+              type="button"
+              onClick={stopVoicePlayback}
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-red-400 hover:text-red-700"
+            >
+              <span aria-hidden="true">⏹</span>
+              Stop voice
+            </button>
           )}
           {error && (
             <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">

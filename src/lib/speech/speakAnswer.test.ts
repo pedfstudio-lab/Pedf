@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { speakAnswer } from './speakAnswer';
+import { playSpeechBlob, speakAnswer } from './speakAnswer';
 
 const providerSpeak = vi.hoisted(() => vi.fn());
 
@@ -105,5 +105,22 @@ describe('speakAnswer', () => {
 
     stop();
     expect(synthesis.cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('plays a cached blob without another provider request', async () => {
+    const createObjectURL = vi.fn(() => 'blob:acknowledgment');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('Audio', FakeAudio);
+    const onEnded = vi.fn();
+
+    await playSpeechBlob(new Blob(['ack']), onEnded);
+
+    expect(providerSpeak).not.toHaveBeenCalled();
+    const audio = FakeAudio.instances[0];
+    expect(audio?.src).toBe('blob:acknowledgment');
+    audio?.emit('ended');
+    expect(onEnded).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:acknowledgment');
   });
 });

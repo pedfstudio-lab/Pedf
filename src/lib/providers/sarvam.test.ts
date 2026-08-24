@@ -24,6 +24,19 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function sseResponse(parts: readonly string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(encoder.encode(part));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 describe('SarvamProvider.discuss', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -78,6 +91,54 @@ describe('SarvamProvider.discuss', () => {
       grounded: false,
       provider: 'Sarvam',
     });
+  });
+
+  it('uses a smaller token budget and brevity prompt for spoken answers', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: 'Check-in is at 3 PM. [Page 1]' } }],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new SarvamProvider(directConfig()).discuss({ ...input, spoken: true });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const request = JSON.parse(String(init?.body)) as {
+      max_tokens: number;
+      messages: readonly { content: string }[];
+    };
+    expect(request.max_tokens).toBe(120);
+    expect(request.messages[0]?.content).toContain('1–2 short sentences');
+    expect(request.messages[0]?.content).toContain('no more than 40 words');
+  });
+
+  it('streams spoken chat deltas and assembles the final grounded answer', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(sseResponse([
+      'data: {"choices":[{"delta":{"content":"Check-in is "}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"at 3 PM. [Page 1]"}}]}\n',
+      '\ndata: {"choices":[],"usage":{"total_tokens":12}}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+    vi.stubGlobal('fetch', fetchMock);
+    const onTextDelta = vi.fn();
+
+    await expect(new SarvamProvider(directConfig()).discuss({
+      ...input,
+      spoken: true,
+      onTextDelta,
+    })).resolves.toEqual({
+      answer: 'Check-in is at 3 PM. [Page 1]',
+      grounded: true,
+      provider: 'Sarvam',
+    });
+
+    expect(onTextDelta.mock.calls.map(([delta]) => delta)).toEqual([
+      'Check-in is ',
+      'at 3 PM. [Page 1]',
+    ]);
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({ stream: true });
   });
 
   it('rejects an empty direct-mode key without making a request', async () => {

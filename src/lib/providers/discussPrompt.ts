@@ -14,6 +14,7 @@ export interface DiscussPromptInput {
   readonly documentText: string;
   readonly language?: string;
   readonly history?: readonly DiscussHistoryMessage[];
+  readonly spoken?: boolean;
 }
 
 export function languageNameFor(code: string | undefined): string {
@@ -26,6 +27,7 @@ export function buildDiscussMessages({
   documentText,
   language = 'en-IN' satisfies SupportedLanguageCode,
   history,
+  spoken = false,
 }: DiscussPromptInput): readonly ChatMessage[] {
   const languageName = languageNameFor(language);
   const instructions = [
@@ -37,6 +39,9 @@ export function buildDiscussMessages({
     '(2) If it is a greeting, small talk, or about you as the assistant, reply naturally and briefly, without using the marker.',
     `(3) If it asks for factual information that is not stated in the DOCUMENT, begin with the exact marker ${NOT_IN_DOCUMENT_MARKER}, then give a brief, helpful answer from general knowledge in ${languageName}, presented as general information rather than a fact from the DOCUMENT.`,
     "Never present general knowledge as if it came from the DOCUMENT, and never invent document-specific details such as this trip's dates, names, prices, or bookings.",
+    ...(spoken
+      ? ['For a spoken reply, answer in 1–2 short sentences and no more than 40 words. Be brief and conversational. Use normal capitalization for institution and company names; keep true acronyms uppercase.']
+      : []),
   ].join(' ');
 
   return [

@@ -23,6 +23,8 @@ const SARVAM_METHODS = new Set<ProviderMethod>([
 ]);
 
 const CHAT_MODEL = 'sarvam-105b-conversations';
+const CHAT_MAX_TOKENS = 600;
+const SPOKEN_CHAT_MAX_TOKENS = 120;
 const TTS_MODEL = 'bulbul:v3';
 const TTS_MAX_CHARS = 2500;
 const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
@@ -33,6 +35,12 @@ interface SarvamChatResponse {
     readonly message?: { readonly content?: unknown };
   }[];
   readonly error?: { readonly message?: unknown };
+}
+
+interface SarvamChatStreamChunk {
+  readonly choices?: readonly {
+    readonly delta?: { readonly content?: unknown };
+  }[];
 }
 
 interface SarvamTtsResponse {
@@ -64,6 +72,56 @@ async function readErrorMessage(response: Response): Promise<string> {
     // The status code still provides a useful error if the body is not JSON.
   }
   return response.statusText || 'request failed';
+}
+
+/** Decode Sarvam's OpenAI-compatible SSE chat stream and return the assembled answer. */
+export async function readChatCompletionStream(
+  response: Response,
+  onTextDelta: (delta: string) => void,
+): Promise<string> {
+  if (!response.body) throw new Error('Sarvam returned an empty chat stream.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let answer = '';
+  let finished = false;
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) return;
+    const data = trimmed.slice('data:'.length).trim();
+    if (data === '[DONE]') {
+      finished = true;
+      return;
+    }
+    if (data === '') return;
+
+    let chunk: SarvamChatStreamChunk;
+    try {
+      chunk = JSON.parse(data) as SarvamChatStreamChunk;
+    } catch {
+      throw new Error('Sarvam returned an invalid chat stream event.');
+    }
+    const content = chunk.choices?.[0]?.delta?.content;
+    if (typeof content !== 'string' || content === '') return;
+    answer += content;
+    onTextDelta(content);
+  };
+
+  while (!finished) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      consumeLine(line);
+      if (finished) break;
+    }
+  }
+  buffer += decoder.decode();
+  if (!finished && buffer.trim() !== '') consumeLine(buffer);
+  return answer;
 }
 
 /** Sarvam API provider; translation and transcription arrive in later tasks. */
@@ -166,6 +224,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (key !== '') headers['api-subscription-key'] = key;
 
+    const stream = typeof input.onTextDelta === 'function';
     const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/v1/chat/completions'), {
       method: 'POST',
       headers,
@@ -173,7 +232,8 @@ export class SarvamProvider implements ProviderWithCapabilities {
         model: CHAT_MODEL,
         messages: buildDiscussMessages(input),
         temperature: 0.2,
-        max_tokens: 600,
+        max_tokens: input.spoken ? SPOKEN_CHAT_MAX_TOKENS : CHAT_MAX_TOKENS,
+        ...(stream ? { stream: true } : {}),
       }),
     });
 
@@ -182,8 +242,20 @@ export class SarvamProvider implements ProviderWithCapabilities {
       throw new Error(`Sarvam request failed (${response.status}): ${detail}`);
     }
 
-    const payload = await response.json() as SarvamChatResponse;
-    const rawAnswer = payload.choices?.[0]?.message?.content;
+    let rawAnswer: unknown;
+    if (stream && input.onTextDelta) {
+      const contentType = response.headers.get('content-type') ?? '';
+      if (contentType.includes('application/json')) {
+        const payload = await response.json() as SarvamChatResponse;
+        rawAnswer = payload.choices?.[0]?.message?.content;
+        if (typeof rawAnswer === 'string' && rawAnswer !== '') input.onTextDelta(rawAnswer);
+      } else {
+        rawAnswer = await readChatCompletionStream(response, input.onTextDelta);
+      }
+    } else {
+      const payload = await response.json() as SarvamChatResponse;
+      rawAnswer = payload.choices?.[0]?.message?.content;
+    }
     if (typeof rawAnswer !== 'string' || rawAnswer.trim() === '') {
       throw new Error('Sarvam returned an empty chat response.');
     }

@@ -33,6 +33,8 @@ export interface DiscussInput {
   readonly documentText: string;
   readonly language?: LanguageCode;
   readonly history?: readonly DiscussHistoryMessage[];
+  readonly spoken?: boolean;
+  readonly onTextDelta?: (delta: string) => void;
 }
 
 export interface TextResult {
