@@ -1,9 +1,37 @@
 import { defaultProviders } from '@/lib/providers';
 
 export type StopSpeech = () => void;
+export type StartSpeechStream = (
+  onAudioChunk: (audio: Uint8Array<ArrayBuffer>) => void,
+  signal: AbortSignal,
+) => Promise<void>;
+
+export interface PreparedSpeechStream {
+  /** Resolves after the first MP3 bytes have been appended to the live buffer. */
+  readonly ready: Promise<void>;
+  play(onEnded: () => void, onError: (error: unknown) => void): Promise<StopSpeech>;
+  stop(): void;
+}
 
 /** Read ~15% faster than default; matches the Sarvam TTS pace. */
 const PLAYBACK_RATE = 1.15;
+const STREAM_CONTENT_TYPE = 'audio/mpeg';
+
+function stoppedError(): DOMException {
+  return new DOMException('Speech playback was stopped.', 'AbortError');
+}
+
+function unavailablePreparedStream(error: Error): PreparedSpeechStream {
+  return {
+    ready: Promise.reject(error),
+    async play() {
+      throw error;
+    },
+    stop() {
+      // Nothing was started.
+    },
+  };
+}
 
 export function speakWithBrowser(
   text: string,
@@ -67,6 +95,165 @@ export async function playSpeechBlob(
     active = false;
     element.pause();
     URL.revokeObjectURL(url);
+  };
+}
+
+/**
+ * Prepare a Sarvam MP3 stream in a MediaSource so synthesis can run in the
+ * background while the queue preserves sentence playback order.
+ */
+export function prepareSpeechStream(startStream: StartSpeechStream): PreparedSpeechStream {
+  if (
+    typeof MediaSource === 'undefined'
+    || !MediaSource.isTypeSupported(STREAM_CONTENT_TYPE)
+  ) {
+    return unavailablePreparedStream(new Error('Progressive MP3 playback is unavailable.'));
+  }
+
+  const controller = new AbortController();
+  const mediaSource = new MediaSource();
+  const url = URL.createObjectURL(mediaSource);
+  const element = new Audio(url);
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let sourceBuffer: SourceBuffer | null = null;
+  let streamFinished = false;
+  let firstChunkAppended = false;
+  let stopped = false;
+  let cleaned = false;
+  let failure: unknown;
+  let onPlaybackEnded: (() => void) | null = null;
+  let onPlaybackError: ((error: unknown) => void) | null = null;
+  let resolveReady: () => void = () => undefined;
+  let rejectReady: (error: unknown) => void = () => undefined;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+
+  const cleanup = (pause: boolean) => {
+    if (cleaned) return;
+    cleaned = true;
+    stopped = true;
+    controller.abort();
+    if (pause) element.pause();
+    URL.revokeObjectURL(url);
+  };
+
+  const reportFailure = (error: unknown) => {
+    if (stopped || failure !== undefined) return;
+    failure = error;
+    if (!firstChunkAppended) rejectReady(error);
+    const handler = onPlaybackError;
+    if (handler) {
+      onPlaybackError = null;
+      onPlaybackEnded = null;
+      cleanup(true);
+      handler(error);
+    }
+  };
+
+  const finishMediaSource = () => {
+    if (
+      stopped
+      || !streamFinished
+      || chunks.length > 0
+      || sourceBuffer?.updating
+      || mediaSource.readyState !== 'open'
+    ) return;
+    try {
+      mediaSource.endOfStream();
+    } catch (error) {
+      reportFailure(error);
+    }
+  };
+
+  const appendNextChunk = () => {
+    if (stopped || !sourceBuffer || sourceBuffer.updating) return;
+    const chunk = chunks.shift();
+    if (!chunk) {
+      finishMediaSource();
+      return;
+    }
+    try {
+      sourceBuffer.appendBuffer(chunk);
+    } catch (error) {
+      reportFailure(error);
+    }
+  };
+
+  const handleSourceOpen = () => {
+    if (stopped) return;
+    try {
+      sourceBuffer = mediaSource.addSourceBuffer(STREAM_CONTENT_TYPE);
+      sourceBuffer.addEventListener('updateend', () => {
+        if (!firstChunkAppended) {
+          firstChunkAppended = true;
+          resolveReady();
+        }
+        appendNextChunk();
+      });
+      sourceBuffer.addEventListener('error', () => {
+        reportFailure(new Error('Progressive speech buffer failed.'));
+      });
+      appendNextChunk();
+    } catch (error) {
+      reportFailure(error);
+    }
+  };
+
+  element.addEventListener('ended', () => {
+    if (stopped) return;
+    const handler = onPlaybackEnded;
+    onPlaybackEnded = null;
+    onPlaybackError = null;
+    cleanup(false);
+    handler?.();
+  }, { once: true });
+  element.addEventListener('error', () => {
+    reportFailure(new Error('Progressive speech playback failed.'));
+  }, { once: true });
+  mediaSource.addEventListener('sourceopen', handleSourceOpen, { once: true });
+
+  void startStream((audio) => {
+    if (stopped || audio.byteLength === 0) return;
+    chunks.push(audio);
+    appendNextChunk();
+  }, controller.signal).then(() => {
+    if (stopped) return;
+    streamFinished = true;
+    if (!firstChunkAppended && chunks.length === 0) {
+      reportFailure(new Error('Sarvam streaming TTS returned no audio.'));
+      return;
+    }
+    finishMediaSource();
+  }).catch((error) => {
+    if (controller.signal.aborted || stopped) return;
+    reportFailure(error);
+  });
+
+  return {
+    ready,
+    async play(onEnded, onError) {
+      await ready;
+      if (stopped) throw stoppedError();
+      if (failure !== undefined) throw failure;
+      await element.play();
+      if (stopped) {
+        element.pause();
+        throw stoppedError();
+      }
+      if (failure !== undefined) {
+        element.pause();
+        throw failure;
+      }
+      onPlaybackEnded = onEnded;
+      onPlaybackError = onError;
+      return () => cleanup(true);
+    },
+    stop() {
+      if (!firstChunkAppended) rejectReady(stoppedError());
+      cleanup(true);
+    },
   };
 }
 

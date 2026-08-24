@@ -1,11 +1,21 @@
-import { defaultProviders } from '@/lib/providers';
-import type { SpeakInput, SpeakResult } from '@/lib/providers/types';
-import { playSpeechBlob, speakWithBrowser } from './speakAnswer';
-import type { StopSpeech } from './speakAnswer';
+import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
+import type { AudioChunkHandler, SpeakInput, SpeakResult } from '@/lib/providers/types';
+import { playSpeechBlob, prepareSpeechStream, speakWithBrowser } from './speakAnswer';
+import type { PreparedSpeechStream, StartSpeechStream, StopSpeech } from './speakAnswer';
 
 type Speak = (input: SpeakInput) => Promise<SpeakResult>;
+type SpeakStream = (
+  input: SpeakInput,
+  onAudioChunk: AudioChunkHandler,
+  signal?: AbortSignal,
+) => Promise<void>;
 type PlayBlob = (audio: Blob, onEnded: () => void) => Promise<StopSpeech>;
 type SpeakBrowser = (text: string, language: string, onEnded: () => void) => StopSpeech;
+type PrepareStream = (startStream: StartSpeechStream) => PreparedSpeechStream;
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
 
 interface BlobSource {
   readonly kind: 'blob';
@@ -20,7 +30,14 @@ interface BrowserSource {
   readonly language: string;
 }
 
-type SpeechSource = BlobSource | BrowserSource;
+interface StreamSource {
+  readonly kind: 'stream';
+  readonly prepared: PreparedSpeechStream;
+  readonly text: string;
+  readonly language: string;
+}
+
+type SpeechSource = BlobSource | BrowserSource | StreamSource;
 
 interface Deferred {
   readonly promise: Promise<void>;
@@ -66,7 +83,9 @@ export interface SpeechQueue {
 
 export interface SpeechQueueOptions {
   readonly speak?: Speak;
+  readonly speakStream?: SpeakStream;
   readonly playBlob?: PlayBlob;
+  readonly prepareStream?: PrepareStream;
   readonly speakBrowser?: SpeakBrowser;
   readonly now?: () => number;
   readonly logTiming?: (message: string) => void;
@@ -84,13 +103,25 @@ interface PendingSpeech {
   readonly generation: number;
   readonly ready: Deferred;
   readonly done: Deferred;
+  prepared?: PreparedSpeechStream;
   source?: SpeechSource;
 }
 
 /** One stoppable playback lane. TTS requests start together but enter the lane in call order. */
 export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue {
   const speak = options.speak ?? ((input) => defaultProviders().speak(input));
+  const streamingProvider = options.speak === undefined && options.speakStream === undefined
+    ? new SarvamProvider(providerConfig)
+    : null;
+  const speakStream = options.speakStream ?? (
+    streamingProvider
+      ? (input: SpeakInput, onAudioChunk: AudioChunkHandler, signal?: AbortSignal) => (
+        streamingProvider.speakStream(input, onAudioChunk, signal)
+      )
+      : undefined
+  );
   const playBlob = options.playBlob ?? playSpeechBlob;
+  const prepareStream = options.prepareStream ?? prepareSpeechStream;
   const speakBrowser = options.speakBrowser ?? speakWithBrowser;
   const now = options.now ?? (() => globalThis.performance?.now() ?? Date.now());
   const logTiming = options.logTiming ?? ((message) => console.info(message));
@@ -105,12 +136,84 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
   let queue: QueueItem[] = [];
   const pendingSpeech = new Map<number, PendingSpeech>();
 
+  const startBatchFallback = async (
+    text: string,
+    language: string,
+    onEnded: () => void,
+  ): Promise<StopSpeech> => {
+    try {
+      const result = await speak({ text, language });
+      try {
+        return await playBlob(result.audio, onEnded);
+      } catch {
+        return speakBrowser(text, language, onEnded);
+      }
+    } catch {
+      return speakBrowser(text, language, onEnded);
+    }
+  };
+
+  const startStreamSource = async (
+    source: StreamSource,
+    onEnded: () => void,
+  ): Promise<StopSpeech> => {
+    let stopped = false;
+    let finished = false;
+    let fallingBack = false;
+    let activeStop: StopSpeech = () => source.prepared.stop();
+    const finish = () => {
+      if (finished || stopped) return;
+      finished = true;
+      onEnded();
+    };
+    const fallBack = async (streamError: unknown) => {
+      if (stopped || finished || fallingBack) return;
+      if (isAbortError(streamError)) {
+        source.prepared.stop();
+        finish();
+        return;
+      }
+      fallingBack = true;
+      activeStop();
+      source.prepared.stop();
+      try {
+        const stop = await startBatchFallback(source.text, source.language, finish);
+        if (stopped || finished) {
+          stop();
+          return;
+        }
+        activeStop = stop;
+      } catch (error) {
+        onError(error ?? streamError);
+        finish();
+      }
+    };
+
+    try {
+      activeStop = await source.prepared.play(finish, (error) => {
+        void fallBack(error);
+      });
+    } catch (error) {
+      await fallBack(error);
+    }
+
+    return () => {
+      if (stopped || finished) return;
+      stopped = true;
+      activeStop();
+      source.prepared.stop();
+    };
+  };
+
   const startSource = async (
     source: SpeechSource,
     onEnded: () => void,
   ): Promise<StopSpeech> => {
     if (source.kind === 'browser') {
       return speakBrowser(source.text, source.language, onEnded);
+    }
+    if (source.kind === 'stream') {
+      return startStreamSource(source, onEnded);
     }
     try {
       return await playBlob(source.audio, onEnded);
@@ -223,32 +326,60 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
       pendingSpeech.set(sequence, pending);
       const startedAt = now();
 
-      void speak({ text, language }).then((result) => {
-        logTiming(
-          `[voice timing] ${timingLabel}: ${Math.round(now() - startedAt)} ms (${text.length} chars) :: ${JSON.stringify(text)}`,
-        );
-        if (run !== generation) return;
-        pending.source = {
-          kind: 'blob',
-          audio: result.audio,
-          fallbackText: text,
-          fallbackLanguage: language,
-        };
+      const acceptSource = (source: SpeechSource) => {
+        if (run !== generation) {
+          if (source.kind === 'stream') source.prepared.stop();
+          return;
+        }
+        pending.source = source;
         onReady?.();
         ready.resolve();
         flushPreparedSpeech();
         void pump();
-      }).catch(() => {
-        logTiming(
-          `[voice timing] ${timingLabel}: provider unavailable after ${Math.round(now() - startedAt)} ms; using browser speech`,
-        );
-        if (run !== generation) return;
-        pending.source = { kind: 'browser', text, language };
-        onReady?.();
-        ready.resolve();
-        flushPreparedSpeech();
-        void pump();
-      });
+      };
+      const prepareBatchFallback = () => {
+        void speak({ text, language }).then((result) => {
+          logTiming(
+            `[voice timing] ${timingLabel}: batch fallback ready in ${Math.round(now() - startedAt)} ms`,
+          );
+          acceptSource({
+            kind: 'blob',
+            audio: result.audio,
+            fallbackText: text,
+            fallbackLanguage: language,
+          });
+        }).catch(() => {
+          logTiming(
+            `[voice timing] ${timingLabel}: providers unavailable after ${Math.round(now() - startedAt)} ms; using browser speech`,
+          );
+          acceptSource({ kind: 'browser', text, language });
+        });
+      };
+
+      if (!speakStream) {
+        prepareBatchFallback();
+        return { ready: ready.promise, done: done.promise };
+      }
+
+      try {
+        const prepared = prepareStream((onAudioChunk, signal) => (
+          speakStream({ text, language }, onAudioChunk, signal)
+        ));
+        pending.prepared = prepared;
+        void prepared.ready.then(() => {
+          logTiming(
+            `[voice timing] ${timingLabel}: first streaming audio in ${Math.round(now() - startedAt)} ms`,
+          );
+          acceptSource({ kind: 'stream', prepared, text, language });
+        }).catch(() => {
+          if (run !== generation) return;
+          pending.prepared = undefined;
+          prepared.stop();
+          prepareBatchFallback();
+        });
+      } catch {
+        prepareBatchFallback();
+      }
 
       return { ready: ready.promise, done: done.promise };
     },
@@ -266,12 +397,14 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
       stop?.();
       for (const item of queue) {
         if (item.completed) continue;
+        if (item.source.kind === 'stream') item.source.prepared.stop();
         item.completed = true;
         item.onDone?.();
         item.done.resolve();
       }
       queue = [];
       for (const pending of pendingSpeech.values()) {
+        pending.prepared?.stop();
         pending.ready.resolve();
         pending.done.resolve();
       }

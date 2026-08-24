@@ -18,6 +18,9 @@ export interface SpeakInput {
   readonly voice?: string;
 }
 
+/** One decoded audio payload from a provider's streaming TTS connection. */
+export type AudioChunkHandler = (audio: Uint8Array<ArrayBuffer>) => void;
+
 export interface TranscribeInput {
   readonly audio: Blob;
   readonly language?: LanguageCode;

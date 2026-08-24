@@ -37,6 +37,48 @@ function sseResponse(parts: readonly string[]): Response {
   });
 }
 
+type SocketListener = EventListenerOrEventListenerObject;
+
+class FakeWebSocket {
+  readonly listeners = new Map<string, Set<SocketListener>>();
+  readonly sent: string[] = [];
+  readonly close = vi.fn((code = 1000) => {
+    this.readyState = WebSocket.CLOSED;
+    this.emit('close', { code } as CloseEvent);
+  });
+  readyState: number = WebSocket.CONNECTING;
+
+  addEventListener(type: string, listener: SocketListener): void {
+    const listeners = this.listeners.get(type) ?? new Set<SocketListener>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: SocketListener): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  open(): void {
+    this.readyState = WebSocket.OPEN;
+    this.emit('open', new Event('open'));
+  }
+
+  message(data: unknown): void {
+    this.emit('message', { data: JSON.stringify(data) } as MessageEvent<string>);
+  }
+
+  private emit(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      if (typeof listener === 'function') listener(event);
+      else listener.handleEvent(event);
+    }
+  }
+}
+
 describe('SarvamProvider.discuss', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -283,6 +325,101 @@ describe('SarvamProvider.speak', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe('/api/sarvam/text-to-speech');
     expect(init?.headers).not.toHaveProperty('api-subscription-key');
+  });
+});
+
+describe('SarvamProvider.speakStream', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('authenticates through the socket protocol and streams Bulbul v3 MP3 chunks', async () => {
+    vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
+    const socket = new FakeWebSocket();
+    const factory = vi.fn((url: string, protocols: readonly string[]) => {
+      void url;
+      void protocols;
+      return socket as unknown as WebSocket;
+    });
+    const provider = new SarvamProvider(directConfig(), factory);
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+
+    const completion = provider.speakStream(
+      { text: 'Hello there', language: 'en-IN', voice: 'priya' },
+      (audio) => chunks.push(audio),
+    );
+    socket.open();
+
+    expect(factory).toHaveBeenCalledOnce();
+    const [rawUrl, protocols] = factory.mock.calls[0] ?? [];
+    const url = new URL(String(rawUrl));
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe(
+      'wss://api.sarvam.ai/text-to-speech/ws',
+    );
+    expect(url.searchParams.get('model')).toBe('bulbul:v3');
+    expect(url.searchParams.get('send_completion_event')).toBe('true');
+    expect(protocols).toEqual(['api-subscription-key.configured-test-key']);
+
+    expect(socket.sent.map((message) => JSON.parse(message))).toEqual([
+      {
+        type: 'config',
+        data: {
+          model: 'bulbul:v3',
+          target_language_code: 'en-IN',
+          speaker: 'priya',
+          pace: 1.15,
+          output_audio_codec: 'mp3',
+          output_audio_bitrate: '128k',
+        },
+      },
+      { type: 'text', data: { text: 'Hello there' } },
+      { type: 'flush' },
+    ]);
+
+    socket.message({
+      type: 'audio',
+      data: { content_type: 'audio/mpeg', audio: 'AQID' },
+    });
+    socket.message({ type: 'event', data: { event_type: 'final' } });
+
+    await expect(completion).resolves.toBeUndefined();
+    expect([...chunks[0] ?? []]).toEqual([1, 2, 3]);
+    expect(socket.close).toHaveBeenCalledWith(1000, 'complete');
+  });
+
+  it('stops and rejects the socket stream when playback is aborted', async () => {
+    vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
+    const socket = new FakeWebSocket();
+    const controller = new AbortController();
+    const provider = new SarvamProvider(
+      directConfig(),
+      () => socket as unknown as WebSocket,
+    );
+    const completion = provider.speakStream(
+      { text: 'Stop me', language: 'en-IN' },
+      vi.fn(),
+      controller.signal,
+    );
+    socket.open();
+    controller.abort();
+
+    await expect(completion).rejects.toMatchObject({ name: 'AbortError' });
+    expect(socket.close).toHaveBeenCalledWith(1000, 'stream failed');
+  });
+
+  it('keeps proxy mode on the existing REST batch fallback until WS proxying lands', async () => {
+    const factory = vi.fn();
+    const config: ProviderConfig = {
+      mode: 'proxy',
+      sarvamBaseUrl: '/api/sarvam',
+      getSarvamKey: () => 'must-not-leave-the-browser',
+    };
+
+    await expect(new SarvamProvider(config, factory).speakStream(
+      { text: 'Hello', language: 'en-IN' },
+      vi.fn(),
+    )).rejects.toThrow('WebSocket proxy support');
+    expect(factory).not.toHaveBeenCalled();
   });
 });
 

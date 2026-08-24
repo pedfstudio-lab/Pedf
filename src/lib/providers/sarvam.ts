@@ -4,6 +4,7 @@ import { buildDiscussMessages, NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
 import { NotImplementedError } from './errors';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import type {
+  AudioChunkHandler,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -29,6 +30,10 @@ const TTS_MODEL = 'bulbul:v3';
 const TTS_MAX_CHARS = 2500;
 const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
 const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
+const TTS_STREAM_CODEC = 'mp3';
+const TTS_STREAM_BITRATE = '128k';
+
+type WebSocketFactory = (url: string, protocols: readonly string[]) => WebSocket;
 
 interface SarvamChatResponse {
   readonly choices?: readonly {
@@ -47,6 +52,15 @@ interface SarvamTtsResponse {
   readonly audios?: readonly unknown[];
 }
 
+interface SarvamTtsStreamMessage {
+  readonly type?: unknown;
+  readonly data?: {
+    readonly audio?: unknown;
+    readonly event_type?: unknown;
+    readonly message?: unknown;
+  };
+}
+
 interface SarvamSttResponse {
   readonly transcript?: unknown;
 }
@@ -62,6 +76,18 @@ export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
 
 function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+}
+
+function streamingTtsUrl(base: string): string {
+  const url = new URL(joinUrl(base, '/text-to-speech/ws'));
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('model', TTS_MODEL);
+  url.searchParams.set('send_completion_event', 'true');
+  return url.toString();
+}
+
+function abortError(): DOMException {
+  return new DOMException('Speech streaming was stopped.', 'AbortError');
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -128,7 +154,12 @@ export async function readChatCompletionStream(
 export class SarvamProvider implements ProviderWithCapabilities {
   readonly name = 'Sarvam';
 
-  constructor(readonly config: ProviderConfig = providerConfig) {}
+  constructor(
+    readonly config: ProviderConfig = providerConfig,
+    private readonly createWebSocket: WebSocketFactory = (url, protocols) => (
+      new WebSocket(url, [...protocols])
+    ),
+  ) {}
 
   supports(method: ProviderMethod): boolean {
     return SARVAM_METHODS.has(method);
@@ -181,6 +212,133 @@ export class SarvamProvider implements ProviderWithCapabilities {
       audio: new Blob([base64ToBytes(encodedAudio)], { type: 'audio/wav' }),
       provider: this.name,
     };
+  }
+
+  /** Stream Bulbul v3 MP3 bytes as Sarvam synthesizes them. Batch speak() remains the fallback. */
+  async speakStream(
+    input: SpeakInput,
+    onAudioChunk: AudioChunkHandler,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.config.mode !== 'direct') {
+      throw new Error('Streaming TTS needs WebSocket proxy support in production.');
+    }
+
+    const key = this.config.getSarvamKey().trim();
+    if (key === '') {
+      throw new Error('Add your Sarvam API key in Settings before playing audio.');
+    }
+    if (signal?.aborted) throw abortError();
+
+    await new Promise<void>((resolve, reject) => {
+      let socket: WebSocket;
+      try {
+        // Browser WebSockets cannot set custom headers. Sarvam's JS SDK sends the key
+        // through this WebSocket subprotocol in direct mode.
+        socket = this.createWebSocket(
+          streamingTtsUrl(this.config.sarvamBaseUrl),
+          [`api-subscription-key.${key}`],
+        );
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      let settled = false;
+      let receivedFinalEvent = false;
+
+      const cleanup = () => {
+        signal?.removeEventListener('abort', handleAbort);
+        socket.removeEventListener('open', handleOpen);
+        socket.removeEventListener('message', handleMessage);
+        socket.removeEventListener('error', handleError);
+        socket.removeEventListener('close', handleClose);
+      };
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try {
+          socket.close(1000, 'stream failed');
+        } catch {
+          // The original error is more useful than a close failure.
+        }
+        reject(error);
+      };
+      const handleAbort = () => fail(abortError());
+      const handleOpen = () => {
+        try {
+          socket.send(JSON.stringify({
+            type: 'config',
+            data: {
+              model: TTS_MODEL,
+              target_language_code: input.language,
+              speaker: input.voice ?? TTS_SPEAKER,
+              pace: TTS_PACE,
+              output_audio_codec: TTS_STREAM_CODEC,
+              output_audio_bitrate: TTS_STREAM_BITRATE,
+            },
+          }));
+          socket.send(JSON.stringify({
+            type: 'text',
+            data: { text: input.text.slice(0, TTS_MAX_CHARS) },
+          }));
+          socket.send(JSON.stringify({ type: 'flush' }));
+        } catch (error) {
+          fail(error);
+        }
+      };
+      const handleMessage = (event: MessageEvent<unknown>) => {
+        try {
+          if (typeof event.data !== 'string') {
+            throw new Error('Sarvam returned an invalid streaming TTS event.');
+          }
+          const message = JSON.parse(event.data) as SarvamTtsStreamMessage;
+          if (message.type === 'audio') {
+            const encodedAudio = message.data?.audio;
+            if (typeof encodedAudio !== 'string' || encodedAudio === '') {
+              throw new Error('Sarvam returned an empty streaming audio chunk.');
+            }
+            onAudioChunk(base64ToBytes(encodedAudio));
+            return;
+          }
+          if (message.type === 'error') {
+            const detail = typeof message.data?.message === 'string'
+              ? message.data.message
+              : 'streaming request failed';
+            fail(new Error(`Sarvam streaming TTS failed: ${detail}`));
+            return;
+          }
+          if (message.type === 'event' && message.data?.event_type === 'final') {
+            receivedFinalEvent = true;
+            socket.close(1000, 'complete');
+          }
+        } catch (error) {
+          fail(error);
+        }
+      };
+      const handleError = () => fail(new Error('Sarvam streaming TTS connection failed.'));
+      const handleClose = (event: CloseEvent) => {
+        if (settled) return;
+        if (receivedFinalEvent || event.code === 1000) {
+          succeed();
+          return;
+        }
+        fail(new Error(`Sarvam streaming TTS closed unexpectedly (${event.code}).`));
+      };
+
+      signal?.addEventListener('abort', handleAbort, { once: true });
+      socket.addEventListener('open', handleOpen);
+      socket.addEventListener('message', handleMessage);
+      socket.addEventListener('error', handleError);
+      socket.addEventListener('close', handleClose);
+    });
   }
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {

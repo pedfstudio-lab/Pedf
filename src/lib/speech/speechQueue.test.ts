@@ -191,4 +191,145 @@ describe('speechQueue', () => {
     endings[1]?.();
     await answer.done;
   });
+
+  it('prefers prepared streaming audio and marks it ready on the first chunk', async () => {
+    const streamEnded: Array<() => void> = [];
+    const stopStream = vi.fn();
+    const prepared = {
+      ready: Promise.resolve(),
+      play: vi.fn(async (onEnded: () => void) => {
+        streamEnded.push(onEnded);
+        return stopStream;
+      }),
+      stop: vi.fn(),
+    };
+    const speak = vi.fn();
+    const speakStream = vi.fn(async () => undefined);
+    const onReady = vi.fn();
+    const queue = createSpeechQueue({
+      speak,
+      speakStream,
+      prepareStream: (startStream) => {
+        void startStream(vi.fn(), new AbortController().signal);
+        return prepared;
+      },
+      logTiming: vi.fn(),
+    });
+
+    const ticket = queue.enqueueSpeech('Stream me.', 'en-IN', 'stream', onReady);
+    await ticket.ready;
+    await flush();
+
+    expect(speakStream).toHaveBeenCalledWith(
+      { text: 'Stream me.', language: 'en-IN' },
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(speak).not.toHaveBeenCalled();
+    expect(onReady).toHaveBeenCalledOnce();
+    expect(prepared.play).toHaveBeenCalledOnce();
+
+    streamEnded.shift()?.();
+    await ticket.done;
+  });
+
+  it('stops active progressive playback through the queue-wide stop handle', async () => {
+    const stopStream = vi.fn();
+    const prepared = {
+      ready: Promise.resolve(),
+      play: vi.fn(async () => stopStream),
+      stop: vi.fn(),
+    };
+    const queue = createSpeechQueue({
+      speakStream: vi.fn(async () => undefined),
+      prepareStream: () => prepared,
+      logTiming: vi.fn(),
+    });
+
+    const ticket = queue.enqueueSpeech('Interrupt me.', 'en-IN');
+    await ticket.ready;
+    await flush();
+    queue.stop();
+    await ticket.done;
+
+    expect(stopStream).toHaveBeenCalledOnce();
+    expect(prepared.stop).toHaveBeenCalled();
+  });
+
+  it('falls back to batch TTS when a stream cannot prepare its first chunk', async () => {
+    const streamError = new Error('socket failed');
+    const prepared = {
+      ready: Promise.reject(streamError),
+      play: vi.fn(),
+      stop: vi.fn(),
+    };
+    const endings: Array<() => void> = [];
+    const speak = vi.fn(async () => ({
+      audio: new Blob(['batch']),
+      provider: 'Sarvam',
+    }));
+    const played: string[] = [];
+    const queue = createSpeechQueue({
+      speak,
+      speakStream: vi.fn(async () => undefined),
+      prepareStream: () => prepared,
+      playBlob: async (audio, onEnded) => {
+        played.push(await audio.text());
+        endings.push(onEnded);
+        return vi.fn();
+      },
+      logTiming: vi.fn(),
+    });
+
+    const ticket = queue.enqueueSpeech('Fallback.', 'en-IN');
+    await ticket.ready;
+    await flush();
+
+    expect(prepared.stop).toHaveBeenCalled();
+    expect(speak).toHaveBeenCalledWith({ text: 'Fallback.', language: 'en-IN' });
+    expect(played).toEqual(['batch']);
+    endings.shift()?.();
+    await ticket.done;
+  });
+
+  it('switches an active failed stream to batch audio in the same queue item', async () => {
+    let reportStreamError: ((error: unknown) => void) | undefined;
+    const stopStream = vi.fn();
+    const prepared = {
+      ready: Promise.resolve(),
+      play: vi.fn(async (_onEnded: () => void, onError: (error: unknown) => void) => {
+        reportStreamError = onError;
+        return stopStream;
+      }),
+      stop: vi.fn(),
+    };
+    const endings: Array<() => void> = [];
+    const speak = vi.fn(async () => ({
+      audio: new Blob(['batch recovery']),
+      provider: 'Sarvam',
+    }));
+    const played: string[] = [];
+    const queue = createSpeechQueue({
+      speak,
+      speakStream: vi.fn(async () => undefined),
+      prepareStream: () => prepared,
+      playBlob: async (audio, onEnded) => {
+        played.push(await audio.text());
+        endings.push(onEnded);
+        return vi.fn();
+      },
+      logTiming: vi.fn(),
+    });
+
+    const ticket = queue.enqueueSpeech('Recover me.', 'en-IN');
+    await ticket.ready;
+    await flush();
+    reportStreamError?.(new Error('connection dropped'));
+    await vi.waitFor(() => expect(played).toEqual(['batch recovery']));
+
+    expect(stopStream).toHaveBeenCalledOnce();
+    expect(speak).toHaveBeenCalledWith({ text: 'Recover me.', language: 'en-IN' });
+    endings.shift()?.();
+    await ticket.done;
+  });
 });

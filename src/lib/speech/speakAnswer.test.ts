@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { playSpeechBlob, speakAnswer } from './speakAnswer';
+import { playSpeechBlob, prepareSpeechStream, speakAnswer } from './speakAnswer';
 
 const providerSpeak = vi.hoisted(() => vi.fn());
 
@@ -46,10 +46,58 @@ class FakeUtterance {
   }
 }
 
+class FakeSourceBuffer {
+  readonly listeners = new Map<string, PlaybackListener>();
+  readonly appended: Uint8Array[] = [];
+  updating = false;
+
+  addEventListener(type: string, listener: PlaybackListener): void {
+    this.listeners.set(type, listener);
+  }
+
+  appendBuffer(audio: Uint8Array): void {
+    this.updating = true;
+    this.appended.push(audio);
+    this.updating = false;
+    this.listeners.get('updateend')?.();
+  }
+}
+
+class FakeMediaSource {
+  static instances: FakeMediaSource[] = [];
+  static readonly isTypeSupported = vi.fn(() => true);
+
+  readonly listeners = new Map<string, PlaybackListener>();
+  readonly sourceBuffer = new FakeSourceBuffer();
+  readonly endOfStream = vi.fn(() => {
+    this.readyState = 'ended';
+  });
+  readyState = 'closed';
+
+  constructor() {
+    FakeMediaSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: PlaybackListener): void {
+    this.listeners.set(type, listener);
+  }
+
+  addSourceBuffer(): FakeSourceBuffer {
+    return this.sourceBuffer;
+  }
+
+  open(): void {
+    this.readyState = 'open';
+    this.listeners.get('sourceopen')?.();
+  }
+}
+
 describe('speakAnswer', () => {
   beforeEach(() => {
     providerSpeak.mockReset();
     FakeAudio.instances = [];
+    FakeMediaSource.instances = [];
+    FakeMediaSource.isTypeSupported.mockClear();
   });
 
   afterEach(() => {
@@ -122,5 +170,71 @@ describe('speakAnswer', () => {
     audio?.emit('ended');
     expect(onEnded).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:acknowledgment');
+  });
+
+  it('starts progressive playback after the first streaming MP3 chunk is appended', async () => {
+    const createObjectURL = vi.fn(() => 'blob:stream');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('Audio', FakeAudio);
+    vi.stubGlobal('MediaSource', FakeMediaSource);
+    let sendChunk: ((audio: Uint8Array<ArrayBuffer>) => void) | undefined;
+    let finishStream: (() => void) | undefined;
+    let streamSignal: AbortSignal | undefined;
+    const prepared = prepareSpeechStream((onAudioChunk, signal) => {
+      sendChunk = onAudioChunk;
+      streamSignal = signal;
+      return new Promise<void>((resolve) => {
+        finishStream = resolve;
+      });
+    });
+    const mediaSource = FakeMediaSource.instances[0];
+    mediaSource?.open();
+
+    sendChunk?.(new Uint8Array([1, 2, 3]));
+    await prepared.ready;
+    const onEnded = vi.fn();
+    const onError = vi.fn();
+    const stop = await prepared.play(onEnded, onError);
+
+    expect(mediaSource?.sourceBuffer.appended).toHaveLength(1);
+    expect(FakeAudio.instances[0]?.play).toHaveBeenCalledOnce();
+    finishStream?.();
+    await Promise.resolve();
+    expect(mediaSource?.endOfStream).toHaveBeenCalledOnce();
+
+    FakeAudio.instances[0]?.emit('ended');
+    expect(onEnded).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:stream');
+    expect(streamSignal?.aborted).toBe(true);
+
+    stop();
+    expect(FakeAudio.instances[0]?.pause).not.toHaveBeenCalled();
+  });
+
+  it('aborts both synthesis and playback through one progressive stop handle', async () => {
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:stream'),
+      revokeObjectURL: vi.fn(),
+    });
+    vi.stubGlobal('Audio', FakeAudio);
+    vi.stubGlobal('MediaSource', FakeMediaSource);
+    let sendChunk: ((audio: Uint8Array<ArrayBuffer>) => void) | undefined;
+    let streamSignal: AbortSignal | undefined;
+    const prepared = prepareSpeechStream((onAudioChunk, signal) => {
+      sendChunk = onAudioChunk;
+      streamSignal = signal;
+      return new Promise<void>(() => undefined);
+    });
+    FakeMediaSource.instances[0]?.open();
+    sendChunk?.(new Uint8Array([4, 5, 6]));
+    await prepared.ready;
+    const stop = await prepared.play(vi.fn(), vi.fn());
+
+    stop();
+
+    expect(streamSignal?.aborted).toBe(true);
+    expect(FakeAudio.instances[0]?.pause).toHaveBeenCalledOnce();
   });
 });
