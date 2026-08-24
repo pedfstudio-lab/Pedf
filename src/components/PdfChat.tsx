@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getDocumentText } from '@/lib/pdf/documentText';
-import { defaultProviders } from '@/lib/providers';
+import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
 import { recentChatHistory } from '@/lib/providers/chatHistory';
 import { NOT_IN_DOCUMENT_MARKER } from '@/lib/providers/discussPrompt';
 import { getSarvamKey } from '@/lib/providers/keys';
@@ -449,7 +449,10 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     setMicState('requesting');
 
     try {
-      const activeRecording = await startRecording();
+      const realtimeProvider = new SarvamProvider(providerConfig);
+      const activeRecording = await startRecording({
+        startTranscription: () => realtimeProvider.transcribeStream({ language: 'auto' }),
+      });
       if (micRequest.current !== request) {
         activeRecording.cancel();
         return;
@@ -474,15 +477,23 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     void startAcknowledgment(preferredLanguage, request);
 
     try {
-      const audio = await activeRecording.stop();
+      const stoppedAt = performance.now();
+      const recorded = await activeRecording.stop();
       if (micRequest.current !== request) return;
-      const sttStartedAt = performance.now();
-      const result = await defaultProviders().transcribe({ audio });
-      console.info(
-        `[voice timing] request ${request} STT: ${Math.round(performance.now() - sttStartedAt)} ms`,
-      );
+      let transcript = recorded.streamingTranscript?.trim() ?? '';
+      if (transcript !== '') {
+        console.info(
+          `[voice timing] request ${request} realtime STT final after stop: ${Math.round(performance.now() - stoppedAt)} ms`,
+        );
+      } else {
+        const sttStartedAt = performance.now();
+        const result = await defaultProviders().transcribe({ audio: recorded.audio });
+        transcript = result.text.trim();
+        console.info(
+          `[voice timing] request ${request} batch STT fallback: ${Math.round(performance.now() - sttStartedAt)} ms`,
+        );
+      }
       if (micRequest.current !== request) return;
-      const transcript = result.text.trim();
       if (transcript === '') throw new Error('Sarvam returned an empty transcript.');
       setMicState('idle');
       await ask(transcript, { spoken: true, voiceRequest: request });

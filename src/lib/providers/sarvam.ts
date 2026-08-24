@@ -12,6 +12,8 @@ import type {
   SpeakResult,
   TextResult,
   TranscribeInput,
+  TranscribeStreamInput,
+  TranscribeStreamSession,
   TranslateInput,
 } from './types';
 
@@ -32,6 +34,9 @@ const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overr
 const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
 const TTS_STREAM_CODEC = 'mp3';
 const TTS_STREAM_BITRATE = '128k';
+const STT_REALTIME_MODEL = 'saaras:v3-realtime';
+const STT_REALTIME_SAMPLE_RATE = 16_000;
+const STT_FINAL_TIMEOUT_MS = 2_500;
 
 type WebSocketFactory = (url: string, protocols: readonly string[]) => WebSocket;
 
@@ -65,6 +70,13 @@ interface SarvamSttResponse {
   readonly transcript?: unknown;
 }
 
+interface SarvamRealtimeSttMessage {
+  readonly event?: unknown;
+  readonly text?: unknown;
+  readonly message?: unknown;
+  readonly code?: unknown;
+}
+
 export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const decoded = atob(base64);
   const bytes = new Uint8Array(decoded.length);
@@ -86,8 +98,29 @@ function streamingTtsUrl(base: string): string {
   return url.toString();
 }
 
+function streamingSttUrl(base: string, language: string): string {
+  const url = new URL(joinUrl(base, '/speech-to-text-realtime/ws'));
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('language_code', language === 'od-IN' ? 'or-IN' : language);
+  url.searchParams.set('model', STT_REALTIME_MODEL);
+  url.searchParams.set('stream_type', 'fast');
+  url.searchParams.set('mode', 'transcribe');
+  url.searchParams.set('endpointing', 'manual');
+  url.searchParams.set('encoding', 'linear16');
+  url.searchParams.set('sample_rate', String(STT_REALTIME_SAMPLE_RATE));
+  return url.toString();
+}
+
 function abortError(): DOMException {
   return new DOMException('Speech streaming was stopped.', 'AbortError');
+}
+
+function bytesToBase64(bytes: Uint8Array<ArrayBuffer>): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index] ?? 0);
+  }
+  return btoa(binary);
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -339,6 +372,171 @@ export class SarvamProvider implements ProviderWithCapabilities {
       socket.addEventListener('error', handleError);
       socket.addEventListener('close', handleClose);
     });
+  }
+
+  /** Open a one-question Saaras realtime session and accept 16 kHz mono PCM frames. */
+  transcribeStream(input: TranscribeStreamInput = {}): TranscribeStreamSession {
+    if (this.config.mode !== 'direct') {
+      throw new Error('Streaming STT needs WebSocket proxy support in production.');
+    }
+
+    const key = this.config.getSarvamKey().trim();
+    if (key === '') {
+      throw new Error('Add your Sarvam API key in Settings before using the mic.');
+    }
+    if (input.signal?.aborted) throw abortError();
+
+    const socket = this.createWebSocket(
+      streamingSttUrl(this.config.sarvamBaseUrl, input.language ?? 'auto'),
+      [`api-subscription-key.${key}`],
+    );
+    const queuedAudio: Uint8Array<ArrayBuffer>[] = [];
+    let opened = false;
+    let finishRequested = false;
+    let terminal = false;
+    let finalTimer: ReturnType<typeof setTimeout> | undefined;
+    let resolveReady: () => void = () => undefined;
+    let rejectReady: (error: unknown) => void = () => undefined;
+    let resolveFinal: (result: TextResult) => void = () => undefined;
+    let rejectFinal: (error: unknown) => void = () => undefined;
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    const finalTranscript = new Promise<TextResult>((resolve, reject) => {
+      resolveFinal = resolve;
+      rejectFinal = reject;
+    });
+    // A setup failure can occur before recordQuestion asks for finish(); retain
+    // the rejection for that caller without producing an unhandled rejection.
+    void ready.catch(() => undefined);
+    void finalTranscript.catch(() => undefined);
+
+    const cleanup = () => {
+      if (finalTimer !== undefined) clearTimeout(finalTimer);
+      input.signal?.removeEventListener('abort', handleAbort);
+      socket.removeEventListener('open', handleOpen);
+      socket.removeEventListener('message', handleMessage);
+      socket.removeEventListener('error', handleError);
+      socket.removeEventListener('close', handleClose);
+    };
+    const closeSocket = (reason: string) => {
+      try {
+        socket.close(1000, reason);
+      } catch {
+        // The session result is already settled; close failure is non-actionable.
+      }
+    };
+    const fail = (error: unknown) => {
+      if (terminal) return;
+      terminal = true;
+      cleanup();
+      rejectReady(error);
+      rejectFinal(error);
+      closeSocket('stream failed');
+    };
+    const succeed = (text: string) => {
+      if (terminal) return;
+      terminal = true;
+      cleanup();
+      resolveReady();
+      resolveFinal({ text, provider: this.name });
+      try {
+        if (opened) socket.send(JSON.stringify({ event: 'end' }));
+      } catch {
+        // The transcript is already final; session cleanup must not discard it.
+      }
+      closeSocket('complete');
+    };
+    const sendJson = (message: unknown) => {
+      try {
+        socket.send(JSON.stringify(message));
+      } catch (error) {
+        fail(error);
+      }
+    };
+    const sendEndOfSpeech = () => {
+      if (!opened || terminal || !finishRequested) return;
+      sendJson({ event: 'speech_end' });
+      if (!terminal) sendJson({ event: 'flush' });
+    };
+    const handleAbort = () => fail(abortError());
+    const handleOpen = () => {
+      if (terminal) return;
+      opened = true;
+      resolveReady();
+      sendJson({ event: 'speech_start' });
+      for (const audio of queuedAudio.splice(0)) {
+        if (terminal) return;
+        sendJson({ event: 'audio_input', audio: bytesToBase64(audio) });
+      }
+      sendEndOfSpeech();
+    };
+    const handleMessage = (event: MessageEvent<unknown>) => {
+      try {
+        if (typeof event.data !== 'string') {
+          throw new Error('Sarvam returned an invalid realtime STT event.');
+        }
+        const message = JSON.parse(event.data) as SarvamRealtimeSttMessage;
+        if (message.event === 'transcript.partial') {
+          if (typeof message.text === 'string' && message.text.trim() !== '') {
+            input.onPartial?.(message.text.trim());
+          }
+          return;
+        }
+        if (message.event === 'transcript.final') {
+          const text = typeof message.text === 'string' ? message.text.trim() : '';
+          if (text === '') throw new Error('Sarvam returned an empty realtime transcript.');
+          succeed(text);
+          return;
+        }
+        if (message.event === 'error') {
+          const detail = typeof message.message === 'string'
+            ? message.message
+            : 'realtime request failed';
+          const code = typeof message.code === 'string' || typeof message.code === 'number'
+            ? ` (${message.code})`
+            : '';
+          fail(new Error(`Sarvam streaming STT failed${code}: ${detail}`));
+        }
+      } catch (error) {
+        fail(error);
+      }
+    };
+    const handleError = () => fail(new Error('Sarvam streaming STT connection failed.'));
+    const handleClose = (event: CloseEvent) => {
+      if (terminal) return;
+      fail(new Error(`Sarvam streaming STT closed unexpectedly (${event.code}).`));
+    };
+
+    input.signal?.addEventListener('abort', handleAbort, { once: true });
+    socket.addEventListener('open', handleOpen);
+    socket.addEventListener('message', handleMessage);
+    socket.addEventListener('error', handleError);
+    socket.addEventListener('close', handleClose);
+
+    return {
+      ready,
+      pushAudio: (audio) => {
+        if (terminal || finishRequested || audio.byteLength === 0) return;
+        if (!opened) {
+          queuedAudio.push(audio.slice());
+          return;
+        }
+        sendJson({ event: 'audio_input', audio: bytesToBase64(audio) });
+      },
+      finish: () => {
+        if (!terminal && !finishRequested) {
+          finishRequested = true;
+          sendEndOfSpeech();
+          finalTimer = setTimeout(() => {
+            fail(new Error('Sarvam realtime transcript timed out.'));
+          }, STT_FINAL_TIMEOUT_MS);
+        }
+        return finalTranscript;
+      },
+      cancel: () => fail(abortError()),
+    };
   }
 
   async transcribe(input: TranscribeInput): Promise<TextResult> {

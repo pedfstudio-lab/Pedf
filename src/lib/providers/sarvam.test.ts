@@ -423,6 +423,120 @@ describe('SarvamProvider.speakStream', () => {
   });
 });
 
+describe('SarvamProvider.transcribeStream', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('queues PCM until open and resolves partial and final realtime transcripts', async () => {
+    vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
+    const socket = new FakeWebSocket();
+    const factory = vi.fn((url: string, protocols: readonly string[]) => {
+      void url;
+      void protocols;
+      return socket as unknown as WebSocket;
+    });
+    const onPartial = vi.fn();
+    const session = new SarvamProvider(directConfig(), factory).transcribeStream({
+      language: 'hi-IN',
+      onPartial,
+    });
+    const frame = new Uint8Array(new ArrayBuffer(4));
+    frame.set([0, 1, 2, 3]);
+    session.pushAudio(frame);
+
+    socket.open();
+    await expect(session.ready).resolves.toBeUndefined();
+
+    const [rawUrl, protocols] = factory.mock.calls[0] ?? [];
+    const url = new URL(String(rawUrl));
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe(
+      'wss://api.sarvam.ai/speech-to-text-realtime/ws',
+    );
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      language_code: 'hi-IN',
+      model: 'saaras:v3-realtime',
+      stream_type: 'fast',
+      mode: 'transcribe',
+      endpointing: 'manual',
+      encoding: 'linear16',
+      sample_rate: '16000',
+    });
+    expect(protocols).toEqual(['api-subscription-key.configured-test-key']);
+    expect(socket.sent.map((message) => JSON.parse(message))).toEqual([
+      { event: 'speech_start' },
+      { event: 'audio_input', audio: 'AAECAw==' },
+    ]);
+
+    socket.message({ event: 'transcript.partial', text: ' क्या समय ' });
+    expect(onPartial).toHaveBeenCalledWith('क्या समय');
+    const completed = session.finish();
+    expect(socket.sent.slice(-2).map((message) => JSON.parse(message))).toEqual([
+      { event: 'speech_end' },
+      { event: 'flush' },
+    ]);
+    socket.message({ event: 'transcript.final', text: ' क्या समय है? ' });
+
+    await expect(completed).resolves.toEqual({ text: 'क्या समय है?', provider: 'Sarvam' });
+    expect(JSON.parse(socket.sent.at(-1) ?? '{}')).toEqual({ event: 'end' });
+    expect(socket.close).toHaveBeenCalledWith(1000, 'complete');
+  });
+
+  it('cancels the realtime socket through the shared abort path', async () => {
+    vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
+    const socket = new FakeWebSocket();
+    const session = new SarvamProvider(
+      directConfig(),
+      () => socket as unknown as WebSocket,
+    ).transcribeStream();
+    socket.open();
+
+    const completed = session.finish();
+    session.cancel();
+
+    await expect(completed).rejects.toMatchObject({ name: 'AbortError' });
+    expect(socket.close).toHaveBeenCalledWith(1000, 'stream failed');
+  });
+
+  it('surfaces connection failure so recording can select its batch fallback', async () => {
+    vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
+    const socket = new FakeWebSocket();
+    const session = new SarvamProvider(
+      directConfig(),
+      () => socket as unknown as WebSocket,
+    ).transcribeStream();
+    const completed = session.finish();
+
+    socket.close(4401);
+
+    await expect(session.ready).rejects.toThrow('closed unexpectedly (4401)');
+    await expect(completed).rejects.toThrow('closed unexpectedly (4401)');
+  });
+
+  it('rejects a missing key before opening a socket', () => {
+    const factory = vi.fn();
+
+    expect(() => new SarvamProvider(directConfig(''), factory).transcribeStream()).toThrow(
+      'Add your Sarvam API key in Settings',
+    );
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('leaves proxy mode on the batch fallback until WebSocket proxying lands', () => {
+    const factory = vi.fn();
+    const config: ProviderConfig = {
+      mode: 'proxy',
+      sarvamBaseUrl: '/api/sarvam',
+      getSarvamKey: () => 'must-not-leave-the-browser',
+    };
+
+    expect(() => new SarvamProvider(config, factory).transcribeStream()).toThrow(
+      'WebSocket proxy support',
+    );
+    expect(factory).not.toHaveBeenCalled();
+  });
+});
+
 describe('SarvamProvider.transcribe', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

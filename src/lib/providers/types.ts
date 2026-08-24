@@ -26,6 +26,12 @@ export interface TranscribeInput {
   readonly language?: LanguageCode;
 }
 
+export interface TranscribeStreamInput {
+  readonly language?: LanguageCode;
+  readonly onPartial?: (text: string) => void;
+  readonly signal?: AbortSignal;
+}
+
 export interface DiscussHistoryMessage {
   readonly role: 'user' | 'assistant';
   readonly content: string;
@@ -43,6 +49,15 @@ export interface DiscussInput {
 export interface TextResult {
   readonly text: string;
   readonly provider: string;
+}
+
+export interface TranscribeStreamSession {
+  /** Resolves once the realtime WebSocket is ready to accept audio. */
+  readonly ready: Promise<void>;
+  pushAudio(audio: Uint8Array<ArrayBuffer>): void;
+  /** Signal end-of-speech and wait for the final transcript. */
+  finish(): Promise<TextResult>;
+  cancel(): void;
 }
 
 export interface SpeakResult {

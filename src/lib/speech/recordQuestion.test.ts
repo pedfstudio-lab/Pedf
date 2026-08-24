@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseMimeType, startRecording } from './recordQuestion';
+import { baseMimeType, floatSamplesToPcm16, startRecording } from './recordQuestion';
 
 type FakeRecorderEvent = { readonly data?: Blob };
 type FakeRecorderListener = (event: FakeRecorderEvent) => void;
@@ -59,6 +59,23 @@ describe('baseMimeType', () => {
   });
 });
 
+describe('floatSamplesToPcm16', () => {
+  it('clamps samples and writes signed little-endian PCM16', () => {
+    const bytes = floatSamplesToPcm16(new Float32Array([-2, -1, -0.5, 0, 0.5, 1, 2]));
+    const view = new DataView(bytes.buffer);
+
+    expect(Array.from({ length: 7 }, (_, index) => view.getInt16(index * 2, true))).toEqual([
+      -32768,
+      -32768,
+      -16384,
+      0,
+      16384,
+      32767,
+      32767,
+    ]);
+  });
+});
+
 describe('startRecording', () => {
   const stopTrack = vi.fn();
   const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
@@ -88,10 +105,80 @@ describe('startRecording', () => {
       mimeType: 'audio/webm;codecs=opus',
     });
 
-    const audio = await recording.stop();
-    expect(audio.type).toBe('audio/webm');
-    expect(audio.size).toBeGreaterThan(0);
+    const result = await recording.stop();
+    expect(result.audio.type).toBe('audio/webm');
+    expect(result.audio.size).toBeGreaterThan(0);
+    expect(result.streamingTranscript).toBeUndefined();
     expect(stopTrack).toHaveBeenCalledOnce();
+  });
+
+  it('streams PCM while retaining browser audio for the batch fallback', async () => {
+    const pushAudio = vi.fn();
+    const finish = vi.fn(async () => ({ text: '  what are the dates?  ', provider: 'Sarvam' }));
+    const cancel = vi.fn();
+    const stopPcm = vi.fn(async () => undefined);
+    const frame = new Uint8Array(new ArrayBuffer(2));
+    frame.set([1, 2]);
+    const createPcmCapture = vi.fn(async (_stream, onAudio: (audio: Uint8Array<ArrayBuffer>) => void) => {
+      onAudio(frame);
+      return { stop: stopPcm };
+    });
+
+    const recording = await startRecording({
+      startTranscription: () => ({
+        ready: Promise.resolve(),
+        pushAudio,
+        finish,
+        cancel,
+      }),
+      createPcmCapture,
+    });
+    const result = await recording.stop();
+
+    expect(createPcmCapture).toHaveBeenCalledWith(stream, expect.any(Function));
+    expect(pushAudio).toHaveBeenCalledWith(frame);
+    expect(stopPcm).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledOnce();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(result.streamingTranscript).toBe('what are the dates?');
+    expect(result.audio.size).toBeGreaterThan(0);
+  });
+
+  it('returns batch audio when the realtime transcript fails', async () => {
+    const cancel = vi.fn();
+    const recording = await startRecording({
+      startTranscription: () => ({
+        ready: Promise.resolve(),
+        pushAudio: vi.fn(),
+        finish: vi.fn(async () => { throw new Error('socket failed'); }),
+        cancel,
+      }),
+      createPcmCapture: async () => ({ stop: async () => undefined }),
+    });
+
+    const result = await recording.stop();
+
+    expect(result.streamingTranscript).toBeUndefined();
+    expect(result.audio.size).toBeGreaterThan(0);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('keeps recording when realtime PCM setup is unavailable', async () => {
+    const cancel = vi.fn();
+    const recording = await startRecording({
+      startTranscription: () => ({
+        ready: Promise.resolve(),
+        pushAudio: vi.fn(),
+        finish: vi.fn(),
+        cancel,
+      }),
+      createPcmCapture: async () => { throw new Error('AudioWorklet unavailable'); },
+    });
+
+    await expect(recording.stop()).resolves.toMatchObject({
+      audio: expect.any(Blob),
+    });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('falls back to the recorder default and cancellation releases tracks once', async () => {
@@ -102,6 +189,28 @@ describe('startRecording', () => {
     recording.cancel();
     recording.cancel();
     await Promise.resolve();
+    expect(stopTrack).toHaveBeenCalledOnce();
+  });
+
+  it('cancels realtime capture together with the browser recording', async () => {
+    const cancel = vi.fn();
+    const stopPcm = vi.fn(async () => undefined);
+    const recording = await startRecording({
+      startTranscription: () => ({
+        ready: Promise.resolve(),
+        pushAudio: vi.fn(),
+        finish: vi.fn(),
+        cancel,
+      }),
+      createPcmCapture: async () => ({ stop: stopPcm }),
+    });
+
+    recording.cancel();
+    recording.cancel();
+    await Promise.resolve();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stopPcm).toHaveBeenCalledOnce();
     expect(stopTrack).toHaveBeenCalledOnce();
   });
 
