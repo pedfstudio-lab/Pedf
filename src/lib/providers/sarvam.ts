@@ -32,8 +32,11 @@ const TTS_MODEL = 'bulbul:v3';
 const TTS_MAX_CHARS = 2500;
 const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
 const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
+// MP3 is the most broadly MediaSource-compatible Sarvam streaming container.
+// Use Sarvam's maximum documented lossy bitrate and streaming sample rate.
 const TTS_STREAM_CODEC = 'mp3';
-const TTS_STREAM_BITRATE = '128k';
+const TTS_STREAM_BITRATE = '256k';
+const TTS_STREAM_SAMPLE_RATE = 24_000;
 const STT_REALTIME_MODEL = 'saaras:v3-realtime';
 const STT_REALTIME_SAMPLE_RATE = 16_000;
 const STT_FINAL_TIMEOUT_MS = 2_500;
@@ -316,6 +319,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
               pace: TTS_PACE,
               output_audio_codec: TTS_STREAM_CODEC,
               output_audio_bitrate: TTS_STREAM_BITRATE,
+              speech_sample_rate: TTS_STREAM_SAMPLE_RATE,
             },
           }));
           socket.send(JSON.stringify({

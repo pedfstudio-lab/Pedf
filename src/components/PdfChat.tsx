@@ -9,13 +9,14 @@ import { getSarvamKey } from '@/lib/providers/keys';
 import {
   MAX_BRIDGING_FILLERS,
   preloadAcknowledgments,
+  preloadBridgingAcknowledgments,
   takeAcknowledgment,
   takeAcknowledgmentPhrase,
   takeBridgingAcknowledgment,
-  waitForAcknowledgmentDelay,
   waitForBridgingGap,
   waitForBridgingInitialDelay,
 } from '@/lib/speech/acknowledgments';
+import { classifyQuestion } from '@/lib/speech/classifyQuestion';
 import { startRecording } from '@/lib/speech/recordQuestion';
 import type { Recording } from '@/lib/speech/recordQuestion';
 import {
@@ -182,7 +183,11 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   );
 
   const enqueueBridgingFillers = async (state: VoicePlaybackState) => {
-    await waitForBridgingInitialDelay();
+    if (!isCurrentVoicePlayback(state) || state.firstAnswerReady) return;
+    await Promise.all([
+      waitForBridgingInitialDelay(),
+      preloadBridgingAcknowledgments(state.language),
+    ]);
     for (let count = 0; count < MAX_BRIDGING_FILLERS; count += 1) {
       if (!isCurrentVoicePlayback(state) || state.firstAnswerReady) return;
       const bridge = takeBridgingAcknowledgment(state.language);
@@ -257,7 +262,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     setMicState('idle');
   };
 
-  const startAcknowledgment = async (language: string, voiceRequest: number) => {
+  const beginVoiceAnswer = (language: string, voiceRequest: number): VoicePlaybackState => {
     stopPlayback();
     const playbackToken = playbackRequest.current;
     const state: VoicePlaybackState = {
@@ -268,20 +273,23 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       bridgeActive: false,
     };
     voicePlayback.current = state;
-    await waitForAcknowledgmentDelay();
+    playback.current = { id: ACKNOWLEDGMENT_PLAYBACK_ID };
+    setPlayingId(ACKNOWLEDGMENT_PLAYBACK_ID);
+    return state;
+  };
+
+  const startAcknowledgment = (state: VoicePlaybackState) => {
     if (!isCurrentVoicePlayback(state)) return;
 
     try {
-      const cached = takeAcknowledgment(language);
+      const cached = takeAcknowledgment(state.language);
       const ticket = cached
         ? speechQueue.current?.enqueue(cached)
         : speechQueue.current?.enqueueBrowserSpeech(
-          takeAcknowledgmentPhrase(language),
-          language,
+          takeAcknowledgmentPhrase(state.language),
+          state.language,
         );
       if (!ticket || !isCurrentVoicePlayback(state)) return;
-      playback.current = { id: ACKNOWLEDGMENT_PLAYBACK_ID };
-      setPlayingId(ACKNOWLEDGMENT_PLAYBACK_ID);
       void ticket.done.then(() => enqueueBridgingFillers(state));
     } catch {
       // An acknowledgment is best-effort; transcription and the real answer must continue.
@@ -474,7 +482,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     const request = micRequest.current;
     setError(null);
     setMicState('transcribing');
-    void startAcknowledgment(preferredLanguage, request);
 
     try {
       const stoppedAt = performance.now();
@@ -495,6 +502,8 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       }
       if (micRequest.current !== request) return;
       if (transcript === '') throw new Error('Sarvam returned an empty transcript.');
+      const voiceState = beginVoiceAnswer(preferredLanguage, request);
+      if (classifyQuestion(transcript) === 'document') startAcknowledgment(voiceState);
       setMicState('idle');
       await ask(transcript, { spoken: true, voiceRequest: request });
     } catch (caught) {

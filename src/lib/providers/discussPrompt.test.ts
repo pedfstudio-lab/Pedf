@@ -18,11 +18,18 @@ describe('buildDiscussMessages', () => {
     expect(messages[0]?.content).toContain('cite the relevant [Page N]');
     expect(messages[0]?.content).toContain('general knowledge');
     expect(messages[0]?.content).toContain('Answer concisely in Hindi');
+    expect(messages[0]?.content).toContain('warm, easygoing companion');
+    expect(messages[0]?.content).toContain('never clinical or robotic');
+    expect(messages[0]?.content).toContain('say so honestly and warmly');
+    expect(messages[0]?.content).toContain('cannot access accounts or history');
+    expect(messages[0]?.content).toContain('qualified professional');
     expect(messages[0]?.content).toContain(NOT_IN_DOCUMENT_MARKER);
     expect(messages[0]?.content).toContain('[Page 1]\nCheck-in is at 3 PM.');
     expect(messages[1]?.content).not.toContain('<DOCUMENT>');
     expect(messages[1]?.content).toContain('What time is check-in?');
     expect(messages[0]?.content).not.toContain('no more than 40 words');
+    expect(messages[0]?.content).not.toContain('end the call');
+    expect(messages[0]?.content).not.toContain('voicemail');
   });
 
   it('adds the brevity instruction only for a spoken question', () => {

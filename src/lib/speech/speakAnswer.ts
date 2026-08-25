@@ -16,6 +16,14 @@ export interface PreparedSpeechStream {
 /** Read ~15% faster than default; matches the Sarvam TTS pace. */
 const PLAYBACK_RATE = 1.15;
 const STREAM_CONTENT_TYPE = 'audio/mpeg';
+/** Approximately +1.9 dB to match the fuller batch-WAV acknowledgment level. */
+export const STREAM_PLAYBACK_GAIN = 1.25;
+const STREAM_LIMITER_THRESHOLD_DB = -1;
+
+interface StreamPlaybackGraph {
+  resume(): Promise<void>;
+  close(): void;
+}
 
 function stoppedError(): DOMException {
   return new DOMException('Speech playback was stopped.', 'AbortError');
@@ -29,6 +37,55 @@ function unavailablePreparedStream(error: Error): PreparedSpeechStream {
     },
     stop() {
       // Nothing was started.
+    },
+  };
+}
+
+/**
+ * Boost only the streamed MP3 path. Batch WAV clips already play at the
+ * desired level; a near-0 dB limiter prevents the make-up gain from clipping.
+ */
+function createStreamPlaybackGraph(element: HTMLAudioElement): StreamPlaybackGraph | null {
+  if (typeof AudioContext === 'undefined') return null;
+
+  let context: AudioContext | null = null;
+  let source: MediaElementAudioSourceNode | null = null;
+  let gain: GainNode | null = null;
+  let limiter: DynamicsCompressorNode | null = null;
+  try {
+    context = new AudioContext();
+    source = context.createMediaElementSource(element);
+    gain = context.createGain();
+    limiter = context.createDynamicsCompressor();
+    gain.gain.value = STREAM_PLAYBACK_GAIN;
+    limiter.threshold.value = STREAM_LIMITER_THRESHOLD_DB;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.1;
+    source.connect(gain);
+    gain.connect(limiter);
+    limiter.connect(context.destination);
+  } catch {
+    source?.disconnect();
+    gain?.disconnect();
+    limiter?.disconnect();
+    if (context && context.state !== 'closed') void context.close();
+    return null;
+  }
+
+  let closed = false;
+  return {
+    async resume() {
+      if (context?.state === 'suspended') await context.resume();
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      source?.disconnect();
+      gain?.disconnect();
+      limiter?.disconnect();
+      if (context && context.state !== 'closed') void context.close();
     },
   };
 }
@@ -120,6 +177,7 @@ export function prepareSpeechStream(startStream: StartSpeechStream): PreparedSpe
   let firstChunkAppended = false;
   let stopped = false;
   let cleaned = false;
+  let playbackGraph: StreamPlaybackGraph | null = null;
   let failure: unknown;
   let onPlaybackEnded: (() => void) | null = null;
   let onPlaybackError: ((error: unknown) => void) | null = null;
@@ -136,6 +194,8 @@ export function prepareSpeechStream(startStream: StartSpeechStream): PreparedSpe
     stopped = true;
     controller.abort();
     if (pause) element.pause();
+    playbackGraph?.close();
+    playbackGraph = null;
     URL.revokeObjectURL(url);
   };
 
@@ -238,6 +298,13 @@ export function prepareSpeechStream(startStream: StartSpeechStream): PreparedSpe
       if (stopped) throw stoppedError();
       if (failure !== undefined) throw failure;
       await element.play();
+      playbackGraph = createStreamPlaybackGraph(element);
+      try {
+        await playbackGraph?.resume();
+      } catch (error) {
+        cleanup(true);
+        throw error;
+      }
       if (stopped) {
         element.pause();
         throw stoppedError();

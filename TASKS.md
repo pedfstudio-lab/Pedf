@@ -3437,6 +3437,95 @@ is already truncated upstream).
 **Land it (on the user's go):** commit to `main`. Commit message:
 `Conversation memory — the chat bot remembers prior turns (multi-turn)`.
 
+### Task 24C — Voice persona ("warm document companion") + varied, human acknowledgments  🔲 TODO → on `main`
+> Two related upgrades so the voice feels like a person, not a script: (a) give the bot a consistent **warm, casual
+> character** for its real answers, and (b) replace the **3 repeating** filler lines with a **rich, varied** pool in
+> that same voice so it never says the same thing twice. Adapted from a persona spec the user supplied (originally
+> for an emotional-support companion) — re-pointed at OUR job: reading & discussing the user's document. **On `main`**
+> (a keeper, no branch); the grounding logic stays intact underneath.
+
+**Depends on:** Task 24/24A (grounded 3-way answers), 25B (acknowledgments). **Keeps** the 3-way grounding, the
+`[Page N]` citations, and `NOT_IN_DOCUMENT_MARKER` — the persona only adds TONE on top.
+
+**Part A — persona/tone in the answer prompt → `discussPrompt.ts`.** Layer these into the `instructions` array
+(they ADD character; they do NOT replace the "(1)/(2)/(3)" grounding rules or the `spoken` length rule already
+there):
+- "You are a warm, easygoing companion inside the app who helps the user read, understand, and talk about their
+  open DOCUMENT — like a helpful friend flipping through it with them."
+- "Sound gentle, casual, and friendly, never clinical or robotic; use everyday spoken language and short, simple
+  sentences that translate cleanly across languages."
+- "If asked whether you are an AI, say so honestly and warmly, and keep going."
+- "Never repeat a sentence verbatim; if a topic comes back, say it fresher and shorter."
+- "You can read and discuss the open DOCUMENT, but you cannot access accounts or history or take real-world actions
+  (sending, booking, contacting); say so warmly if asked, and never invent details that are not in the DOCUMENT."
+- Light safety net: "If the user shares something genuinely distressing (self-harm, a crisis, a medical emergency),
+  drop the casual tone, take it seriously, and gently point them to a real person or emergency help — you are not a
+  substitute for that. For medical, legal, or financial decisions, talk it through kindly but point them to a
+  qualified professional."
+Keep the existing grounding block and the `spoken` 1–2 sentence rule exactly. **Do NOT** add telephony behavior (no
+"end the call", no voicemail) — this is an in-app chat, not a phone agent.
+
+**Part B — a rich, varied filler pool → `acknowledgments.ts`.** The `nextIndex` no-repeat logic already works — it
+just needs many more lines. Replace the 3-line English pools with these (authored in the persona voice), and have
+the model write NATURAL, CASUAL equivalents for the other 9 languages (not literal translations — friend-like, and
+short for fast synthesis):
+
+`ACKNOWLEDGMENT_PHRASES['en-IN']` (instant starter, fires ~600 ms after the user stops):
+```
+"Sure, let me take a look.", "Yeah, let me check that for you.", "Okay, one sec while I look.",
+"Let me find that.", "Hmm, let me see.", "Sure thing, give me a moment.", "Got it, let me look through this.",
+"Okay, checking now.", "Let me pull that up.", "Alright, let me have a look.", "Sure, just a sec.",
+"Let me scan through it."
+```
+`BRIDGING_PHRASES['en-IN']` (only if a reply is unusually slow — rare now that TTS streams):
+```
+"Still looking through it.", "Almost there.", "Bear with me a sec.", "Just going through it.",
+"Nearly got it.", "One more moment.", "Still scanning.", "Hang on, almost there."
+```
+
+**Part C — (optional) context-aware starter.** When the open document is large, bias the starter toward a
+"big document" line so it feels aware, e.g. `"This is a big one, give me a sec.", "Lots here, just a moment.",
+"It's a long document, bear with me."`. Only if it's easy; skip if it complicates the manager.
+
+**Part D — fire the RIGHT filler for the question type (fixes "let me check" on chat questions).** The filler
+currently fires during STT, **before we know the question**, so it blindly says "let me check" even for "how are
+you" or "what do you think" — which sounds robotic (nothing is being "looked up"). **Move the filler decision to
+AFTER the transcript is available** (we have it before the answer), and classify with a cheap LOCAL check (no extra
+model call):
+- **greeting / small-talk / opinion** (short; matches hi/hello/thanks/bye, "how are you", "what do you think",
+  "do you like", etc.) → **NO "let me check" filler**: play nothing, or a soft neutral beat only (`"hmm,"`,
+  `"well,"`, `"let me think,"`).
+- **otherwise** (a document-ish question) → a neutral starter from Part B is fine.
+Keep the wording **neutral** so it never assumes a lookup unless it truly is one. Since the voice is fast now, a
+brief natural pause during STT is fine — don't paper over it with a lookup line. (Pairs with streaming STT: the
+transcript arrives quickly, so the classified filler still lands before the answer.) Add a small
+`classifyQuestion(text)` helper + tests (greeting vs small-talk vs lookup).
+
+**Part E — speak months & years in FULL (dates are read as abbreviations).** User: the résumé's `Jun'22` / `Oct'25`
+/ `Jan'25` are spoken as "Jun twenty-five" — unclear; wanted full month name + full year ("January twenty
+twenty-five", "June twenty twenty-two", "May twenty twenty-six"). **Fix in `normalizeForSpeech`
+(`sentenceChunking.ts`) — SPEECH ONLY (the on-screen text keeps the résumé's `Jun'22`):**
+1. **Expand month abbreviations → full names** when a date follows (an apostrophe/space + digit): Jan→January,
+   Feb→February, Mar→March, Apr→April, Jun→June, Jul→July, Aug→August, Sep/Sept→September, Oct→October, Nov→November,
+   Dec→December (May is already full). Handle an optional trailing period (`Jan.`).
+2. **Expand `'YY` → `20YY`** with a separating space: `Jun'22`→`June 2022`, `May '26`→`May 2026`. Handle straight
+   and curly apostrophes.
+3. **Year ranges** `YYYY-YYYY` → `YYYY to YYYY` (`(2020-2023)`→`2020 to 2023`) so the dash is not misread.
+Only expand a month when a digit/year follows, so a name ("Jan Smith") or a word ("Marketing", "Marched") is left
+alone. Tests: `normalizeForSpeech("Jun'22 to Oct'25")` contains `"June 2022"` and `"October 2025"`; `"May '26"` →
+`"May 2026"`; `"(2020-2023)"` → `"2020 to 2023"`; `"Marketing"` unchanged.
+
+**Cost/perf note:** more phrases = more pre-synthesis at `preload`. The clips are short, but synthesize the starter
+pool eagerly and the bridges (and any large-doc set) lazily — or cap how many are pre-synthesized per language — so
+opening the chat doesn't fire ~30 TTS calls at once. Browser-speech fallback still covers anything not cached.
+
+**Verify:** answers still come **from the document** with `[Page N]` grounding (Part A didn't break it) and now
+sound warmer/casual; ask several questions in a row → the starter is **different each time**, never the robotic same
+three. `npm run test` / `typecheck` / `lint` green (update the acknowledgment tests for the larger pools).
+
+**Land it (on the user's go):** commit to `main`. Commit message:
+`Voice persona: warm document companion + varied acknowledgments (Task 24C)`.
+
 #### Stage 2 — the mouth (speak the answer)
 
 ### Task 23 — Speech output: speak the answer aloud (TTS · the mouth)  ⏳
@@ -4063,6 +4152,18 @@ is REST-only, so prod (proxy mode) needs WS proxying (Cloudflare supports it) �
 
 **Land it (only if we like it, on your go):** merge `voice-streaming-tts` → `main`, then schedule the WS-proxy
 follow-up (Step 5) before the public deploy. Commit message: `Streaming TTS: play each clip as it synthesizes (Task 25C)`.
+
+**⚠ Follow-up fix (2026-08-24) — the streamed answer sounds QUIETER & FLATTER than the WAV filler.** User feedback:
+the pre-cached acknowledgment (full-quality **WAV**) is crisp and loud, but the streamed answer (**128k MP3** via
+MediaSource) sounds thinner and softer right after it. Not stuttery — a fidelity/loudness gap. Pace is already
+matched (both `TTS_PACE`), so this is format, not speed. **Fix (`sarvam.ts` + `speakAnswer.ts`):**
+1. **Raise `TTS_STREAM_BITRATE`** from `128k` toward the max Sarvam streaming allows (e.g. `192k`/`256k`) → fixes the
+   "flat" compression.
+2. **Even out loudness** — check whether the MP3 stream, or its MediaSource `<audio>` playback, is quieter than the
+   filler's WAV player; match them (audio-element volume, or a Web Audio gain node if the source level is lower).
+3. **If Sarvam streaming offers a higher-fidelity codec** (higher-bitrate MP3, or Opus/WebM), prefer it — closer to
+   the WAV filler.
+Goal: filler → answer with **no audible drop** in volume or crispness. On `main`. Verify by ear.
 
 ### Task 25D — Streaming STT: transcribe the question WHILE you speak (fix the "ears" delay)  🔬 EXPERIMENT → same branch `voice-streaming-tts`
 > STT is still **batch**: `startRecording` captures the whole question, then `transcribe()` uploads it and we wait

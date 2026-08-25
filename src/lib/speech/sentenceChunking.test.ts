@@ -89,6 +89,24 @@ describe('chunkSentences', () => {
     );
   });
 
+  it('speaks abbreviated résumé months and apostrophe years in full', () => {
+    expect(normalizeForSpeech("Jun'22 to Oct'25")).toBe(
+      'June 2022 to October 2025',
+    );
+    expect(normalizeForSpeech("May '26")).toBe('May 2026');
+    expect(normalizeForSpeech("Jan.’25 and Feb. '24")).toBe(
+      'January 2025 and February 2024',
+    );
+  });
+
+  it('speaks full year ranges without changing unrelated month-like words', () => {
+    expect(normalizeForSpeech('(2020-2023)')).toBe('2020 to 2023');
+    expect(normalizeForSpeech('2019–2021')).toBe('2019 to 2021');
+    expect(normalizeForSpeech('Marketing, Marched, and Jan Smith')).toBe(
+      'Marketing, Marched, and Jan Smith',
+    );
+  });
+
   it('makes a long first sentence start with a short natural clause', () => {
     const sentence = 'Your hotel check-in begins at three o’clock, and the reception team will have your room ready when you arrive.';
     const chunks = splitFirstSpeechChunk(sentence);

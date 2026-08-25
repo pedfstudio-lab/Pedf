@@ -4,6 +4,21 @@ export const SECOND_SPEECH_CHUNK_TARGET_CHARS = 60;
 export const THIRD_SPEECH_CHUNK_TARGET_CHARS = 100;
 export const COALESCED_SPEECH_CHUNK_TARGET_CHARS = 150;
 
+const SPOKEN_MONTH_NAMES: Readonly<Record<string, string>> = {
+  jan: 'January',
+  feb: 'February',
+  mar: 'March',
+  apr: 'April',
+  jun: 'June',
+  jul: 'July',
+  aug: 'August',
+  sep: 'September',
+  sept: 'September',
+  oct: 'October',
+  nov: 'November',
+  dec: 'December',
+};
+
 function protectPeriods(text: string): string {
   return text
     .replace(/\b(?:a\.m|p\.m)\./gi, (match, offset: number, source: string) => {
@@ -59,6 +74,13 @@ export function chunkSentences(text: string): string[] {
 /** Normalize readability quirks for TTS without changing the displayed answer. */
 export function normalizeForSpeech(text: string): string {
   return text
+    .replace(
+      /\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep(?:t)?|Oct|Nov|Dec)\.?(?=(?:\s*[’']\s*|\s+)\d{2,4}\b)/giu,
+      (month) => SPOKEN_MONTH_NAMES[month.replace('.', '').toLowerCase()] ?? month,
+    )
+    .replace(/[’']\s*(\d{2})\b/gu, ' 20$1')
+    .replace(/\(\s*(\d{4})\s*[-–—]\s*(\d{4})\s*\)/gu, '$1 to $2')
+    .replace(/\b(\d{4})\s*[-–—]\s*(\d{4})\b/gu, '$1 to $2')
     .replace(/([A-Za-z])\.(?=[A-Za-z])/g, '$1 ')
     .replace(/\b[A-Z]{2,}(?:\s+[A-Z]{2,})+\b/g, (run) => (
       run

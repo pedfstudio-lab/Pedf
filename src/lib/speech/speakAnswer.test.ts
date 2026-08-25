@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { playSpeechBlob, prepareSpeechStream, speakAnswer } from './speakAnswer';
+import {
+  playSpeechBlob,
+  prepareSpeechStream,
+  speakAnswer,
+  STREAM_PLAYBACK_GAIN,
+} from './speakAnswer';
 
 const providerSpeak = vi.hoisted(() => vi.fn());
 
@@ -92,11 +97,52 @@ class FakeMediaSource {
   }
 }
 
+class FakeAudioNode {
+  readonly connect = vi.fn();
+  readonly disconnect = vi.fn();
+}
+
+class FakeGainNode extends FakeAudioNode {
+  readonly gain = { value: 1 };
+}
+
+class FakeLimiterNode extends FakeAudioNode {
+  readonly threshold = { value: 0 };
+  readonly knee = { value: 0 };
+  readonly ratio = { value: 1 };
+  readonly attack = { value: 0 };
+  readonly release = { value: 0 };
+}
+
+class FakeAudioContext {
+  static instances: FakeAudioContext[] = [];
+
+  readonly destination = {};
+  readonly source = new FakeAudioNode();
+  readonly gain = new FakeGainNode();
+  readonly limiter = new FakeLimiterNode();
+  readonly createMediaElementSource = vi.fn(() => this.source);
+  readonly createGain = vi.fn(() => this.gain);
+  readonly createDynamicsCompressor = vi.fn(() => this.limiter);
+  readonly resume = vi.fn(async () => {
+    this.state = 'running';
+  });
+  readonly close = vi.fn(async () => {
+    this.state = 'closed';
+  });
+  state: AudioContextState = 'suspended';
+
+  constructor() {
+    FakeAudioContext.instances.push(this);
+  }
+}
+
 describe('speakAnswer', () => {
   beforeEach(() => {
     providerSpeak.mockReset();
     FakeAudio.instances = [];
     FakeMediaSource.instances = [];
+    FakeAudioContext.instances = [];
     FakeMediaSource.isTypeSupported.mockClear();
   });
 
@@ -178,6 +224,7 @@ describe('speakAnswer', () => {
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
     vi.stubGlobal('Audio', FakeAudio);
     vi.stubGlobal('MediaSource', FakeMediaSource);
+    vi.stubGlobal('AudioContext', FakeAudioContext);
     let sendChunk: ((audio: Uint8Array<ArrayBuffer>) => void) | undefined;
     let finishStream: (() => void) | undefined;
     let streamSignal: AbortSignal | undefined;
@@ -199,6 +246,15 @@ describe('speakAnswer', () => {
 
     expect(mediaSource?.sourceBuffer.appended).toHaveLength(1);
     expect(FakeAudio.instances[0]?.play).toHaveBeenCalledOnce();
+    const audioContext = FakeAudioContext.instances[0];
+    if (!audioContext) throw new Error('Expected the streaming gain graph to be created.');
+    expect(audioContext.createMediaElementSource).toHaveBeenCalledWith(FakeAudio.instances[0]);
+    expect(audioContext.gain.gain.value).toBe(STREAM_PLAYBACK_GAIN);
+    expect(audioContext.limiter.threshold.value).toBe(-1);
+    expect(audioContext.source.connect).toHaveBeenCalledWith(audioContext.gain);
+    expect(audioContext.gain.connect).toHaveBeenCalledWith(audioContext.limiter);
+    expect(audioContext.limiter.connect).toHaveBeenCalledWith(audioContext.destination);
+    expect(audioContext.resume).toHaveBeenCalledOnce();
     finishStream?.();
     await Promise.resolve();
     expect(mediaSource?.endOfStream).toHaveBeenCalledOnce();
@@ -208,6 +264,7 @@ describe('speakAnswer', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:stream');
     expect(streamSignal?.aborted).toBe(true);
+    expect(audioContext.close).toHaveBeenCalledOnce();
 
     stop();
     expect(FakeAudio.instances[0]?.pause).not.toHaveBeenCalled();
