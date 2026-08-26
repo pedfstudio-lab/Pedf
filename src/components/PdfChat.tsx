@@ -19,8 +19,8 @@ import {
 import { classifyQuestion } from '@/lib/speech/classifyQuestion';
 import {
   createConversationEndpoint,
+  dedupeImmediateTranscriptRepeats,
   isUsableConversationTranscript,
-  mergeConversationTranscript,
 } from '@/lib/speech/conversationEndpoint';
 import type { ConversationEndpoint } from '@/lib/speech/conversationEndpoint';
 import { startConversationSession } from '@/lib/speech/conversationSession';
@@ -138,8 +138,8 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const conversationEndpoint = useRef<ConversationEndpoint | null>(null);
   const conversationTranscript = useRef('');
   const conversationUserSpeaking = useRef(false);
-  const conversationTranscriptionFactory = useRef<ConversationTranscriptionFactory | null>(null);
   const finalizeConversationTurnRef = useRef<() => void>(() => undefined);
+  const handleConversationFinalRef = useRef<(text: string) => void>(() => undefined);
   const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
 
   const updateConversationPhase = useCallback((phase: ConversationPhase) => {
@@ -171,7 +171,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     conversationEndpoint.current = null;
     conversationTranscript.current = '';
     conversationUserSpeaking.current = false;
-    conversationTranscriptionFactory.current = null;
     askRequest.current += 1;
     micRequest.current += 1;
     stopPlayback();
@@ -235,7 +234,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     conversationEndpoint.current = null;
     conversationTranscript.current = '';
     conversationUserSpeaking.current = false;
-    conversationTranscriptionFactory.current = null;
     const activeConversation = conversationSession.current;
     conversationSession.current = null;
     void activeConversation?.stop();
@@ -598,21 +596,11 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     }
   };
 
-  const resumeConversationListening = async (request: number) => {
+  const resumeConversationListening = (request: number) => {
     if (
       conversationRequest.current !== request
       || !conversationSession.current
-      || !conversationTranscriptionFactory.current
     ) return;
-    try {
-      await conversationSession.current.replaceTranscription(
-        conversationTranscriptionFactory.current,
-      );
-    } catch {
-      // The shared session error callback surfaces the cause and tears down the mode.
-      return;
-    }
-    if (conversationRequest.current !== request || !conversationSession.current) return;
     conversationTranscript.current = '';
     conversationUserSpeaking.current = false;
     setLiveTranscript('');
@@ -620,18 +608,17 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     updateConversationPhase('listening');
   };
 
-  const finalizeConversationTurn = async () => {
+  const handleConversationFinal = async (rawTranscript: string) => {
     if (
-      conversationPhaseRef.current !== 'listening'
+      conversationPhaseRef.current !== 'thinking'
       || !conversationSession.current
     ) return;
-    const transcript = conversationTranscript.current.trim();
-    if (!isUsableConversationTranscript(transcript)) return;
     const request = conversationRequest.current;
-    conversationEndpoint.current?.cancel();
-    conversationUserSpeaking.current = false;
-    conversationSession.current.setListening(false);
-    updateConversationPhase('thinking');
+    const transcript = dedupeImmediateTranscriptRepeats(rawTranscript);
+    if (!isUsableConversationTranscript(transcript)) {
+      resumeConversationListening(request);
+      return;
+    }
 
     const voiceRequest = micRequest.current + 1;
     micRequest.current = voiceRequest;
@@ -641,14 +628,33 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       spoken: true,
       voiceRequest,
       onVoiceComplete: () => {
-        void resumeConversationListening(request);
+        resumeConversationListening(request);
       },
     });
     updateConversationPhase('speaking');
     await answering;
   };
+  handleConversationFinalRef.current = (text) => {
+    void handleConversationFinal(text);
+  };
+
+  const finalizeConversationTurn = () => {
+    if (
+      conversationPhaseRef.current !== 'listening'
+      || !conversationSession.current
+    ) return;
+    const activeSession = conversationSession.current;
+    conversationEndpoint.current?.cancel();
+    conversationUserSpeaking.current = false;
+    activeSession.setListening(false);
+    updateConversationPhase('thinking');
+    if (!activeSession.requestFinal()) {
+      activeSession.setListening(true);
+      updateConversationPhase('listening');
+    }
+  };
   finalizeConversationTurnRef.current = () => {
-    void finalizeConversationTurn();
+    finalizeConversationTurn();
   };
 
   const beginConversation = async () => {
@@ -678,14 +684,15 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       );
       const transcriptionFactory: ConversationTranscriptionFactory = (
         onPartial,
+        onFinal,
         onError,
       ) => realtimeProvider.transcribeStream({
         language: preferredLanguage,
         onPartial,
+        onFinal,
         onError,
       });
       conversationEndpoint.current = endpoint;
-      conversationTranscriptionFactory.current = transcriptionFactory;
       const activeConversation = await startConversationSession(
         transcriptionFactory,
         {
@@ -694,12 +701,12 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               conversationRequest.current !== request
               || conversationPhaseRef.current !== 'listening'
             ) return;
-            const merged = mergeConversationTranscript(
-              conversationTranscript.current,
-              text,
-            );
-            conversationTranscript.current = merged;
-            setLiveTranscript(merged);
+            conversationTranscript.current = text;
+            setLiveTranscript(text);
+          },
+          onFinal: (text) => {
+            if (conversationRequest.current !== request) return;
+            handleConversationFinalRef.current(text);
           },
           onSpeechStart: () => {
             if (
@@ -718,6 +725,20 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             endpoint.onSpeechEnd(isUsableConversationTranscript(
               conversationTranscript.current,
             ));
+          },
+          onReconnect: () => {
+            if (conversationRequest.current !== request) return;
+            conversationEndpoint.current?.cancel();
+            conversationTranscript.current = '';
+            conversationUserSpeaking.current = false;
+            setLiveTranscript('');
+            if (
+              conversationPhaseRef.current === 'thinking'
+              && conversationSession.current
+            ) {
+              conversationSession.current.setListening(true);
+              updateConversationPhase('listening');
+            }
           },
           onError: (caught) => {
             if (conversationRequest.current !== request) return;
@@ -740,7 +761,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       conversationEndpoint.current = null;
       conversationTranscript.current = '';
       conversationUserSpeaking.current = false;
-      conversationTranscriptionFactory.current = null;
       updateConversationPhase('idle');
       setLiveTranscript('');
       if (!microphonePermissionDenied(caught)) setConversationUnavailable(true);

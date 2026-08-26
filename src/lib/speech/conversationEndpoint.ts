@@ -10,21 +10,59 @@ export function isUsableConversationTranscript(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text);
 }
 
-/** Merge cumulative partials and new segments without duplicating growing transcripts. */
-export function mergeConversationTranscript(
-  current: string,
-  partial: string,
+function comparisonToken(token: string): string {
+  const word = token
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  return word === '' ? token.toLocaleLowerCase() : word;
+}
+
+function segmentsMatch(words: readonly string[], first: number, second: number, length: number): boolean {
+  for (let offset = 0; offset < length; offset += 1) {
+    if (comparisonToken(words[first + offset] ?? '') !== comparisonToken(words[second + offset] ?? '')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Collapse adjacent repeated words or phrases in a clean provider-final transcript. */
+export function dedupeImmediateTranscriptRepeats(
+  text: string,
   maxChars = MAX_CONVERSATION_TRANSCRIPT_CHARS,
 ): string {
-  const existing = current.replace(/\s+/gu, ' ').trim();
-  const incoming = partial.replace(/\s+/gu, ' ').trim();
-  if (incoming === '') return existing;
-  const merged = existing === '' || incoming.startsWith(existing)
-    ? incoming
-    : existing.startsWith(incoming) || existing.endsWith(incoming)
-      ? existing
-      : `${existing} ${incoming}`;
-  return merged.slice(0, maxChars).trimEnd();
+  const words = text.replace(/\s+/gu, ' ').trim().split(' ').filter(Boolean);
+  const deduped: string[] = [];
+  let cursor = 0;
+
+  while (cursor < words.length) {
+    let repeatedLength = 0;
+    let repeatCount = 1;
+    const maxLength = Math.floor((words.length - cursor) / 2);
+    for (let length = 1; length <= maxLength; length += 1) {
+      if (!segmentsMatch(words, cursor, cursor + length, length)) continue;
+      repeatedLength = length;
+      repeatCount = 2;
+      while (
+        cursor + (repeatCount + 1) * length <= words.length
+        && segmentsMatch(words, cursor, cursor + repeatCount * length, length)
+      ) {
+        repeatCount += 1;
+      }
+      break;
+    }
+
+    if (repeatedLength > 0) {
+      deduped.push(...words.slice(cursor, cursor + repeatedLength));
+      cursor += repeatedLength * repeatCount;
+    } else {
+      deduped.push(words[cursor] ?? '');
+      cursor += 1;
+    }
+  }
+
+  return deduped.join(' ').slice(0, maxChars).trimEnd();
 }
 
 /** Arm finalization after silence, and cancel it immediately when speech resumes. */

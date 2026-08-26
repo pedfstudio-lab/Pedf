@@ -115,7 +115,7 @@ describe('startRecording', () => {
   it('streams PCM while retaining browser audio for the batch fallback', async () => {
     const pushAudio = vi.fn();
     const finish = vi.fn(async () => ({ text: '  what are the dates?  ', provider: 'Sarvam' }));
-    const cancel = vi.fn();
+    const close = vi.fn();
     const stopPcm = vi.fn(async () => undefined);
     const frame = new Uint8Array(new ArrayBuffer(2));
     frame.set([1, 2]);
@@ -129,7 +129,7 @@ describe('startRecording', () => {
         ready: Promise.resolve(),
         pushAudio,
         finish,
-        cancel,
+        close,
       }),
       createPcmCapture,
     });
@@ -139,19 +139,19 @@ describe('startRecording', () => {
     expect(pushAudio).toHaveBeenCalledWith(frame);
     expect(stopPcm).toHaveBeenCalledOnce();
     expect(finish).toHaveBeenCalledOnce();
-    expect(cancel).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
     expect(result.streamingTranscript).toBe('what are the dates?');
     expect(result.audio.size).toBeGreaterThan(0);
   });
 
   it('returns batch audio when the realtime transcript fails', async () => {
-    const cancel = vi.fn();
+    const close = vi.fn();
     const recording = await startRecording({
       startTranscription: () => ({
         ready: Promise.resolve(),
         pushAudio: vi.fn(),
         finish: vi.fn(async () => { throw new Error('socket failed'); }),
-        cancel,
+        close,
       }),
       createPcmCapture: async () => ({ stop: async () => undefined }),
     });
@@ -160,17 +160,17 @@ describe('startRecording', () => {
 
     expect(result.streamingTranscript).toBeUndefined();
     expect(result.audio.size).toBeGreaterThan(0);
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('keeps recording when realtime PCM setup is unavailable', async () => {
-    const cancel = vi.fn();
+    const close = vi.fn();
     const recording = await startRecording({
       startTranscription: () => ({
         ready: Promise.resolve(),
         pushAudio: vi.fn(),
         finish: vi.fn(),
-        cancel,
+        close,
       }),
       createPcmCapture: async () => { throw new Error('AudioWorklet unavailable'); },
     });
@@ -178,7 +178,7 @@ describe('startRecording', () => {
     await expect(recording.stop()).resolves.toMatchObject({
       audio: expect.any(Blob),
     });
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('falls back to the recorder default and cancellation releases tracks once', async () => {
@@ -193,14 +193,14 @@ describe('startRecording', () => {
   });
 
   it('cancels realtime capture together with the browser recording', async () => {
-    const cancel = vi.fn();
+    const close = vi.fn();
     const stopPcm = vi.fn(async () => undefined);
     const recording = await startRecording({
       startTranscription: () => ({
         ready: Promise.resolve(),
         pushAudio: vi.fn(),
         finish: vi.fn(),
-        cancel,
+        close,
       }),
       createPcmCapture: async () => ({ stop: stopPcm }),
     });
@@ -209,7 +209,7 @@ describe('startRecording', () => {
     recording.cancel();
     await Promise.resolve();
 
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
     expect(stopPcm).toHaveBeenCalledOnce();
     expect(stopTrack).toHaveBeenCalledOnce();
   });

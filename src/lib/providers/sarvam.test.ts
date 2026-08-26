@@ -429,7 +429,7 @@ describe('SarvamProvider.transcribeStream', () => {
     vi.unstubAllGlobals();
   });
 
-  it('queues PCM until open and resolves partial and final realtime transcripts', async () => {
+  it('keeps one socket open across partials, finals, VAD signals, and multiple utterances', async () => {
     vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
     const socket = new FakeWebSocket();
     const factory = vi.fn((url: string, protocols: readonly string[]) => {
@@ -438,9 +438,15 @@ describe('SarvamProvider.transcribeStream', () => {
       return socket as unknown as WebSocket;
     });
     const onPartial = vi.fn();
+    const onFinal = vi.fn();
+    const onSpeechStart = vi.fn();
+    const onSpeechEnd = vi.fn();
     const session = new SarvamProvider(directConfig(), factory).transcribeStream({
       language: 'hi-IN',
       onPartial,
+      onFinal,
+      onSpeechStart,
+      onSpeechEnd,
     });
     const frame = new Uint8Array(new ArrayBuffer(4));
     frame.set([0, 1, 2, 3]);
@@ -471,6 +477,10 @@ describe('SarvamProvider.transcribeStream', () => {
 
     socket.message({ event: 'transcript.partial', text: ' “How\'s   it going?” ' });
     expect(onPartial).toHaveBeenCalledWith("How's it going?");
+    socket.message({ event: 'vad.speech_start' });
+    socket.message({ event: 'vad.speech_end' });
+    expect(onSpeechStart).toHaveBeenCalledOnce();
+    expect(onSpeechEnd).toHaveBeenCalledOnce();
     const completed = session.finish();
     expect(socket.sent.slice(-2).map((message) => JSON.parse(message))).toEqual([
       { event: 'speech_end' },
@@ -479,11 +489,27 @@ describe('SarvamProvider.transcribeStream', () => {
     socket.message({ event: 'transcript.final', text: ' «That’s   fine» ' });
 
     await expect(completed).resolves.toEqual({ text: 'That’s fine', provider: 'Sarvam' });
+    expect(onFinal).toHaveBeenCalledWith('That’s fine');
+    expect(socket.close).not.toHaveBeenCalled();
+
+    session.pushAudio(frame);
+    const second = session.finish();
+    expect(socket.sent.slice(-4).map((message) => JSON.parse(message))).toEqual([
+      { event: 'speech_start' },
+      { event: 'audio_input', audio: 'AAECAw==' },
+      { event: 'speech_end' },
+      { event: 'flush' },
+    ]);
+    socket.message({ event: 'transcript.final', text: 'Second utterance' });
+    await expect(second).resolves.toEqual({ text: 'Second utterance', provider: 'Sarvam' });
+    expect(factory).toHaveBeenCalledOnce();
+
+    session.close();
     expect(JSON.parse(socket.sent.at(-1) ?? '{}')).toEqual({ event: 'end' });
     expect(socket.close).toHaveBeenCalledWith(1000, 'complete');
   });
 
-  it('cancels the realtime socket through the shared abort path', async () => {
+  it('explicitly closes the persistent socket and rejects a pending final', async () => {
     vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
     const socket = new FakeWebSocket();
     const session = new SarvamProvider(
@@ -493,10 +519,10 @@ describe('SarvamProvider.transcribeStream', () => {
     socket.open();
 
     const completed = session.finish();
-    session.cancel();
+    session.close();
 
     await expect(completed).rejects.toMatchObject({ name: 'AbortError' });
-    expect(socket.close).toHaveBeenCalledWith(1000, 'stream failed');
+    expect(socket.close).toHaveBeenCalledWith(1000, 'complete');
   });
 
   it('surfaces connection failure so recording can select its batch fallback', async () => {

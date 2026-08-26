@@ -29,6 +29,9 @@ export interface TranscribeInput {
 export interface TranscribeStreamInput {
   readonly language?: LanguageCode;
   readonly onPartial?: (text: string) => void;
+  readonly onFinal?: (text: string) => void;
+  readonly onSpeechStart?: () => void;
+  readonly onSpeechEnd?: () => void;
   readonly onError?: (error: unknown) => void;
   readonly signal?: AbortSignal;
 }
@@ -56,9 +59,10 @@ export interface TranscribeStreamSession {
   /** Resolves once the realtime WebSocket is ready to accept audio. */
   readonly ready: Promise<void>;
   pushAudio(audio: Uint8Array<ArrayBuffer>): void;
-  /** Signal end-of-speech and wait for the final transcript. */
+  /** Flush one utterance and wait for its final transcript; the socket remains open. */
   finish(): Promise<TextResult>;
-  cancel(): void;
+  /** Explicitly close the persistent realtime socket. */
+  close(): void;
 }
 
 export interface SpeakResult {

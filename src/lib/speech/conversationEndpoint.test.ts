@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_CONVERSATION_TRANSCRIPT_CHARS,
   createConversationEndpoint,
+  dedupeImmediateTranscriptRepeats,
   isUsableConversationTranscript,
-  mergeConversationTranscript,
 } from './conversationEndpoint';
 
 describe('createConversationEndpoint', () => {
@@ -44,23 +44,23 @@ describe('createConversationEndpoint', () => {
   });
 });
 
-describe('conversation transcript accumulation', () => {
-  it('replaces growing partials and appends distinct speech segments', () => {
-    expect(mergeConversationTranscript('what are', 'what are the dates')).toBe(
-      'what are the dates',
+describe('clean final conversation transcripts', () => {
+  it('collapses immediately repeated words and phrases without stitching partials', () => {
+    expect(dedupeImmediateTranscriptRepeats(
+      'Microsoft Excel Microsoft Excel Microsoft Excel Microsoft Excel is listed',
+    )).toBe('Microsoft Excel is listed');
+    expect(dedupeImmediateTranscriptRepeats('What what WHAT, is the role?')).toBe(
+      'What is the role?',
     );
-    expect(mergeConversationTranscript('what are the dates', 'in this PDF?')).toBe(
-      'what are the dates in this PDF?',
-    );
-    expect(mergeConversationTranscript('what are the dates', 'what are')).toBe(
-      'what are the dates',
+    expect(dedupeImmediateTranscriptRepeats('Excel appears here and Excel appears later')).toBe(
+      'Excel appears here and Excel appears later',
     );
   });
 
-  it('rejects punctuation-only input and caps very long monologues', () => {
+  it('rejects punctuation-only input and caps very long final transcripts', () => {
     expect(isUsableConversationTranscript('  ...?!  ')).toBe(false);
     expect(isUsableConversationTranscript('हाँ?')).toBe(true);
-    const capped = mergeConversationTranscript('', 'a'.repeat(5_000));
+    const capped = dedupeImmediateTranscriptRepeats('a'.repeat(5_000));
     expect(capped).toHaveLength(MAX_CONVERSATION_TRANSCRIPT_CHARS);
   });
 });

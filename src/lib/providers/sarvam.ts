@@ -40,6 +40,7 @@ const TTS_STREAM_SAMPLE_RATE = 24_000;
 const STT_REALTIME_MODEL = 'saaras:v3-realtime';
 const STT_REALTIME_SAMPLE_RATE = 16_000;
 const STT_FINAL_TIMEOUT_MS = 2_500;
+const STT_KEEPALIVE_MS = 15_000;
 
 type WebSocketFactory = (url: string, protocols: readonly string[]) => WebSocket;
 
@@ -78,6 +79,7 @@ interface SarvamRealtimeSttMessage {
   readonly text?: unknown;
   readonly message?: unknown;
   readonly code?: unknown;
+  readonly is_fatal?: unknown;
 }
 
 export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
@@ -116,6 +118,17 @@ function streamingSttUrl(base: string, language: string): string {
 
 function abortError(): DOMException {
   return new DOMException('Speech streaming was stopped.', 'AbortError');
+}
+
+function realtimeSttError(
+  message: string,
+  retryable: boolean,
+  code?: string | number,
+): Error & { readonly retryable: boolean; readonly code?: string | number } {
+  return Object.assign(new Error(message), {
+    retryable,
+    ...(code === undefined ? {} : { code }),
+  });
 }
 
 function normalizeRealtimeTranscript(text: string): string {
@@ -385,7 +398,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     });
   }
 
-  /** Open a one-question Saaras realtime session and accept 16 kHz mono PCM frames. */
+  /** Open a persistent Saaras realtime session and accept 16 kHz mono PCM frames. */
   transcribeStream(input: TranscribeStreamInput = {}): TranscribeStreamSession {
     if (this.config.mode !== 'direct') {
       throw new Error('Streaming STT needs WebSocket proxy support in production.');
@@ -403,28 +416,27 @@ export class SarvamProvider implements ProviderWithCapabilities {
     );
     const queuedAudio: Uint8Array<ArrayBuffer>[] = [];
     let opened = false;
+    let utteranceStarted = false;
     let finishRequested = false;
     let terminal = false;
     let finalTimer: ReturnType<typeof setTimeout> | undefined;
+    let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+    let pendingFinal: {
+      readonly promise: Promise<TextResult>;
+      readonly resolve: (result: TextResult) => void;
+      readonly reject: (error: unknown) => void;
+    } | undefined;
     let resolveReady: () => void = () => undefined;
     let rejectReady: (error: unknown) => void = () => undefined;
-    let resolveFinal: (result: TextResult) => void = () => undefined;
-    let rejectFinal: (error: unknown) => void = () => undefined;
     const ready = new Promise<void>((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
     });
-    const finalTranscript = new Promise<TextResult>((resolve, reject) => {
-      resolveFinal = resolve;
-      rejectFinal = reject;
-    });
-    // A setup failure can occur before recordQuestion asks for finish(); retain
-    // the rejection for that caller without producing an unhandled rejection.
     void ready.catch(() => undefined);
-    void finalTranscript.catch(() => undefined);
 
     const cleanup = () => {
       if (finalTimer !== undefined) clearTimeout(finalTimer);
+      if (keepaliveTimer !== undefined) clearInterval(keepaliveTimer);
       input.signal?.removeEventListener('abort', handleAbort);
       socket.removeEventListener('open', handleOpen);
       socket.removeEventListener('message', handleMessage);
@@ -438,25 +450,33 @@ export class SarvamProvider implements ProviderWithCapabilities {
         // The session result is already settled; close failure is non-actionable.
       }
     };
+    const clearFinalTimer = () => {
+      if (finalTimer === undefined) return;
+      clearTimeout(finalTimer);
+      finalTimer = undefined;
+    };
     const fail = (error: unknown, report = true) => {
       if (terminal) return;
       terminal = true;
       cleanup();
       rejectReady(error);
-      rejectFinal(error);
+      pendingFinal?.reject(error);
+      pendingFinal = undefined;
       if (report) input.onError?.(error);
       closeSocket('stream failed');
     };
-    const succeed = (text: string) => {
+    const close = () => {
       if (terminal) return;
       terminal = true;
       cleanup();
-      resolveReady();
-      resolveFinal({ text, provider: this.name });
+      const stopped = abortError();
+      rejectReady(stopped);
+      pendingFinal?.reject(stopped);
+      pendingFinal = undefined;
       try {
         if (opened) socket.send(JSON.stringify({ event: 'end' }));
       } catch {
-        // The transcript is already final; session cleanup must not discard it.
+        // Closing is best-effort; resources are released below regardless.
       }
       closeSocket('complete');
     };
@@ -467,19 +487,28 @@ export class SarvamProvider implements ProviderWithCapabilities {
         fail(error);
       }
     };
+    const startUtterance = () => {
+      if (!opened || terminal || utteranceStarted) return;
+      utteranceStarted = true;
+      sendJson({ event: 'speech_start' });
+    };
     const sendEndOfSpeech = () => {
       if (!opened || terminal || !finishRequested) return;
+      startUtterance();
       sendJson({ event: 'speech_end' });
       if (!terminal) sendJson({ event: 'flush' });
     };
-    const handleAbort = () => fail(abortError(), false);
+    const handleAbort = () => close();
     const handleOpen = () => {
       if (terminal) return;
       opened = true;
       resolveReady();
-      sendJson({ event: 'speech_start' });
+      keepaliveTimer = setInterval(() => {
+        if (opened && !terminal) sendJson({ event: 'ping' });
+      }, STT_KEEPALIVE_MS);
       for (const audio of queuedAudio.splice(0)) {
         if (terminal) return;
+        startUtterance();
         sendJson({ event: 'audio_input', audio: bytesToBase64(audio) });
       }
       sendEndOfSpeech();
@@ -490,6 +519,14 @@ export class SarvamProvider implements ProviderWithCapabilities {
           throw new Error('Sarvam returned an invalid realtime STT event.');
         }
         const message = JSON.parse(event.data) as SarvamRealtimeSttMessage;
+        if (message.event === 'vad.speech_start' || message.event === 'START_SPEECH') {
+          input.onSpeechStart?.();
+          return;
+        }
+        if (message.event === 'vad.speech_end' || message.event === 'END_SPEECH') {
+          input.onSpeechEnd?.();
+          return;
+        }
         if (message.event === 'transcript.partial') {
           const text = typeof message.text === 'string'
             ? normalizeRealtimeTranscript(message.text)
@@ -504,7 +541,13 @@ export class SarvamProvider implements ProviderWithCapabilities {
             ? normalizeRealtimeTranscript(message.text)
             : '';
           if (text === '') throw new Error('Sarvam returned an empty realtime transcript.');
-          succeed(text);
+          clearFinalTimer();
+          finishRequested = false;
+          utteranceStarted = false;
+          const completed = pendingFinal;
+          pendingFinal = undefined;
+          input.onFinal?.(text);
+          completed?.resolve({ text, provider: this.name });
           return;
         }
         if (message.event === 'error') {
@@ -514,16 +557,36 @@ export class SarvamProvider implements ProviderWithCapabilities {
           const code = typeof message.code === 'string' || typeof message.code === 'number'
             ? ` (${message.code})`
             : '';
-          fail(new Error(`Sarvam streaming STT failed${code}: ${detail}`));
+          const rawCode = typeof message.code === 'string' || typeof message.code === 'number'
+            ? message.code
+            : undefined;
+          const retryable = message.is_fatal !== true
+            && rawCode !== 1003
+            && rawCode !== '1003'
+            && rawCode !== 4000
+            && rawCode !== '4000';
+          fail(realtimeSttError(
+            `Sarvam streaming STT failed${code}: ${detail}`,
+            retryable,
+            rawCode,
+          ));
         }
       } catch (error) {
         fail(error);
       }
     };
-    const handleError = () => fail(new Error('Sarvam streaming STT connection failed.'));
+    const handleError = () => fail(realtimeSttError(
+      'Sarvam streaming STT connection failed.',
+      true,
+    ));
     const handleClose = (event: CloseEvent) => {
       if (terminal) return;
-      fail(new Error(`Sarvam streaming STT closed unexpectedly (${event.code}).`));
+      const retryable = event.code < 4000 && event.code !== 1003;
+      fail(realtimeSttError(
+        `Sarvam streaming STT closed unexpectedly (${event.code}).`,
+        retryable,
+        event.code,
+      ));
     };
 
     input.signal?.addEventListener('abort', handleAbort, { once: true });
@@ -540,19 +603,28 @@ export class SarvamProvider implements ProviderWithCapabilities {
           queuedAudio.push(audio.slice());
           return;
         }
+        startUtterance();
         sendJson({ event: 'audio_input', audio: bytesToBase64(audio) });
       },
       finish: () => {
-        if (!terminal && !finishRequested) {
-          finishRequested = true;
-          sendEndOfSpeech();
-          finalTimer = setTimeout(() => {
-            fail(new Error('Sarvam realtime transcript timed out.'));
-          }, STT_FINAL_TIMEOUT_MS);
-        }
-        return finalTranscript;
+        if (terminal) return Promise.reject(abortError());
+        if (pendingFinal) return pendingFinal.promise;
+        let resolveFinal: (result: TextResult) => void = () => undefined;
+        let rejectFinal: (error: unknown) => void = () => undefined;
+        const promise = new Promise<TextResult>((resolve, reject) => {
+          resolveFinal = resolve;
+          rejectFinal = reject;
+        });
+        void promise.catch(() => undefined);
+        pendingFinal = { promise, resolve: resolveFinal, reject: rejectFinal };
+        finishRequested = true;
+        sendEndOfSpeech();
+        finalTimer = setTimeout(() => {
+          fail(realtimeSttError('Sarvam realtime transcript timed out.', true));
+        }, STT_FINAL_TIMEOUT_MS);
+        return promise;
       },
-      cancel: () => fail(abortError(), false),
+      close,
     };
   }
 

@@ -240,7 +240,7 @@ export async function startRecording(options: RecordingOptions = {}): Promise<Re
         (audio) => realtimeSession?.pushAudio(audio),
       );
     } catch (error) {
-      realtimeSession?.cancel();
+      realtimeSession?.close();
       realtimeSession = undefined;
       console.info('[voice timing] realtime STT unavailable; retaining batch fallback.', error);
     }
@@ -280,9 +280,10 @@ export async function startRecording(options: RecordingOptions = {}): Promise<Re
     try {
       await pcmCapture.stop();
       const result = await realtimeSession.finish();
+      realtimeSession.close();
       return result.text.trim() || undefined;
     } catch (error) {
-      realtimeSession.cancel();
+      realtimeSession.close();
       console.info('[voice timing] realtime STT failed; using batch fallback.', error);
       return undefined;
     }
@@ -302,7 +303,7 @@ export async function startRecording(options: RecordingOptions = {}): Promise<Re
     cancel: () => {
       if (cancelled) return;
       cancelled = true;
-      realtimeSession?.cancel();
+      realtimeSession?.close();
       void pcmCapture?.stop();
       try {
         if (recorder.state !== 'inactive') recorder.stop();

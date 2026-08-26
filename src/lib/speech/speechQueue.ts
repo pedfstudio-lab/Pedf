@@ -138,6 +138,9 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
   let nextSpeechSequence = 0;
   let nextSpeechToQueue = 0;
   let queue: QueueItem[] = [];
+  // Once streaming TTS fails (e.g. its WebSocket is refused under conversation-mode
+  // socket pressure), stop reopening a doomed socket per clip — use batch for the session.
+  let streamingUnavailable = false;
   const pendingSpeech = new Map<number, PendingSpeech>();
 
   const startBrowserFallback = (
@@ -391,7 +394,7 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
         })();
       };
 
-      if (!speakStream) {
+      if (!speakStream || streamingUnavailable) {
         prepareBatchFallback();
         return { ready: ready.promise, done: done.promise };
       }
@@ -407,6 +410,10 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
           );
           acceptSource({ kind: 'stream', prepared, text, language });
         }).catch(() => {
+          if (!streamingUnavailable) {
+            streamingUnavailable = true;
+            logTiming('[voice] streaming TTS unavailable — using batch Sarvam for the rest of this session');
+          }
           if (run !== generation) return;
           pending.prepared = undefined;
           prepared.stop();
