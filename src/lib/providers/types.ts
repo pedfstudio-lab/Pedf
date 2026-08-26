@@ -29,6 +29,7 @@ export interface TranscribeInput {
 export interface TranscribeStreamInput {
   readonly language?: LanguageCode;
   readonly onPartial?: (text: string) => void;
+  readonly onError?: (error: unknown) => void;
   readonly signal?: AbortSignal;
 }
 

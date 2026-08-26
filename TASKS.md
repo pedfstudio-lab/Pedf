@@ -4212,6 +4212,267 @@ Commit message: `Streaming STT: transcribe while the user speaks (Task 25D)`.
 
 ---
 
+## Voice — continuous conversation (hands-free)
+
+### Task 32 — Continuous voice conversation (hands-free)  🔬 EXPERIMENT → branch `continuous-voice`
+> Replace click-to-talk with an **always-open mic + a conversational state machine**, so you just talk and the bot
+> talks back — like ChatGPT voice mode. Built on the streaming ears (25D) + streaming mouth (25C) + persona (24C).
+> **Earphone-optimized.** Big UX change → its own branch; **click-to-talk stays as the fallback** until this is solid.
+
+**State machine:** `idle → listening → (3s pause) → thinking → speaking → listening …`. **Barge-in:** user speech
+during `speaking` → stop → `listening`. **Idle:** 3s silence with nothing asked → "Is everything okay?" → close.
+
+**Cross-cutting (all stages):**
+- **Echo / earphones:** open the mic with `getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true,
+  autoGainControl: true } })`. On earphones the bot's voice never reaches the mic → clean barge-in. Recommend
+  earphones in the UI; on loudspeakers, gate barge-in with a higher energy threshold.
+- **Cost:** mic + streaming STT stay open for the whole session (more Sarvam usage than click-per-question) — only
+  while conversation mode is ON.
+- **Production:** streaming uses WebSockets → prod needs the WS-proxy (known follow-up). Dev (direct key) works now.
+- **Fallback:** the existing click-to-talk button stays; conversation mode is a separate toggle.
+- **Branch:** `git switch -c continuous-voice` from `main`. Do NOT touch `main`.
+
+**Depends on:** 25C (streaming TTS) + 25D (streaming STT) + 24C (persona / fillers / classifier).
+**Reusable pieces already built (25C/25D/24C):** `createRealtimePcmCapture` (AudioWorklet → 16 kHz mono PCM16,
+100 ms frames) in `recordQuestion.ts`; the realtime STT session `TranscribeStreamSession` (`pushAudio(bytes)` /
+`finish()` / `cancel()`, plus `onPartial(text)` for interim text) in `sarvam.ts` / `types.ts`; `speechQueue.stop()`
+/ `skipCurrent()`; `createSpeechChunkAccumulator` + `speakStream`; `classifyQuestion`, persona & fillers.
+
+---
+
+#### Task 32A — Continuous listening (open mic + always-on STT)  🔲
+**What this is (and isn't).** A conversation-mode toggle that opens the mic ONCE and keeps a realtime STT session
+running **across turns**, showing live text. NO turn-taking yet (32B) — this stage only proves the mic stays open
+and transcribes continuously, and that toggling off tears everything down cleanly.
+
+**Step 1 — persistent session → `src/lib/speech/conversationSession.ts` (NEW).** Unlike `startRecording` (which
+`finish()`es the STT session after one utterance), keep a long-lived mic stream + PCM capture, with a swappable STT
+session on top.
+```ts
+export type ConversationPhase = 'idle' | 'listening' | 'thinking' | 'speaking';
+export interface ConversationCallbacks { onPartial?(t: string): void; onError?(e: unknown): void; }
+export interface ConversationSession {
+  readonly stream: MediaStream;            // reused by 32B/32C (VAD, barge-in)
+  stop(): Promise<void>;
+}
+export async function startConversationSession(
+  startTranscription: (onPartial: (t: string) => void) => TranscribeStreamSession,
+  cbs: ConversationCallbacks,
+  createPcmCapture = createRealtimePcmCapture,
+): Promise<ConversationSession> {
+  // 1. getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true } })
+  // 2. open ONE realtime STT session (onPartial → cbs.onPartial)
+  // 3. createPcmCapture(stream, bytes => session.pushAudio(bytes))  // frames flow continuously
+  // 4. keep all three open until stop(); stop() = pcmCapture.stop() → session.finish()/cancel() → release tracks
+}
+```
+**Decide from Sarvam docs:** does `saaras:v3-realtime` stream **multiple utterances on one socket** (preferred → one
+session for the whole conversation) or **one-utterance-per-socket** (then keep the mic stream + PCM capture
+persistent and cycle a fresh STT session per turn in 32B)? Build the module so the STT session is swappable without
+disturbing the mic stream/capture.
+
+**Step 2 — conversation state → `PdfChat.tsx`.** `conversationPhase` ref (+ state mirror for the UI),
+`conversationSession` ref, and a `liveTranscript` state for the input area.
+
+**Step 3 — the toggle (UI) → `PdfChat.tsx`.** Add a **"Conversation" toggle** beside the existing mic button (leave
+click-to-talk untouched as the fallback). ON → `startConversationSession(...)`, phase `listening`, `onPartial` →
+`liveTranscript`. OFF → `session.stop()`, phase `idle`. Disabled when `keyMissing` / no doc (same guard as the mic).
+
+**Step 4 — cleanup.** Stop the session on modal close, unmount, and language change; guard against double-start.
+
+**Verify.** Toggle ON (earphones) → the input shows words appearing **as you speak**, across several sentences, no
+clicking; toggle OFF → mic indicator off and the WS closes (devtools). `npm run test` — session lifecycle (starts,
+forwards audio to `pushAudio`, `onPartial` surfaces text, `stop()` closes once and is idempotent). `typecheck` /
+`lint`.
+
+**Edge cases.** getUserMedia denied → surface the mic error, stay `idle`; realtime STT unavailable → disable
+conversation mode (click-to-talk still works); never leave the mic open after OFF.
+
+---
+
+#### Task 32B — Turn-taking (VAD + 3s endpointing → auto-answer)  🔲
+**What this is.** Decide when the user has *finished* (a ~3 s pause) and answer automatically; a brief pause keeps
+waiting so the user is never cut off.
+
+**Step 1 — voice-activity detection → `src/lib/speech/vad.ts` (NEW).** Compute short-term energy from the **same**
+PCM16 frames the capture already emits (reuse them — no second audio graph), with hysteresis:
+```ts
+export interface VadOptions { speechRms?: number; silenceMs?: number; frameMs?: number; }
+export interface Vad {
+  pushFrame(pcm: Uint8Array): void;   // rms over Int16 samples; > speechRms ⇒ speech
+  onSpeechStart?: () => void;         // energy crosses up
+  onSpeechEnd?: () => void;           // silenceMs continuously below
+  reset(): void;
+}
+export function createVad(opts?: VadOptions): Vad { /* ... */ }
+```
+Prefer Sarvam realtime end-of-utterance events if the session exposes them; else this local RMS VAD is the source of
+truth. Tune `speechRms` for `autoGainControl` output.
+
+**Step 2 — tee PCM into VAD → `conversationSession.ts`.** In the capture callback, call **both**
+`session.pushAudio(bytes)` **and** `vad.pushFrame(bytes)`; surface `onSpeechStart` / `onSpeechEnd` on the session
+callbacks.
+
+**Step 3 — endpoint timer → `PdfChat.tsx`.**
+```ts
+const ENDPOINT_SILENCE_MS = 3000;   // tunable
+// onSpeechStart → clear the pending endpoint timer (user resumed) + mark speaking
+// onSpeechEnd   → if the current-turn transcript is non-empty, start a 3s timer; on fire → finalizeTurn()
+```
+`finalizeTurn()`: snapshot the accumulated transcript → phase `thinking` → `ask(transcript, { spoken: true,
+voiceRequest })` (existing streaming-answer path) → phase `speaking`; when the answer's last clip finishes → phase
+`listening`, clear the transcript. Fillers (24C `startAcknowledgment` gated by `classifyQuestion`) play in `thinking`.
+
+**Step 4 — accumulation.** Append `onPartial` text to the current-turn transcript; a pause < 3 s (a new
+`onSpeechStart`) cancels the endpoint timer.
+
+**Verify.** Ask a question, pause ~3 s → it answers by itself; put a 1 s gap mid-question → it waits and takes the
+whole thing. `npm run test` — endpoint timer fires after `silenceMs`, resets on new speech; `finalizeTurn` calls
+`ask`. `typecheck` / `lint`.
+
+**Edge cases.** Empty/garbage transcript at `onSpeechEnd` → don't fire (hand to 32D idle); cap very long monologues;
+ignore `onSpeechEnd` while `thinking`/`speaking` (that path is 32C).
+
+---
+
+#### Fixes 1–3 for 32B (2026-08-25) — speaker-first, from the live test  🔲
+> Target = **laptop / phone speakers, no earphones** (most users won't wear earphones). Three problems surfaced in
+> the 32B live test: (1) the 3 s wait feels slow, (2) on speakers the mic transcribes the bot's own voice back as a
+> question ("34 words"), (3) the voice flipped to a robotic accent once. All on `continuous-voice`.
+
+**Fix 1 — answer fast, but don't cut the user off.**
+- **Step 1 → `PdfChat.tsx`.** `export const ENDPOINT_SILENCE_MS` (tunable). **Retuned 2026-08-26:** `3_000` → `600`
+  was **too short** — it fired during natural mid-sentence pauses and answered fragments ("Hi, how are" before
+  "you"), which also broke the classifier → wrong filler. Now **`1_500`** — the balance: not the sluggish 3 s, but
+  enough to not chop words, and longer/complete utterances also transcribe more accurately. (The VAD's own
+  `silenceMs ≈ 400 ms` still absorbs sub-400 ms gaps; total wait after true silence ≈ VAD 400 ms + 1.5 s.)
+  There is no value that is both truly instant AND never cuts off — that needs sentence-completeness detection,
+  deferred.
+- **Do NOT** add a trailed-off "Are you there?" nudge (removed by request).
+- **Test** (`conversationEndpoint.test.ts`): with `silenceMs = 600`, `onSpeechEnd(true)` fires `finalizeTurn` after
+  ~600 ms; an `onSpeechStart` before then cancels it.
+
+**Fix 2 — half-duplex: stop the mic transcribing the bot's own voice.**
+On speakers the always-open mic feeds the bot's own audio into Saaras → it comes back as the next "question." Only
+feed the STT + VAD while actually **listening**.
+- **Step 1 → `conversationSession.ts`.** Add a `listening` gate and expose `setListening`:
+  ```ts
+  export interface ConversationSession {
+    readonly stream: MediaStream;
+    replaceTranscription(f: ConversationTranscriptionFactory): Promise<void>;
+    setListening(listening: boolean): void;   // NEW
+    stop(): Promise<void>;
+  }
+  // inside startConversationSession:
+  let listening = true;
+  pcmCapture = await createPcmCapture(stream, (audio) => {
+    if (!listening) return;                    // ← gate: silent while the bot talks
+    transcription?.pushAudio(audio);
+    vad.pushFrame(audio);
+  });
+  // in the returned object:
+  setListening(next) { listening = next; vad.reset(); },   // reset clears stale speaking state
+  ```
+- **Step 2 → `PdfChat.tsx`.** In `finalizeConversationTurn`, the moment it goes to `thinking`, stop listening:
+  `conversationSession.current?.setListening(false)`. In `resumeConversationListening`, after `replaceTranscription(...)`
+  and clearing the transcript, resume: `conversationSession.current?.setListening(true)` (this also `vad.reset()`s).
+  Keep the existing transcript-clear there.
+- **Barge-in stays out** (talking over the bot is 32C). Half-duplex — one speaks at a time — is the correct, safe
+  speaker behavior meanwhile. Keep `echoCancellation` on for residual room echo.
+- **Test** (`conversationSession.test.ts`): frames pushed after `setListening(false)` are NOT forwarded to
+  `pushAudio` or the VAD; `setListening(true)` resumes forwarding and resets the VAD.
+
+**Fix 3 — keep the voice on Sarvam (no robotic-accent flip).**
+A failed streaming clip currently falls streaming → batch → **browser speech** (the OS voice) → the one-off accent
+flip. Make browser speech a true last resort.
+- **Step 1 → `speechQueue.ts` (`startBatchFallback`).** Retry Sarvam batch before browser, and log the path taken:
+  ```ts
+  const TTS_FALLBACK_RETRIES = 2;
+  const startBatchFallback = async (text, language, onEnded) => {
+    for (let attempt = 1; attempt <= TTS_FALLBACK_RETRIES; attempt += 1) {
+      try {
+        const result = await speak({ text, language });
+        try {
+          logTiming(`[voice] clip via batch Sarvam (attempt ${attempt})`);
+          return await playBlob(result.audio, onEnded);
+        } catch { break; }               // playback failed → go to browser, don't re-synth
+      } catch {
+        if (attempt >= TTS_FALLBACK_RETRIES) break;   // synth failed → retry, then browser
+      }
+    }
+    logTiming('[voice] clip via BROWSER speech (Sarvam unavailable)');
+    return speakBrowser(text, language, onEnded);
+  };
+  ```
+- **Step 2 (optional).** Also log when a clip plays via the **streaming** path, so the console shows
+  streaming / batch / browser per clip and we can see how often browser actually fires.
+- **Test** (`speechQueue.test.ts`): one streaming failure → batch Sarvam plays (browser NOT called); browser only
+  after streaming + `TTS_FALLBACK_RETRIES` batch failures.
+
+**Land (all three, on your go):** `npm run test` / `typecheck` / `lint` green on `continuous-voice`. Commit:
+`Voice conversation fixes: fast answer, half-duplex on speakers, Sarvam-first TTS fallback`.
+
+---
+
+#### Task 32C — Barge-in (interrupt the bot)  🔲
+**What this is.** Talk while the bot is speaking → it stops instantly and takes the new question.
+
+**Step 1 — keep listening while speaking.** The `conversationSession` (mic + VAD) stays open during `speaking` — do
+**not** pause it for playback. `getUserMedia`'s `echoCancellation` (32A) keeps earphone audio out of the mic.
+
+**Step 2 — barge-in trigger → `PdfChat.tsx`.**
+```ts
+const BARGE_IN_RMS = /* higher than 32B's speechRms so the bot's own leakage can't trip it */;
+const BARGE_IN_MIN_MS = 180;   // sustained speech, so a cough/tail doesn't fire
+// while phase === 'speaking', VAD speech above BARGE_IN_RMS sustained ≥ BARGE_IN_MIN_MS (or a confident onPartial):
+//   speechQueue.current?.stop();           // cut the bot immediately
+//   abandon the in-flight answer (bump the request id, like askRequest/micRequest today)
+//   phase → 'listening'; the new speech begins a fresh turn (32B endpointing applies)
+```
+
+**Step 3 — clean handoff.** `speechQueue.stop()` bumps generation so queued clips + the streaming TTS stop; guard the
+old turn's LLM stream on its request id so its late deltas are ignored; don't drop the transcript captured during the
+interruption.
+
+**Verify (earphones).** Mid-answer, start talking → the bot stops within a beat and answers the new question; a
+cough / short noise does **not** interrupt. `npm run test` — a speech event during `speaking` calls `stop()` and sets
+`listening`; a sub-threshold blip does not. `typecheck` / `lint`.
+
+**Edge cases.** Loudspeaker echo → raise `BARGE_IN_RMS` / recommend earphones in the UI; rapid double-interrupt →
+`stop()` is idempotent; ensure the newly captured words aren't lost in the transition.
+
+---
+
+#### Task 32D — Idle & graceful close  🔲
+**What this is.** After genuine silence (nothing asked), gently check in, then close.
+
+**Step 1 — idle timer → `PdfChat.tsx`.** In `listening` with **no speech since entering listening** (transcript
+empty, VAD never fired), start `IDLE_PROMPT_MS = 3000`; on fire → speak **"Is everything okay?"** through the
+persona/TTS (a one-off line, not a rotating filler); phase stays `listening`.
+
+**Step 2 — close timer.** After the prompt, if still silent for `IDLE_CLOSE_MS` (≈ 4000) → speak **"Let me know if
+you have any other queries."** → `session.stop()` → phase `idle`, toggle OFF. Any user speech during either timer
+cancels both and returns to normal `listening`.
+
+**Step 3 — reset.** Clear timers + transcript on close; re-entrant (toggling ON again starts fresh).
+
+**Verify.** Toggle ON, stay silent → ~3 s → "Is everything okay?" → keep silent → it closes with the sign-off and the
+mic turns off; speak during the prompt → it cancels and listens normally. `npm run test` — idle → prompt → close
+timers, and speech cancels them. `typecheck` / `lint`.
+
+---
+
+**Verify the whole loop (live, branch, SPEAKERS — no earphones):** toggle conversation mode → ask a full question →
+within ~0.6 s it answers (no 3 s wait) → the transcript never fills with the bot's own words → the voice stays
+Sarvam's throughout. (Later, with 32C:) talk over it → it stops; go silent → "Is everything okay?" → it closes.
+`npm run test` / `typecheck` / `lint` green. **Do NOT merge to `main`** until the whole loop feels right.
+
+**Land it (only on your go):** merge `continuous-voice` → `main`; schedule the WS-proxy before the public deploy.
+Stage commits — 32A: `Continuous listening: always-on mic + streaming STT`; 32B: `Voice turn-taking: 3s endpointing`;
+32C: `Voice barge-in: interrupt the bot when the user speaks`; 32D: `Voice idle prompt + graceful close`.
+
+---
+
 ## PWA & deploy
 
 ### Task 26 — PWA manifest + service worker  🔲

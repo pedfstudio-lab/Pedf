@@ -13,6 +13,8 @@ type PlayBlob = (audio: Blob, onEnded: () => void) => Promise<StopSpeech>;
 type SpeakBrowser = (text: string, language: string, onEnded: () => void) => StopSpeech;
 type PrepareStream = (startStream: StartSpeechStream) => PreparedSpeechStream;
 
+export const TTS_FALLBACK_RETRIES = 2;
+
 function isAbortError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 }
@@ -22,12 +24,14 @@ interface BlobSource {
   readonly audio: Blob;
   readonly fallbackText?: string;
   readonly fallbackLanguage?: string;
+  readonly batchAttempt?: number;
 }
 
 interface BrowserSource {
   readonly kind: 'browser';
   readonly text: string;
   readonly language: string;
+  readonly sarvamUnavailable?: boolean;
 }
 
 interface StreamSource {
@@ -136,21 +140,37 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
   let queue: QueueItem[] = [];
   const pendingSpeech = new Map<number, PendingSpeech>();
 
+  const startBrowserFallback = (
+    text: string,
+    language: string,
+    onEnded: () => void,
+  ): StopSpeech => {
+    logTiming('[voice] clip via BROWSER speech (Sarvam unavailable)');
+    return speakBrowser(text, language, onEnded);
+  };
+
   const startBatchFallback = async (
     text: string,
     language: string,
     onEnded: () => void,
   ): Promise<StopSpeech> => {
-    try {
-      const result = await speak({ text, language });
+    for (let attempt = 1; attempt <= TTS_FALLBACK_RETRIES; attempt += 1) {
+      let result: SpeakResult;
+      try {
+        result = await speak({ text, language });
+      } catch {
+        continue;
+      }
+
+      logTiming(`[voice] clip via batch Sarvam (attempt ${attempt})`);
       try {
         return await playBlob(result.audio, onEnded);
       } catch {
-        return speakBrowser(text, language, onEnded);
+        break;
       }
-    } catch {
-      return speakBrowser(text, language, onEnded);
     }
+
+    return startBrowserFallback(text, language, onEnded);
   };
 
   const startStreamSource = async (
@@ -193,6 +213,7 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
       activeStop = await source.prepared.play(finish, (error) => {
         void fallBack(error);
       });
+      logTiming('[voice] clip via streaming Sarvam');
     } catch (error) {
       await fallBack(error);
     }
@@ -210,16 +231,22 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
     onEnded: () => void,
   ): Promise<StopSpeech> => {
     if (source.kind === 'browser') {
+      if (source.sarvamUnavailable) {
+        logTiming('[voice] clip via BROWSER speech (Sarvam unavailable)');
+      }
       return speakBrowser(source.text, source.language, onEnded);
     }
     if (source.kind === 'stream') {
       return startStreamSource(source, onEnded);
     }
     try {
+      if (source.batchAttempt !== undefined) {
+        logTiming(`[voice] clip via batch Sarvam (attempt ${source.batchAttempt})`);
+      }
       return await playBlob(source.audio, onEnded);
     } catch (error) {
       if (source.fallbackText && source.fallbackLanguage) {
-        return speakBrowser(source.fallbackText, source.fallbackLanguage, onEnded);
+        return startBrowserFallback(source.fallbackText, source.fallbackLanguage, onEnded);
       }
       throw error;
     }
@@ -338,22 +365,30 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
         void pump();
       };
       const prepareBatchFallback = () => {
-        void speak({ text, language }).then((result) => {
-          logTiming(
-            `[voice timing] ${timingLabel}: batch fallback ready in ${Math.round(now() - startedAt)} ms`,
-          );
-          acceptSource({
-            kind: 'blob',
-            audio: result.audio,
-            fallbackText: text,
-            fallbackLanguage: language,
-          });
-        }).catch(() => {
+        void (async () => {
+          for (let attempt = 1; attempt <= TTS_FALLBACK_RETRIES; attempt += 1) {
+            try {
+              const result = await speak({ text, language });
+              logTiming(
+                `[voice timing] ${timingLabel}: batch fallback ready in ${Math.round(now() - startedAt)} ms`,
+              );
+              acceptSource({
+                kind: 'blob',
+                audio: result.audio,
+                fallbackText: text,
+                fallbackLanguage: language,
+                batchAttempt: attempt,
+              });
+              return;
+            } catch {
+              // Retry synthesis before conceding to browser speech.
+            }
+          }
           logTiming(
             `[voice timing] ${timingLabel}: providers unavailable after ${Math.round(now() - startedAt)} ms; using browser speech`,
           );
-          acceptSource({ kind: 'browser', text, language });
-        });
+          acceptSource({ kind: 'browser', text, language, sarvamUnavailable: true });
+        })();
       };
 
       if (!speakStream) {

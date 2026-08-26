@@ -17,6 +17,18 @@ import {
   waitForBridgingInitialDelay,
 } from '@/lib/speech/acknowledgments';
 import { classifyQuestion } from '@/lib/speech/classifyQuestion';
+import {
+  createConversationEndpoint,
+  isUsableConversationTranscript,
+  mergeConversationTranscript,
+} from '@/lib/speech/conversationEndpoint';
+import type { ConversationEndpoint } from '@/lib/speech/conversationEndpoint';
+import { startConversationSession } from '@/lib/speech/conversationSession';
+import type {
+  ConversationPhase,
+  ConversationSession,
+  ConversationTranscriptionFactory,
+} from '@/lib/speech/conversationSession';
 import { startRecording } from '@/lib/speech/recordQuestion';
 import type { Recording } from '@/lib/speech/recordQuestion';
 import {
@@ -55,6 +67,7 @@ type MicState = 'idle' | 'requesting' | 'recording' | 'transcribing';
 interface AskOptions {
   readonly spoken: boolean;
   readonly voiceRequest?: number;
+  onVoiceComplete?(): void;
 }
 
 interface VoicePlaybackState {
@@ -66,6 +79,7 @@ interface VoicePlaybackState {
 }
 
 const ACKNOWLEDGMENT_PLAYBACK_ID = -1;
+export const ENDPOINT_SILENCE_MS = 1_500;
 
 function readableError(error: unknown): string {
   if (error instanceof AggregateError) {
@@ -75,12 +89,16 @@ function readableError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function microphoneError(error: unknown): string {
+function microphonePermissionDenied(error: unknown): boolean {
   if (error instanceof DOMException && ['NotAllowedError', 'SecurityError'].includes(error.name)) {
-    return 'Allow mic access to ask by voice.';
+    return true;
   }
+  return /permission|denied|not allowed/i.test(readableError(error));
+}
+
+function microphoneError(error: unknown): string {
+  if (microphonePermissionDenied(error)) return 'Allow mic access to ask by voice.';
   const message = readableError(error);
-  if (/permission|denied|not allowed/i.test(message)) return 'Allow mic access to ask by voice.';
   if (/empty (recording|transcript)|didn.t catch/i.test(message)) {
     return "Didn't catch that — try again.";
   }
@@ -95,6 +113,9 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [micState, setMicState] = useState<MicState>('idle');
+  const [conversationPhase, setConversationPhase] = useState<ConversationPhase>('idle');
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [conversationUnavailable, setConversationUnavailable] = useState(false);
   const speechQueue = useRef<SpeechQueue | null>(null);
   if (!speechQueue.current) {
     speechQueue.current = createSpeechQueue({
@@ -111,7 +132,20 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const voicePlayback = useRef<VoicePlaybackState | null>(null);
   const recording = useRef<Recording | null>(null);
   const micRequest = useRef(0);
+  const conversationPhaseRef = useRef<ConversationPhase>('idle');
+  const conversationSession = useRef<ConversationSession | null>(null);
+  const conversationRequest = useRef(0);
+  const conversationEndpoint = useRef<ConversationEndpoint | null>(null);
+  const conversationTranscript = useRef('');
+  const conversationUserSpeaking = useRef(false);
+  const conversationTranscriptionFactory = useRef<ConversationTranscriptionFactory | null>(null);
+  const finalizeConversationTurnRef = useRef<() => void>(() => undefined);
   const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
+
+  const updateConversationPhase = useCallback((phase: ConversationPhase) => {
+    conversationPhaseRef.current = phase;
+    setConversationPhase(phase);
+  }, []);
 
   const stopPlayback = useCallback(() => {
     playbackRequest.current += 1;
@@ -128,22 +162,58 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     setMicState('idle');
   }, []);
 
+  const stopConversation = useCallback(async () => {
+    const request = conversationRequest.current + 1;
+    conversationRequest.current = request;
+    const activeSession = conversationSession.current;
+    conversationSession.current = null;
+    conversationEndpoint.current?.cancel();
+    conversationEndpoint.current = null;
+    conversationTranscript.current = '';
+    conversationUserSpeaking.current = false;
+    conversationTranscriptionFactory.current = null;
+    askRequest.current += 1;
+    micRequest.current += 1;
+    stopPlayback();
+    updateConversationPhase('idle');
+    setLiveTranscript('');
+    setThinking(false);
+    if (!activeSession) return;
+    try {
+      await activeSession.stop();
+    } catch (caught) {
+      if (conversationRequest.current === request) {
+        setError(`Could not close conversation mode: ${readableError(caught)}`);
+      }
+    }
+  }, [stopPlayback, updateConversationPhase]);
+
   useEffect(() => {
     askRequest.current += 1;
     stopPlayback();
     cancelRecording();
+    void stopConversation();
     setEntries([]);
     setQuestion('');
     setError(null);
     setThinking(false);
-  }, [cancelRecording, doc, stopPlayback]);
+    setConversationUnavailable(false);
+  }, [cancelRecording, doc, stopConversation, stopPlayback]);
 
   useEffect(() => {
     if (!open) {
       stopPlayback();
       cancelRecording();
+      void stopConversation();
     }
-  }, [cancelRecording, open, stopPlayback]);
+  }, [cancelRecording, open, stopConversation, stopPlayback]);
+
+  useEffect(() => {
+    setConversationUnavailable(false);
+    if (conversationPhaseRef.current !== 'idle' || conversationSession.current) {
+      void stopConversation();
+    }
+  }, [preferredLanguage, stopConversation]);
 
   useEffect(() => {
     if (!open || keyMissing) return;
@@ -159,6 +229,16 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     micRequest.current += 1;
     recording.current?.cancel();
     recording.current = null;
+    conversationRequest.current += 1;
+    conversationPhaseRef.current = 'idle';
+    conversationEndpoint.current?.cancel();
+    conversationEndpoint.current = null;
+    conversationTranscript.current = '';
+    conversationUserSpeaking.current = false;
+    conversationTranscriptionFactory.current = null;
+    const activeConversation = conversationSession.current;
+    conversationSession.current = null;
+    void activeConversation?.stop();
   }, []);
 
   useEffect(() => {
@@ -172,7 +252,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
 
   useEffect(() => {
     if (open) messagesEnd.current?.scrollIntoView({ block: 'nearest' });
-  }, [entries, micState, open, thinking]);
+  }, [conversationPhase, entries, micState, open, thinking]);
 
   if (!open) return null;
 
@@ -419,7 +499,9 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         setPlayingId(answer.id);
         const finalTicket = lastSentenceTicket;
         if (!finalTicket) {
-          void startPlayback(answer, streamingVoiceState);
+          void startPlayback(answer, streamingVoiceState).then(() => {
+            options.onVoiceComplete?.();
+          });
         } else {
           void finalTicket.done.then(() => {
             if (!isCurrentVoicePlayback(streamingVoiceState)) return;
@@ -427,6 +509,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             playback.current = null;
             voicePlayback.current = null;
             setPlayingId(null);
+            options.onVoiceComplete?.();
           });
         }
       }
@@ -434,6 +517,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       if (askRequest.current === request) {
         if (options.spoken) stopPlayback();
         setError(readableError(caught));
+        options.onVoiceComplete?.();
       }
     } finally {
       if (askRequest.current === request) setThinking(false);
@@ -514,6 +598,158 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     }
   };
 
+  const resumeConversationListening = async (request: number) => {
+    if (
+      conversationRequest.current !== request
+      || !conversationSession.current
+      || !conversationTranscriptionFactory.current
+    ) return;
+    try {
+      await conversationSession.current.replaceTranscription(
+        conversationTranscriptionFactory.current,
+      );
+    } catch {
+      // The shared session error callback surfaces the cause and tears down the mode.
+      return;
+    }
+    if (conversationRequest.current !== request || !conversationSession.current) return;
+    conversationTranscript.current = '';
+    conversationUserSpeaking.current = false;
+    setLiveTranscript('');
+    conversationSession.current.setListening(true);
+    updateConversationPhase('listening');
+  };
+
+  const finalizeConversationTurn = async () => {
+    if (
+      conversationPhaseRef.current !== 'listening'
+      || !conversationSession.current
+    ) return;
+    const transcript = conversationTranscript.current.trim();
+    if (!isUsableConversationTranscript(transcript)) return;
+    const request = conversationRequest.current;
+    conversationEndpoint.current?.cancel();
+    conversationUserSpeaking.current = false;
+    conversationSession.current.setListening(false);
+    updateConversationPhase('thinking');
+
+    const voiceRequest = micRequest.current + 1;
+    micRequest.current = voiceRequest;
+    const voiceState = beginVoiceAnswer(preferredLanguage, voiceRequest);
+    if (classifyQuestion(transcript) === 'document') startAcknowledgment(voiceState);
+    const answering = ask(transcript, {
+      spoken: true,
+      voiceRequest,
+      onVoiceComplete: () => {
+        void resumeConversationListening(request);
+      },
+    });
+    updateConversationPhase('speaking');
+    await answering;
+  };
+  finalizeConversationTurnRef.current = () => {
+    void finalizeConversationTurn();
+  };
+
+  const beginConversation = async () => {
+    if (
+      !doc
+      || thinking
+      || keyMissing
+      || micState !== 'idle'
+      || conversationUnavailable
+      || conversationPhaseRef.current !== 'idle'
+      || conversationSession.current
+    ) return;
+    stopPlayback();
+    const request = conversationRequest.current + 1;
+    conversationRequest.current = request;
+    setError(null);
+    setLiveTranscript('');
+    conversationTranscript.current = '';
+    conversationUserSpeaking.current = false;
+    updateConversationPhase('listening');
+
+    try {
+      const realtimeProvider = new SarvamProvider(providerConfig);
+      const endpoint = createConversationEndpoint(
+        () => finalizeConversationTurnRef.current(),
+        ENDPOINT_SILENCE_MS,
+      );
+      const transcriptionFactory: ConversationTranscriptionFactory = (
+        onPartial,
+        onError,
+      ) => realtimeProvider.transcribeStream({
+        language: preferredLanguage,
+        onPartial,
+        onError,
+      });
+      conversationEndpoint.current = endpoint;
+      conversationTranscriptionFactory.current = transcriptionFactory;
+      const activeConversation = await startConversationSession(
+        transcriptionFactory,
+        {
+          onPartial: (text) => {
+            if (
+              conversationRequest.current !== request
+              || conversationPhaseRef.current !== 'listening'
+            ) return;
+            const merged = mergeConversationTranscript(
+              conversationTranscript.current,
+              text,
+            );
+            conversationTranscript.current = merged;
+            setLiveTranscript(merged);
+          },
+          onSpeechStart: () => {
+            if (
+              conversationRequest.current !== request
+              || conversationPhaseRef.current !== 'listening'
+            ) return;
+            conversationUserSpeaking.current = true;
+            endpoint.onSpeechStart();
+          },
+          onSpeechEnd: () => {
+            if (
+              conversationRequest.current !== request
+              || conversationPhaseRef.current !== 'listening'
+            ) return;
+            conversationUserSpeaking.current = false;
+            endpoint.onSpeechEnd(isUsableConversationTranscript(
+              conversationTranscript.current,
+            ));
+          },
+          onError: (caught) => {
+            if (conversationRequest.current !== request) return;
+            if (!microphonePermissionDenied(caught)) setConversationUnavailable(true);
+            setError(microphoneError(caught));
+            void stopConversation();
+          },
+        },
+      );
+      if (conversationRequest.current !== request) {
+        await activeConversation.stop();
+        return;
+      }
+      conversationSession.current = activeConversation;
+    } catch (caught) {
+      if (conversationRequest.current !== request) return;
+      conversationRequest.current += 1;
+      conversationSession.current = null;
+      conversationEndpoint.current?.cancel();
+      conversationEndpoint.current = null;
+      conversationTranscript.current = '';
+      conversationUserSpeaking.current = false;
+      conversationTranscriptionFactory.current = null;
+      updateConversationPhase('idle');
+      setLiveTranscript('');
+      if (!microphonePermissionDenied(caught)) setConversationUnavailable(true);
+      setError(microphoneError(caught));
+    }
+  };
+
+  const conversationActive = conversationPhase !== 'idle';
+
   return (
     <div
       className="fixed inset-0 z-[190] flex justify-end bg-neutral-950/35"
@@ -558,7 +794,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         </header>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5" aria-live="polite">
-          {entries.length === 0 && !thinking && micState === 'idle' && (
+          {entries.length === 0 && !thinking && micState === 'idle' && !conversationActive && (
             <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4 text-sm text-neutral-600">
               Ask about dates, accommodation, activities, or any other information written in the PDF.
             </div>
@@ -601,6 +837,20 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               {micState === 'transcribing' && 'Transcribing your question…'}
             </div>
           )}
+          {conversationActive && (
+            <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <p className="font-semibold">
+                {conversationPhase === 'listening' && 'Conversation mode is listening.'}
+                {conversationPhase === 'thinking' && 'Finishing your question…'}
+                {conversationPhase === 'speaking' && 'Answering aloud…'}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800">
+                {conversationPhase === 'listening'
+                  ? 'Pause briefly when you finish. Earphones are recommended.'
+                  : 'The microphone stays open; the next listening turn starts automatically.'}
+              </p>
+            </div>
+          )}
           {playingId === ACKNOWLEDGMENT_PLAYBACK_ID && (
             <button
               type="button"
@@ -637,17 +887,19 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               <textarea
                 id="pdf-chat-question"
                 rows={2}
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
+                value={conversationActive ? liveTranscript : question}
+                onChange={(event) => {
+                  if (!conversationActive) setQuestion(event.target.value);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
-                placeholder="Ask a question about this PDF…"
-                disabled={!doc || thinking || micState !== 'idle'}
-                className="min-h-11 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-neutral-100"
+                placeholder={conversationActive ? 'Listening continuously…' : 'Ask a question about this PDF…'}
+                disabled={!doc || thinking || micState !== 'idle' || conversationActive}
+                className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-neutral-100"
               />
               <button
                 type="button"
@@ -655,7 +907,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                   if (micState === 'recording') void finishRecording();
                   else void beginRecording();
                 }}
-                disabled={!doc || thinking || micState === 'requesting' || micState === 'transcribing'}
+                disabled={!doc || thinking || conversationActive || micState === 'requesting' || micState === 'transcribing'}
                 aria-label={micState === 'recording' ? 'Stop recording question' : 'Ask by voice'}
                 aria-pressed={micState === 'recording'}
                 className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${micState === 'recording' ? 'bg-red-600 hover:bg-red-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
@@ -666,8 +918,32 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 {micState === 'idle' && '🎤'}
               </button>
               <button
+                type="button"
+                onClick={() => {
+                  if (conversationActive) void stopConversation();
+                  else void beginConversation();
+                }}
+                disabled={!conversationActive && (!doc || thinking || micState !== 'idle' || conversationUnavailable)}
+                aria-label={conversationActive
+                  ? 'Stop conversation mode'
+                  : conversationUnavailable
+                    ? 'Conversation mode unavailable'
+                    : 'Start conversation mode'}
+                aria-pressed={conversationActive}
+                title={conversationUnavailable
+                  ? 'Realtime speech is unavailable; click-to-talk remains available.'
+                  : 'Conversation mode keeps the microphone open. Earphones recommended.'}
+                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${conversationActive ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-violet-700 hover:bg-violet-600'}`}
+              >
+                {conversationActive
+                  ? 'Stop conversation'
+                  : conversationUnavailable
+                    ? 'Unavailable'
+                    : 'Conversation'}
+              </button>
+              <button
                 type="submit"
-                disabled={!doc || thinking || micState !== 'idle' || question.trim() === ''}
+                disabled={!doc || thinking || micState !== 'idle' || conversationActive || question.trim() === ''}
                 className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Send

@@ -308,17 +308,20 @@ describe('speechQueue', () => {
       audio: new Blob(['batch recovery']),
       provider: 'Sarvam',
     }));
+    const speakBrowser = vi.fn(() => vi.fn());
+    const logTiming = vi.fn();
     const played: string[] = [];
     const queue = createSpeechQueue({
       speak,
       speakStream: vi.fn(async () => undefined),
       prepareStream: () => prepared,
+      speakBrowser,
       playBlob: async (audio, onEnded) => {
         played.push(await audio.text());
         endings.push(onEnded);
         return vi.fn();
       },
-      logTiming: vi.fn(),
+      logTiming,
     });
 
     const ticket = queue.enqueueSpeech('Recover me.', 'en-IN');
@@ -329,7 +332,52 @@ describe('speechQueue', () => {
 
     expect(stopStream).toHaveBeenCalledOnce();
     expect(speak).toHaveBeenCalledWith({ text: 'Recover me.', language: 'en-IN' });
+    expect(speakBrowser).not.toHaveBeenCalled();
+    expect(logTiming).toHaveBeenCalledWith('[voice] clip via batch Sarvam (attempt 1)');
     endings.shift()?.();
     await ticket.done;
+  });
+
+  it('uses browser speech only after streaming and two batch synthesis attempts fail', async () => {
+    let reportStreamError: ((error: unknown) => void) | undefined;
+    const prepared = {
+      ready: Promise.resolve(),
+      play: vi.fn(async (_onEnded: () => void, onError: (error: unknown) => void) => {
+        reportStreamError = onError;
+        return vi.fn();
+      }),
+      stop: vi.fn(),
+    };
+    const speak = vi.fn(async () => {
+      throw new Error('batch unavailable');
+    });
+    const speakBrowser = vi.fn((_text, _language, onEnded: () => void) => {
+      queueMicrotask(onEnded);
+      return vi.fn();
+    });
+    const logTiming = vi.fn();
+    const queue = createSpeechQueue({
+      speak,
+      speakStream: vi.fn(async () => undefined),
+      prepareStream: () => prepared,
+      speakBrowser,
+      logTiming,
+    });
+
+    const ticket = queue.enqueueSpeech('Retry me.', 'en-IN');
+    await ticket.ready;
+    await flush();
+    expect(speakBrowser).not.toHaveBeenCalled();
+
+    reportStreamError?.(new Error('stream unavailable'));
+    await ticket.done;
+
+    expect(speak).toHaveBeenCalledTimes(2);
+    expect(speak).toHaveBeenNthCalledWith(1, { text: 'Retry me.', language: 'en-IN' });
+    expect(speak).toHaveBeenNthCalledWith(2, { text: 'Retry me.', language: 'en-IN' });
+    expect(speakBrowser).toHaveBeenCalledOnce();
+    expect(logTiming).toHaveBeenCalledWith(
+      '[voice] clip via BROWSER speech (Sarvam unavailable)',
+    );
   });
 });

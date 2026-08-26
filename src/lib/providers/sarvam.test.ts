@@ -469,16 +469,16 @@ describe('SarvamProvider.transcribeStream', () => {
       { event: 'audio_input', audio: 'AAECAw==' },
     ]);
 
-    socket.message({ event: 'transcript.partial', text: ' क्या समय ' });
-    expect(onPartial).toHaveBeenCalledWith('क्या समय');
+    socket.message({ event: 'transcript.partial', text: ' “How\'s   it going?” ' });
+    expect(onPartial).toHaveBeenCalledWith("How's it going?");
     const completed = session.finish();
     expect(socket.sent.slice(-2).map((message) => JSON.parse(message))).toEqual([
       { event: 'speech_end' },
       { event: 'flush' },
     ]);
-    socket.message({ event: 'transcript.final', text: ' क्या समय है? ' });
+    socket.message({ event: 'transcript.final', text: ' «That’s   fine» ' });
 
-    await expect(completed).resolves.toEqual({ text: 'क्या समय है?', provider: 'Sarvam' });
+    await expect(completed).resolves.toEqual({ text: 'That’s fine', provider: 'Sarvam' });
     expect(JSON.parse(socket.sent.at(-1) ?? '{}')).toEqual({ event: 'end' });
     expect(socket.close).toHaveBeenCalledWith(1000, 'complete');
   });
@@ -502,16 +502,21 @@ describe('SarvamProvider.transcribeStream', () => {
   it('surfaces connection failure so recording can select its batch fallback', async () => {
     vi.stubGlobal('WebSocket', { CONNECTING: 0, OPEN: 1, CLOSED: 3 });
     const socket = new FakeWebSocket();
+    const onError = vi.fn();
     const session = new SarvamProvider(
       directConfig(),
       () => socket as unknown as WebSocket,
-    ).transcribeStream();
+    ).transcribeStream({ onError });
     const completed = session.finish();
 
     socket.close(4401);
 
     await expect(session.ready).rejects.toThrow('closed unexpectedly (4401)');
     await expect(completed).rejects.toThrow('closed unexpectedly (4401)');
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Sarvam streaming STT closed unexpectedly (4401).',
+    }));
   });
 
   it('rejects a missing key before opening a socket', () => {

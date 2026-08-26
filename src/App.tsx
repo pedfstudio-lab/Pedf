@@ -13,7 +13,7 @@ import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { PrefsStoreProvider } from './state/prefsStore';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
-const DEFAULT_SAMPLE_FILE = 'RAHUL RAJPUT RESUME.pdf';
+const DEFAULT_SAMPLE_FILE = 'Corporate-Governance.pdf';
 const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/${encodeURIComponent(DEFAULT_SAMPLE_FILE)}`;
 
 function isEditableTarget(target: EventTarget | null): boolean {

@@ -118,6 +118,13 @@ function abortError(): DOMException {
   return new DOMException('Speech streaming was stopped.', 'AbortError');
 }
 
+function normalizeRealtimeTranscript(text: string): string {
+  return text
+    .replace(/["“”„«»]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
 function bytesToBase64(bytes: Uint8Array<ArrayBuffer>): string {
   let binary = '';
   for (let index = 0; index < bytes.length; index += 1) {
@@ -431,12 +438,13 @@ export class SarvamProvider implements ProviderWithCapabilities {
         // The session result is already settled; close failure is non-actionable.
       }
     };
-    const fail = (error: unknown) => {
+    const fail = (error: unknown, report = true) => {
       if (terminal) return;
       terminal = true;
       cleanup();
       rejectReady(error);
       rejectFinal(error);
+      if (report) input.onError?.(error);
       closeSocket('stream failed');
     };
     const succeed = (text: string) => {
@@ -464,7 +472,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
       sendJson({ event: 'speech_end' });
       if (!terminal) sendJson({ event: 'flush' });
     };
-    const handleAbort = () => fail(abortError());
+    const handleAbort = () => fail(abortError(), false);
     const handleOpen = () => {
       if (terminal) return;
       opened = true;
@@ -483,13 +491,18 @@ export class SarvamProvider implements ProviderWithCapabilities {
         }
         const message = JSON.parse(event.data) as SarvamRealtimeSttMessage;
         if (message.event === 'transcript.partial') {
-          if (typeof message.text === 'string' && message.text.trim() !== '') {
-            input.onPartial?.(message.text.trim());
+          const text = typeof message.text === 'string'
+            ? normalizeRealtimeTranscript(message.text)
+            : '';
+          if (text !== '') {
+            input.onPartial?.(text);
           }
           return;
         }
         if (message.event === 'transcript.final') {
-          const text = typeof message.text === 'string' ? message.text.trim() : '';
+          const text = typeof message.text === 'string'
+            ? normalizeRealtimeTranscript(message.text)
+            : '';
           if (text === '') throw new Error('Sarvam returned an empty realtime transcript.');
           succeed(text);
           return;
@@ -539,7 +552,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
         }
         return finalTranscript;
       },
-      cancel: () => fail(abortError()),
+      cancel: () => fail(abortError(), false),
     };
   }
 
