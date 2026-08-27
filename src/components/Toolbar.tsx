@@ -1,4 +1,5 @@
 import { HoldToPeek } from './HoldToPeek';
+import { ZOOM_MAX, ZOOM_MIN } from '@/lib/pdf/zoom';
 import { useEdits } from '@/state/editsStore';
 
 interface ToolbarProps {
@@ -9,6 +10,10 @@ interface ToolbarProps {
   imageMode: boolean;
   hasEdits: boolean;
   exporting: boolean;
+  zoom: number;
+  zoomIn(): void;
+  zoomOut(): void;
+  zoomReset(): void;
   onEditModeChange(enabled: boolean): void;
   onTextAddModeChange(enabled: boolean): void;
   onImageModeChange(enabled: boolean): void;
@@ -26,6 +31,10 @@ export function Toolbar({
   imageMode,
   hasEdits,
   exporting,
+  zoom,
+  zoomIn,
+  zoomOut,
+  zoomReset,
   onEditModeChange,
   onTextAddModeChange,
   onImageModeChange,
@@ -65,6 +74,41 @@ export function Toolbar({
         >
           ↷
         </button>
+        <div
+          className="flex items-center rounded-md border border-neutral-300 bg-white"
+          role="group"
+          aria-label="Document zoom"
+        >
+          <button
+            type="button"
+            onClick={zoomOut}
+            disabled={zoom <= ZOOM_MIN}
+            aria-label="Zoom out"
+            title="Zoom out (Ctrl+-)"
+            className="w-8 rounded-l-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={zoomReset}
+            aria-label={`Reset zoom to 100% (currently ${Math.round(zoom * 100)}%)`}
+            title="Reset zoom (Ctrl+0)"
+            className="min-w-14 border-x border-neutral-300 px-2 py-1.5 text-xs font-semibold tabular-nums text-neutral-700 hover:bg-neutral-100"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={zoomIn}
+            disabled={zoom >= ZOOM_MAX}
+            aria-label="Zoom in"
+            title="Zoom in (Ctrl+=)"
+            className="w-8 rounded-r-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            +
+          </button>
+        </div>
         <button
           type="button"
           aria-pressed={editMode}

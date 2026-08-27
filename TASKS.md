@@ -4874,3 +4874,229 @@ original; Redo re-applies; Ctrl+Z / Ctrl+Shift+Z work; Ctrl+Z inside the chat bo
 normal text-undo, not document-undo.
 
 **Commit:** undo/redo for document edits (history in `editsStore` + toolbar + shortcuts). No export-seam.
+
+---
+
+## Editor — Zoom & page operations
+
+> Two independent features, **two separate branches** (never the same branch):
+> **Task 34 — zoom** → branch `editor-zoom`. **Task 35 — insert + duplicate page** → branch `page-operations`.
+> Merge each to `main` on its own, only after it's tested on its branch.
+
+### Task 34 — Zoom in / zoom out  🔲 TODO → branch `editor-zoom`
+> The viewer renders every page at a **fixed** scale (`zoom = 1.5`, hardcoded, no control). Goal: let the user
+> zoom the whole PDF in/out with toolbar buttons + a % readout, without breaking the edit overlays. **The hard part
+> is already done for us** — the coordinate math is fully zoom-driven, so the overlays follow automatically; this
+> task is essentially "add a setter + buttons + clamp." **On branch `editor-zoom`.**
+
+**Why it's small (verified in code):** `src/lib/pdf/renderPage.ts` already computes `renderScale = zoom * dpr` and
+every overlay position flows through `pdfRectToScreenRect(rect, viewport, dpr)` in `src/lib/export/coordinates.ts`,
+where `viewport` is derived from that same `zoom`. `PageCanvas`'s render effect already depends on `zoom`
+(`PageCanvas.tsx`), so changing `zoom` re-renders + re-lays-out everything. **There are no hardcoded scales.** The
+only reason zoom is fixed is the missing setter/UI at `App.tsx:59` (`const [zoom] = useState(1.5)` — no `setZoom`,
+no control). So: add the setter, thread it to the toolbar, clamp it. **No coordinate/overlay rework.**
+
+**Step 1 — make `zoom` stateful → `src/App.tsx` (~line 59).**
+Change `const [zoom] = useState(1.5);` → `const [zoom, setZoom] = useState(1);` (1.0 = **100%**). Add clamp
+helpers:
+```ts
+const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
+const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+const zoomIn  = useCallback(() => setZoom(z => clampZoom(z + ZOOM_STEP)), []);
+const zoomOut = useCallback(() => setZoom(z => clampZoom(z - ZOOM_STEP)), []);
+const zoomReset = useCallback(() => setZoom(1), []);
+```
+> Default note: today the fixed view is `1.5`. Starting at `1.0` (=100%) makes the % intuitive but renders a bit
+> smaller than the current default. If you'd rather the initial view look exactly like today, set `useState(1.5)`
+> (=150%). Pick one — I default to `1.0`.
+
+**Step 2 — toolbar controls → `src/components/Toolbar.tsx`.**
+Add a small zoom cluster near the existing tools: **−** button (`onClick=zoomOut`, `disabled={zoom<=ZOOM_MIN}`), a
+**`{Math.round(zoom*100)}%`** readout (click → `zoomReset`), **+** button (`onClick=zoomIn`,
+`disabled={zoom>=ZOOM_MAX}`). Pass `zoom`, `zoomIn`, `zoomOut`, `zoomReset` as new `Toolbar` props from `App.tsx`.
+
+**Step 3 — (optional, nice-to-have) keyboard + wheel.** `Ctrl/Cmd + =` → zoomIn, `Ctrl/Cmd + -` → zoomOut,
+`Ctrl/Cmd + 0` → reset (in a small `keydown` hook, `preventDefault` when handled, **skip when typing in an
+input/textarea/contenteditable** — same guard as the undo shortcuts). `Ctrl + wheel` over the viewer → zoom. Ship
+Steps 1–2 first; add this only if quick.
+
+**⚠ Impact audit:**
+- **Overlays:** no change needed — they already consume `zoom`/`viewport` and re-lay-out on change (verified). Just
+  **confirm** in testing that text boxes / lines / image handles stay glued to their content at 50% and 300%.
+- **Export:** untouched — export uses stored **scale-1** geometry (`PageGeometry`), independent of `zoom`. Zoom is
+  view-only; the exported PDF is unaffected.
+- **Perf:** changing zoom re-renders every page canvas (pdf.js). Fine for normal docs; if a huge doc feels heavy,
+  that's a later optimization, not this task.
+
+**Verify (live):** open a PDF → **+ / −** change the whole document's size, % readout updates, clamps at 50%/300%,
+click % resets to 100%. Add a text edit + a line, then zoom — **the overlays stay perfectly aligned** to the page
+at every zoom level. `npm run test` / `typecheck` / `lint` green. **Test on the branch; merge only on your go.**
+
+**Land it (on your go):** merge `editor-zoom` → `main`. Commit: `Zoom in/out controls (Task 34)`.
+
+---
+
+### Task 35 — Insert a blank page + Duplicate a page (per-page controls)  🔲 TODO → branch `page-operations`
+> Above **every page**, show two labelled controls — **"Duplicate Page"** and **"Insert Page"** — so the new page
+> lands **right there** (no top-menu "add" that leaves you hunting where it went). Duplicate = an **exact copy** of
+> that page (same content, fonts, size) **including any edits you've made on it**. Insert = a **blank page** the
+> same size, ready to type on. Both land **immediately after** the page you clicked, and both are **undoable**
+> (Ctrl+Z). **On branch `page-operations`** — kept entirely separate from the zoom branch.
+>
+> **This is the big one.** Unlike every edit so far, this changes the document's **page structure**. Today there is
+> **no** page-structural model anywhere: `pageIndex` is a positional key shared across `edits`, `pages`
+> (`PageGeometry[]`), and pdf-lib's page order, and `exportPdf` assumes a **fixed** page count
+> (`pdf.getPage(pageIndex)`, no `copyPages`/`insertPage` in production — verified). So we introduce a **page plan**
+> and touch the model, the viewer, and the export path. Because it's structural, guard the existing zero-edit
+> round-trip (see the identity fast-path in Step 5).
+
+**The model — a "page plan" (ordered list of page instances).** Position in the plan **is** the `pageIndex`.
+```ts
+// new: src/state/pagePlan.ts
+export type PagePlanEntry =
+  | { readonly id: string; readonly kind: 'source'; readonly sourceIndex: number }        // a page from the loaded PDF
+  | { readonly id: string; readonly kind: 'blank'; readonly widthPt: number; readonly heightPt: number };
+export type PagePlan = readonly PagePlanEntry[];
+```
+- **`sourceIndex`** points into the **immutable** original pages loaded once (`loadDocument`); it is **not** the
+  same as the live `pageIndex` after ops. A **duplicate** is just a second `source` entry with the **same**
+  `sourceIndex`. A **blank** carries its own size.
+- **Identity plan at load:** `originalPages.map((_, i) => ({ id: newId(), kind: 'source', sourceIndex: i }))`.
+- **Derive the live geometry** (what export + viewer consume) from the plan + the immutable original geometry:
+```ts
+export function planToGeometry(plan: PagePlan, originalPages: readonly PageGeometry[]): PageGeometry[] {
+  return plan.map((e, position) => e.kind === 'source'
+    ? { ...originalPages[e.sourceIndex], pageIndex: position }
+    : { pageIndex: position, widthPt: e.widthPt, heightPt: e.heightPt, rotation: 0, boxOffset: { x: 0, y: 0 } });
+}
+```
+This keeps the invariant **plan position === pageIndex === live `pages[]` index === output page index**, so all the
+existing content-edit code that keys on positional `pageIndex` keeps working unchanged.
+
+**Step 1 — plan + page-op logic (pure, unit-tested) → `src/state/pagePlan.ts`.**
+Two pure functions that transform **both** the plan and the edits atomically (edits shift because positions move):
+```ts
+// Duplicate the page at `position`; the copy is inserted at position+1, carrying clones of that page's edits.
+export function duplicatePage(plan: PagePlan, edits: readonly Edit[], position: number, newId: () => string)
+  : { plan: PagePlan; edits: Edit[] } {
+  const at = position + 1;
+  const original = plan[position];
+  const copy = { ...original, id: newId() };                                   // same sourceIndex / same blank size
+  const nextPlan = [...plan.slice(0, at), copy, ...plan.slice(at)];
+  const shifted = edits.map(e => e.pageIndex >= at ? { ...e, pageIndex: e.pageIndex + 1 } : e);   // pages below move down
+  const clones = edits.filter(e => e.pageIndex === position).map(e => ({ ...e, id: newId(), pageIndex: at }));
+  return { plan: nextPlan, edits: [...shifted, ...clones] };
+}
+
+// Insert a blank page (same size as `position`) at position+1.
+export function insertBlankPage(plan: PagePlan, edits: readonly Edit[], position: number,
+  size: { widthPt: number; heightPt: number }, newId: () => string): { plan: PagePlan; edits: Edit[] } {
+  const at = position + 1;
+  const entry: PagePlanEntry = { id: newId(), kind: 'blank', widthPt: size.widthPt, heightPt: size.heightPt };
+  const nextPlan = [...plan.slice(0, at), entry, ...plan.slice(at)];
+  const shifted = edits.map(e => e.pageIndex >= at ? { ...e, pageIndex: e.pageIndex + 1 } : e);
+  return { plan: nextPlan, edits: shifted };
+}
+```
+> **Duplicate copies edits too** (a true "what I see" duplicate). If you'd rather duplicate only the *original*
+> page content and leave the copy un-edited, drop the `clones` line — but I default to copying them.
+
+**Step 2 — put the plan in the edits history so page ops are undoable → `src/state/editsStore.tsx`.**
+Today the history's `present` is `readonly Edit[]`. Widen it to carry the plan so **one Ctrl+Z reverts a page op +
+its edit shifts together**:
+```ts
+interface DocPresent { readonly edits: readonly Edit[]; readonly plan: PagePlan; }
+// HistoryState.present: DocPresent (past/future hold DocPresent snapshots)
+```
+- The `default` branch runs the existing `editsReducer` on `present.edits` and **keeps `present.plan`** (content
+  edits never touch the plan).
+- Add two actions — `duplicatePage`/`insertBlankPage` — that call the Step-1 helpers and replace **both**
+  `edits` and `plan` in one history push (so undo/redo revert both).
+- Add a `resetDocument(initialPlan)` action (seeds `plan`, clears `edits` + history) — dispatched when a document
+  opens (replaces/extends the current `resetEdits` on open).
+- **Expose from `useEdits()`:** `pagePlan` (= `present.plan`) and creators `duplicatePage(position)`,
+  `insertBlankPage(position)`. **Keep `edits` (= `present.edits`), `undo`, `redo`, `canUndo`, `canRedo` exactly as
+  they are** so **no other consumer changes** for undo to keep working.
+- Seed `initialPlan` from the loaded doc's geometry at open (App's open handler already has `loaded.pages`).
+
+**Step 3 — per-page controls → `src/components/PdfViewer.tsx` + a tiny `PageToolbar`.**
+In the page `.map()` (`PdfViewer.tsx:36-47`, `pageIndex` in scope), wrap each page so a small bar sits **above** it:
+```tsx
+<div key={entry.id} className="flex flex-col items-center gap-1">
+  <PageToolbar position={position} />           {/* two labelled buttons */}
+  <PageCanvas … pageIndex={position} … />
+</div>
+```
+`PageToolbar` (new, small): two buttons — **"Duplicate Page"** (`onClick → duplicatePage(position)`) and
+**"Insert Page"** (`onClick → insertBlankPage(position)`) from `useEdits()`. Labelled (per the design — not bare
+icons); a small page glyph beside each label is fine. Always visible, subtle, above the page card.
+
+**Step 4 — render the plan (incl. blank + duplicated pages) → `PdfViewer.tsx` / `PageCanvas.tsx`.**
+The viewer must map over the **plan**, not over `doc.numPages`:
+- **`source` entry:** render the PDF page proxy for `sourceIndex` (fetch/cache `doc.getPage(sourceIndex + 1)`;
+  cache by `sourceIndex` so a duplicate reuses the same proxy). Passes the **real** pdf.js viewport → overlays work
+  unchanged. (Duplicated pages need **no** new viewport machinery — they reuse the real page's viewport.)
+- **`blank` entry:** render a white canvas sized `widthPt·renderScale × heightPt·renderScale`, and mount the
+  `OverlayLayer` with a **synthetic viewport** so the blank page is **editable** (you can type/add images on it).
+  Add `src/lib/pdf/blankViewport.ts` exposing the 3 things `coordinates.ts` uses — `width`, `height`, and
+  `convertToViewportPoint` / `convertToPdfPoint` — for a page box `[0,0,widthPt,heightPt]`, rotation 0, at
+  `scale = zoom·dpr` (y-flip: `vx = x·scale`, `vy = (heightPt − y)·scale`). This is the **trickiest sub-part** —
+  do it **last**, after duplicate is working, and unit-test the round-trip `pdf→viewport→pdf ≈ identity`.
+- Give `PageCanvas` a `source` prop: `{ kind:'pdf'; page: PDFPageProxy } | { kind:'blank'; widthPt; heightPt }`.
+- **Stable React keys = `entry.id`** (positions/`sourceIndex` repeat with duplicates). **Reset the page-canvas
+  registry** (`documentStore`) on any plan change so `sampleBackground` (cover edits) reads the right canvas by the
+  new positional index; it repopulates as pages re-render.
+
+**Step 5 — export the plan → `src/lib/export/exportPdf.ts` (+ `EditDocument`).**
+Add the plan to the export input (`EditDocument.plan?: PagePlan`) and branch:
+- **Identity fast-path (protects the verified round-trip):** if `plan` is absent **or** identity (every entry
+  `kind:'source'` with `sourceIndex === position`, length === original count), use the **existing** load-and-patch
+  path **unchanged**. The zero-edit round-trip and all current exports are byte-for-byte as today.
+- **Build path (any duplicate/insert present):** rebuild the document in plan order, then stamp:
+```ts
+const out = await PDFDocument.create();
+const src = await PDFDocument.load(originalBytes, { updateMetadata: false });
+for (const entry of plan) {
+  if (entry.kind === 'source') { const [p] = await out.copyPages(src, [entry.sourceIndex]); out.addPage(p); }
+  else out.addPage([entry.widthPt, entry.heightPt]);                                  // blank
+}
+// then group edits by pageIndex and stamp each onto out.getPage(position) using planToGeometry(...)[position]
+```
+`copyPages` faithfully carries the page's fonts/content (so a duplicate matches exactly, and a blank page's edits
+stamp onto a real blank page). Keep the `sampleBackground` closure working against the (rebuilt) canvas registry.
+
+**Step 6 — wire the plan through the app → `src/App.tsx`.**
+- Seed `resetDocument(initialPlan)` when a doc opens (from `loaded.pages`).
+- `handleExport` passes `plan: pagePlan` into `exportPdf` alongside `originalBytes` / `edits`; live geometry comes
+  from `planToGeometry(pagePlan, loaded.pages)` (replaces the direct `loaded.pages` where the *current* view
+  geometry is needed).
+
+**⚠ Impact audit — what changes vs. stays:**
+- **Content-edit code (coordinates, overlay stamping, handlers, undo):** **unchanged** — still keyed on positional
+  `pageIndex`, which the plan keeps consistent. Only *new* readers (`pagePlan`) are added.
+- **Export for docs with no page ops:** **byte-identical** to today (identity fast-path). New behaviour is gated
+  entirely behind "a duplicate/insert exists."
+- **`pageIndex` invariant:** the one thing to get right — every op re-sequences `pages`/edit indices so
+  `plan.position === pageIndex` always holds. This is why the shift/clone logic is pure + unit-tested (Step 1).
+- **Blank-page editing** is the only genuinely new coordinate surface (synthetic viewport) — isolated to Step 4 and
+  its own test.
+- **Undo/redo:** page ops ride the existing history (Step 2) → Ctrl+Z reverts them, no separate mechanism.
+
+**Tests:**
+- `src/state/pagePlan.test.ts` (pure): duplicate at p → plan length +1, copy at p+1 with same `sourceIndex`; edits
+  on p are **cloned** to p+1 (new ids); edits below shift +1; edits above untouched. Insert blank at p → length +1,
+  blank size = neighbour, edits below shift +1, none cloned. Multiple ops compose (indices stay consistent).
+- `blankViewport.test.ts`: `pdf→viewport→pdf` ≈ identity; width/height = size·scale.
+- Export test (`exportPdf.test.ts`): identity plan → unchanged output (round-trip still green); duplicate → page
+  count +1 and the duplicated page renders the same content; insert blank → +1 blank page; an edit placed on a
+  blank/duplicated page stamps on the correct output page.
+
+**Verify (live):** open a multi-page PDF → **Duplicate Page** on page 2 → an identical page 3 appears right below
+(same fonts/size), and any edits you'd added to page 2 are on the copy too → **Insert Page** on page 2 → a blank,
+same-size page appears at position 3 and you can **type/add an image on it** → **Export** → the downloaded PDF has
+the new/duplicated pages in the right order with correct content → **Ctrl+Z** undoes a page op (page + its edit
+shifts revert together). `npm run test` / `typecheck` / `lint` green, **including the existing zero-edit
+round-trip**. **Test on the branch; merge only on your go.**
+
+**Land it (on your go):** merge `page-operations` → `main`. Commit: `Insert blank + duplicate page, per-page
+controls (Task 35)`.

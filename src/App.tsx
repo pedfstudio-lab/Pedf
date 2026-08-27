@@ -7,6 +7,7 @@ import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
 import { sampleDominantColor } from './lib/export/colorSample';
+import { clampZoom, ZOOM_STEP } from './lib/pdf/zoom';
 import type { PdfRect, Rgb } from './lib/export/types';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
@@ -51,12 +52,53 @@ function useEditHistoryShortcuts(): void {
   }, [canRedo, canUndo, redo, undo]);
 }
 
+function useZoomShortcuts(
+  zoomIn: () => void,
+  zoomOut: () => void,
+  zoomReset: () => void,
+): void {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.altKey
+        || (!event.ctrlKey && !event.metaKey)
+        || isEditableTarget(event.target)
+      ) return;
+
+      const key = event.key.toLowerCase();
+      const action = key === '=' || key === '+'
+        ? zoomIn
+        : key === '-'
+          ? zoomOut
+          : key === '0'
+            ? zoomReset
+            : null;
+      if (!action) return;
+
+      event.preventDefault();
+      action();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [zoomIn, zoomOut, zoomReset]);
+}
+
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
   const { edits, resetEdits } = useEdits();
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
-  const [zoom] = useState(1.5);
+  const [zoom, setZoom] = useState(1);
+  const zoomIn = useCallback(() => {
+    setZoom((current) => clampZoom(current + ZOOM_STEP));
+  }, []);
+  const zoomOut = useCallback(() => {
+    setZoom((current) => clampZoom(current - ZOOM_STEP));
+  }, []);
+  const zoomReset = useCallback(() => setZoom(1), []);
+  useZoomShortcuts(zoomIn, zoomOut, zoomReset);
   const [editMode, setEditMode] = useState(false);
   const [textAddMode, setTextAddMode] = useState(false);
   const [imageMode, setImageMode] = useState(false);
@@ -181,6 +223,10 @@ function EditorApp() {
         imageMode={imageMode}
         hasEdits={edits.length > 0}
         exporting={exporting}
+        zoom={zoom}
+        zoomIn={zoomIn}
+        zoomOut={zoomOut}
+        zoomReset={zoomReset}
         onEditModeChange={(enabled) => {
           setEditMode(enabled);
           if (enabled) {
