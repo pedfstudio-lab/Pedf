@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { HandsFreeVoiceOverlay } from '@/components/HandsFreeVoiceOverlay';
 import { getDocumentText } from '@/lib/pdf/documentText';
 import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
 import { recentChatHistory } from '@/lib/providers/chatHistory';
@@ -118,6 +119,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const [conversationPhase, setConversationPhase] = useState<ConversationPhase>('idle');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [conversationUnavailable, setConversationUnavailable] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
   const speechQueue = useRef<SpeechQueue | null>(null);
   if (!speechQueue.current) {
     speechQueue.current = createSpeechQueue({
@@ -177,6 +179,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     micRequest.current += 1;
     stopPlayback();
     updateConversationPhase('idle');
+    setHandsFree(false);
     setLiveTranscript('');
     setThinking(false);
     if (!activeSession) return;
@@ -794,6 +797,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         return;
       }
       conversationSession.current = activeConversation;
+      setHandsFree(true);
     } catch (caught) {
       if (conversationRequest.current !== request) return;
       conversationRequest.current += 1;
@@ -810,6 +814,22 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   };
 
   const conversationActive = conversationPhase !== 'idle';
+  const latestAssistantAnswer = [...entries]
+    .reverse()
+    .find((entry) => entry.role === 'assistant')?.text;
+
+  if (handsFree && conversationActive) {
+    return (
+      <HandsFreeVoiceOverlay
+        phase={conversationPhase}
+        answer={latestAssistantAnswer}
+        onOpenChat={() => setHandsFree(false)}
+        onStop={() => {
+          void stopConversation();
+        }}
+      />
+    );
+  }
 
   return (
     <div

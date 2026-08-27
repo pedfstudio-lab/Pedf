@@ -8,6 +8,6 @@ export default defineConfig({
   test: {
     // The test suites are Node-compatible and stub browser globals when needed.
     environment: 'node',
-    include: ['src/**/*.{test,spec}.ts'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

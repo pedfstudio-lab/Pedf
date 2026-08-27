@@ -4563,6 +4563,48 @@ Stage commits — 32A: `Continuous listening: always-on mic + streaming STT`; 32
 
 ---
 
+### Task 33 — Hands-free voice over the full PDF (collapse the ask bar during conversation)  🔬 EXPERIMENT → branch `voice-handsfree`
+> Today the ask bar is a modal that dims + blocks the PDF, so you can't scroll while talking. Goal: when voice
+> **conversation mode** is on, collapse the ask bar → the **full PDF is visible + scrollable** → the voice keeps
+> running in the background, with the **bot's answer shown as a caption** over the PDF and a small floating
+> **"Listening / Stop"** control. (Showing the *user's* questions on screen = deferred.) **On a branch**; click-to-talk
+> and the normal panel stay exactly as they are.
+
+**Depends on:** Task 32 (continuous voice). **Reuses** the existing `PdfChat` conversation session — no changes to
+the STT/TTS/turn-taking logic, only the UI shell around it.
+
+**Step 1 — keep the voice session alive when the panel collapses → `PdfChat.tsx`.** Today the panel *owns* the
+conversation session, and closing/unmounting it calls `stopConversation`. Add a `handsFree` UI mode so the component
+stays **mounted** and the session **keeps running** while the panel is collapsed — do NOT `stopConversation` on
+entering hands-free.
+
+**Step 2 — collapse trigger.** When the user starts **conversation mode** (the mic / conversation toggle), set
+`handsFree = true` → render the collapsed view. Click-to-talk and the normal full panel are unchanged.
+
+**Step 3 — collapsed, non-blocking overlay → `PdfChat.tsx`.** In `handsFree`:
+- **Remove the dark backdrop.** Make the overlay container `pointer-events: none` so the PDF underneath receives
+  scroll/clicks; only the floating control + caption get `pointer-events: auto`.
+- **Floating control** (small pill, e.g. bottom-center): shows the phase (`Listening…` / `Thinking…` / `Speaking…`)
+  + a **Stop** button + an **"Open chat"** button to restore the full panel.
+- **Answer caption:** the latest **bot** answer as a readable translucent card (bottom of the screen), persisting
+  until the next answer; scrolls internally if long. No user questions (deferred).
+
+**Step 4 — reopen / restore.** "Open chat" → back to the full panel (read history); the session keeps running.
+**Stop** → end the conversation and exit hands-free.
+
+**Step 5 — the PDF must scroll underneath.** Verify the PDF viewer receives scroll + pointer events in hands-free
+(the overlay isn't capturing them); guard z-index so the floating control sits above the PDF while the rest is
+click-through.
+
+**Verify (live):** start conversation mode → the ask bar collapses, the **full PDF shows and scrolls** while you
+talk → the bot's answer appears as a caption **and** is spoken → the floating pill shows the state and lets you
+**Stop** / **Open chat**. The voice **keeps running** the whole time (no freeze/stop when the panel collapses).
+`npm run test` / `typecheck` / `lint` green. **Do NOT merge to `main` until tested on the branch.**
+
+**Land it (only on your go):** merge `voice-handsfree` → `main`. Commit: `Hands-free voice over the full PDF`.
+
+---
+
 ## PWA & deploy
 
 ### Task 26 — PWA manifest + service worker  🔲
