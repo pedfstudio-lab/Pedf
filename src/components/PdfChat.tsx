@@ -17,6 +17,7 @@ import {
   waitForBridgingInitialDelay,
 } from '@/lib/speech/acknowledgments';
 import { classifyQuestion } from '@/lib/speech/classifyQuestion';
+import { interruptConversationAnswer } from '@/lib/speech/conversationBargeIn';
 import {
   createConversationEndpoint,
   dedupeImmediateTranscriptRepeats,
@@ -76,6 +77,7 @@ interface VoicePlaybackState {
   readonly playbackToken: number;
   firstAnswerReady: boolean;
   bridgeActive: boolean;
+  bargeInArmed: boolean;
 }
 
 const ACKNOWLEDGMENT_PLAYBACK_ID = -1;
@@ -260,6 +262,16 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     && playbackRequest.current === state.playbackToken
   );
 
+  const armConversationBargeIn = (state: VoicePlaybackState) => {
+    if (
+      conversationPhaseRef.current !== 'speaking'
+      || !isCurrentVoicePlayback(state)
+      || state.bargeInArmed
+    ) return;
+    state.bargeInArmed = true;
+    conversationSession.current?.setBargeInEnabled(true);
+  };
+
   const enqueueBridgingFillers = async (state: VoicePlaybackState) => {
     if (!isCurrentVoicePlayback(state) || state.firstAnswerReady) return;
     await Promise.all([
@@ -312,6 +324,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       continuingVoice && index === 0
         ? () => {
           if (!isCurrentVoicePlayback(voiceState)) return;
+          armConversationBargeIn(voiceState);
           voiceState.firstAnswerReady = true;
           if (voiceState.bridgeActive) speechQueue.current?.skipCurrent();
         }
@@ -349,6 +362,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
       playbackToken,
       firstAnswerReady: false,
       bridgeActive: false,
+      bargeInArmed: false,
     };
     voicePlayback.current = state;
     playback.current = { id: ACKNOWLEDGMENT_PLAYBACK_ID };
@@ -368,6 +382,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
           state.language,
         );
       if (!ticket || !isCurrentVoicePlayback(state)) return;
+      armConversationBargeIn(state);
       void ticket.done.then(() => enqueueBridgingFillers(state));
     } catch {
       // An acknowledgment is best-effort; transcription and the real answer must continue.
@@ -423,6 +438,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             speechChunkCount === 1
               ? () => {
                 if (!isCurrentVoicePlayback(streamingVoiceState)) return;
+                armConversationBargeIn(streamingVoiceState);
                 streamingVoiceState.firstAnswerReady = true;
                 if (streamingVoiceState.bridgeActive) speechQueue.current?.skipCurrent();
               }
@@ -498,6 +514,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         const finalTicket = lastSentenceTicket;
         if (!finalTicket) {
           void startPlayback(answer, streamingVoiceState).then(() => {
+            if (micRequest.current !== streamingVoiceState.voiceRequest) return;
             options.onVoiceComplete?.();
           });
         } else {
@@ -608,6 +625,26 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     updateConversationPhase('listening');
   };
 
+  const handleConversationBargeIn = () => {
+    const activeSession = conversationSession.current;
+    if (!activeSession) return;
+    interruptConversationAnswer({
+      phase: conversationPhaseRef.current,
+      playback: { stop: stopPlayback },
+      session: activeSession,
+      abandonAnswer: () => {
+        askRequest.current += 1;
+        micRequest.current += 1;
+        conversationEndpoint.current?.cancel();
+        conversationTranscript.current = '';
+        conversationUserSpeaking.current = false;
+        setLiveTranscript('');
+        setThinking(false);
+      },
+      setPhase: updateConversationPhase,
+    });
+  };
+
   const handleConversationFinal = async (rawTranscript: string) => {
     if (
       conversationPhaseRef.current !== 'thinking'
@@ -623,6 +660,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     const voiceRequest = micRequest.current + 1;
     micRequest.current = voiceRequest;
     const voiceState = beginVoiceAnswer(preferredLanguage, voiceRequest);
+    updateConversationPhase('speaking');
     if (classifyQuestion(transcript) === 'document') startAcknowledgment(voiceState);
     const answering = ask(transcript, {
       spoken: true,
@@ -631,7 +669,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         resumeConversationListening(request);
       },
     });
-    updateConversationPhase('speaking');
     await answering;
   };
   handleConversationFinalRef.current = (text) => {
@@ -725,6 +762,10 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             endpoint.onSpeechEnd(isUsableConversationTranscript(
               conversationTranscript.current,
             ));
+          },
+          onBargeIn: () => {
+            if (conversationRequest.current !== request) return;
+            handleConversationBargeIn();
           },
           onReconnect: () => {
             if (conversationRequest.current !== request) return;
@@ -867,7 +908,9 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               <p className="mt-1 text-xs text-emerald-800">
                 {conversationPhase === 'listening'
                   ? 'Pause briefly when you finish. Earphones are recommended.'
-                  : 'The microphone stays open; the next listening turn starts automatically.'}
+                  : conversationPhase === 'speaking'
+                    ? 'You can interrupt by speaking. Earphones are most reliable; speakers use echo cancellation.'
+                    : 'The microphone stays open; the next listening turn starts automatically.'}
               </p>
             </div>
           )}
@@ -952,7 +995,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 aria-pressed={conversationActive}
                 title={conversationUnavailable
                   ? 'Realtime speech is unavailable; click-to-talk remains available.'
-                  : 'Conversation mode keeps the microphone open. Earphones recommended.'}
+                  : 'Conversation mode keeps the microphone open. You can interrupt spoken answers; earphones improve reliability.'}
                 className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${conversationActive ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-violet-700 hover:bg-violet-600'}`}
               >
                 {conversationActive

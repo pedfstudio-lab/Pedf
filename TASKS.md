@@ -4214,10 +4214,21 @@ Commit message: `Streaming STT: transcribe while the user speaks (Task 25D)`.
 
 ## Voice — continuous conversation (hands-free)
 
-### Task 32 — Continuous voice conversation (hands-free)  🔬 EXPERIMENT → branch `continuous-voice`
+### Task 32 — Continuous voice conversation (hands-free)  ✅ MERGED TO MAIN (2026-08-26, `59b2254`)
 > Replace click-to-talk with an **always-open mic + a conversational state machine**, so you just talk and the bot
 > talks back — like ChatGPT voice mode. Built on the streaming ears (25D) + streaming mouth (25C) + persona (24C).
-> **Earphone-optimized.** Big UX change → its own branch; **click-to-talk stays as the fallback** until this is solid.
+> Shipped **speaker-first** (not earphone-only); **click-to-talk stays as the fallback**.
+
+**✅ What actually landed (2026-08-26)** — hands-free listening → auto-answer → speak → repeat, running continuously
+without freezing. The final architecture differs from the first plan after live testing:
+- **One PERSISTENT realtime STT socket** for the whole conversation + auto-reconnect (**Option B**) — replaced the
+  per-turn socket that exhausted Sarvam's connections and froze after ~15 turns.
+- **Clean transcripts** via Sarvam's `transcript.final` (not stitched partials); **STT fed only while the VAD hears
+  speech** (kills silence-hallucination); **half-duplex** (STT muted while the bot talks) for speaker safety.
+- **~1.5s endpoint** (600ms cut users off mid-sentence); **batch-first TTS fallback** keeps Sarvam's voice and stops
+  reopening a doomed streaming-TTS socket per clip.
+- **Deferred:** true barge-in (32C) — half-duplex means you can't yet talk over the bot; the idle "Is everything
+  okay?" nudge (32D) was dropped by request. Production still needs the **WS-proxy** for the streaming sockets.
 
 **State machine:** `idle → listening → (3s pause) → thinking → speaking → listening …`. **Barge-in:** user speech
 during `speaking` → stop → `listening`. **Idle:** 3s silence with nothing asked → "Is everything okay?" → close.
@@ -4240,7 +4251,7 @@ during `speaking` → stop → `listening`. **Idle:** 3s silence with nothing as
 
 ---
 
-#### Task 32A — Continuous listening (open mic + always-on STT)  🔲
+#### Task 32A — Continuous listening (open mic + always-on STT)  ✅ MERGED TO MAIN
 **What this is (and isn't).** A conversation-mode toggle that opens the mic ONCE and keeps a realtime STT session
 running **across turns**, showing live text. NO turn-taking yet (32B) — this stage only proves the mic stays open
 and transcribes continuously, and that toggling off tears everything down cleanly.
@@ -4290,7 +4301,7 @@ conversation mode (click-to-talk still works); never leave the mic open after OF
 
 ---
 
-#### Task 32B — Turn-taking (VAD + 3s endpointing → auto-answer)  🔲
+#### Task 32B — Turn-taking (VAD + ~1.5s endpointing → auto-answer)  ✅ MERGED TO MAIN
 **What this is.** Decide when the user has *finished* (a ~3 s pause) and answer automatically; a brief pause keeps
 waiting so the user is never cut off.
 
@@ -4335,7 +4346,7 @@ ignore `onSpeechEnd` while `thinking`/`speaking` (that path is 32C).
 
 ---
 
-#### Fixes 1–3 for 32B (2026-08-25) — speaker-first, from the live test  🔲
+#### Fixes 1–3 for 32B (2026-08-25) — speaker-first, from the live test  ✅ DONE (+ STT-clean, VAD-gating, Option B — all in `59b2254`)
 > Target = **laptop / phone speakers, no earphones** (most users won't wear earphones). Three problems surfaced in
 > the 32B live test: (1) the 3 s wait feels slow, (2) on speakers the mic transcribes the bot's own voice back as a
 > question ("34 words"), (3) the voice flipped to a robotic accent once. All on `continuous-voice`.
@@ -4414,36 +4425,115 @@ flip. Make browser speech a true last resort.
 
 ---
 
-#### Task 32C — Barge-in (interrupt the bot)  🔲
-**What this is.** Talk while the bot is speaking → it stops instantly and takes the new question.
+#### Task 32C — Barge-in (interrupt the bot)  ✅ MERGED TO MAIN (2026-08-27) — speaker barge-in + Fix 1 pre-roll for normal turns; barge-in captures live after it triggers (the seed-replay that garbled interruptions was removed). Detection stays deliberately strict (`BARGE_IN_SPEECH_RMS = 0.06`) — may need lowering later if speaker barge-in is too insensitive.
+**What this is (and isn't).** Talk while the bot is speaking → it stops within a beat and takes your new question.
+Target = **speakers** (no earphones assumed) — the *hard* case, because the mic hears the bot's own voice and must
+not let the bot interrupt itself. This **partially undoes the shipped half-duplex**: during the bot's answer we keep
+a **barge-in VAD watch** on the mic (to detect the user starting to talk) while still NOT feeding the bot's audio to
+the STT. Build on a fresh branch off `main` (e.g. `voice-barge-in`), test, then merge.
 
-**Step 1 — keep listening while speaking.** The `conversationSession` (mic + VAD) stays open during `speaking` — do
-**not** pause it for playback. `getUserMedia`'s `echoCancellation` (32A) keeps earphone audio out of the mic.
+**Builds on what shipped:** persistent STT socket + auto-reconnect (Option B); half-duplex (`setListening(false)`
+mutes STT **and** VAD during `thinking`/`speaking`); `speechQueue.stop()`; `createVad`.
 
-**Step 2 — barge-in trigger → `PdfChat.tsx`.**
+**Step 1 — split the half-duplex gate: mute the STT, but keep a barge-in VAD → `conversationSession.ts`.**
+Today `setListening(false)` stops feeding both the STT and the VAD. Change the PCM callback so that while the bot
+answers we still run a **separate barge-in VAD** on the frames (never the STT — so the bot is not transcribed):
 ```ts
-const BARGE_IN_RMS = /* higher than 32B's speechRms so the bot's own leakage can't trip it */;
-const BARGE_IN_MIN_MS = 180;   // sustained speech, so a cough/tail doesn't fire
-// while phase === 'speaking', VAD speech above BARGE_IN_RMS sustained ≥ BARGE_IN_MIN_MS (or a confident onPartial):
-//   speechQueue.current?.stop();           // cut the bot immediately
-//   abandon the in-flight answer (bump the request id, like askRequest/micRequest today)
-//   phase → 'listening'; the new speech begins a fresh turn (32B endpointing applies)
+pcmCapture = await createPcmCapture(stream, (audio) => {
+  if (listening) {                      // normal turn
+    if (speaking) transcription?.pushAudio(audio);
+    vad.pushFrame(audio);
+  } else {                              // bot is answering — watch for a barge-in ONLY
+    bargeVad.pushFrame(audio);          // do NOT push to the STT (don't transcribe the bot)
+  }
+});
+bargeVad.onSpeechStart = () => { if (!stopped) callbacks.onBargeIn?.(); };
 ```
+Expose an `onBargeIn` callback on `ConversationCallbacks`.
 
-**Step 3 — clean handoff.** `speechQueue.stop()` bumps generation so queued clips + the streaming TTS stop; guard the
-old turn's LLM stream on its request id so its late deltas are ignored; don't drop the transcript captured during the
-interruption.
+**Step 2 — a stricter, echo-safe barge-in detector → `vad.ts` / consts.**
+On speakers the mic hears the bot, so the barge-in detector must be harder to trip than normal speech:
+- **Higher RMS threshold** — `BARGE_IN_SPEECH_RMS` > `DEFAULT_VAD_SPEECH_RMS`, so residual echo (after browser
+  `echoCancellation`) can't fire it.
+- **Sustained speech** — require ~**300–500 ms** continuously above threshold (`BARGE_IN_MIN_MS`), so a cough, a
+  click, or the bot's audio tail doesn't fire.
+- **Arm after a short delay** — ignore the first ~500 ms of the bot's answer (its loudest onset + the echo-canceller
+  settling), so the start of the answer can't false-trigger.
+- Keep `echoCancellation: true` (already on) doing the heavy lifting.
 
-**Verify (earphones).** Mid-answer, start talking → the bot stops within a beat and answers the new question; a
-cough / short noise does **not** interrupt. `npm run test` — a speech event during `speaking` calls `stop()` and sets
-`listening`; a sub-threshold blip does not. `typecheck` / `lint`.
+**Step 3 — the barge-in handler → `PdfChat.tsx`.** `onBargeIn` fires only while `phase === 'speaking'`:
+```ts
+// 1. speechQueue.current?.stop();      // cut the bot's audio immediately
+// 2. abandon the in-flight answer: bump askRequest/micRequest so late LLM + TTS deltas are ignored
+// 3. conversationSession.current?.setListening(true);   // resume feeding the PERSISTENT STT socket
+// 4. updateConversationPhase('listening');              // the new speech is now a normal turn (32B endpointing)
+```
+No socket to reopen — the STT socket is persistent (Option B); we just resume feeding it. If it dropped during the
+bot's answer (idle), Option-B **auto-reconnect** must bring it back as/before we resume.
 
-**Edge cases.** Loudspeaker echo → raise `BARGE_IN_RMS` / recommend earphones in the UI; rapid double-interrupt →
-`stop()` is idempotent; ensure the newly captured words aren't lost in the transition.
+**Step 4 — clean handoff.** `speechQueue.stop()` bumps the playback generation → queued clips + streaming/batch TTS
+stop; the abandoned turn's LLM stream is ignored via its request id; the barge-in speech that triggered the
+interrupt seeds the new turn (VAD already fired = speech started, so resuming the STT immediately captures it — don't
+drop the first word).
+
+**Step 5 — UI.** A subtle "you can interrupt" hint; keep the earphone recommendation, since barge-in is most reliable
+on earphones and speakers lean on echo-cancellation + the strict thresholds.
+
+**Verify (speakers AND earphones).** Mid-answer, start talking → the bot stops within a beat and answers the new
+question. **On speakers specifically:** the bot does **not** interrupt itself (its own audio never trips barge-in),
+and a cough / short noise does not interrupt. `npm run test` — a *sustained* speech event during `speaking` calls
+`stop()` + `setListening(true)` + sets `listening`; a sub-threshold or too-short blip does not. `typecheck` / `lint`.
+
+**Edge cases.**
+- **Speaker self-trigger (the big one):** if the bot interrupts itself, raise `BARGE_IN_SPEECH_RMS`, lengthen
+  `BARGE_IN_MIN_MS`, or lengthen the arm-delay; last resort, recommend earphones for barge-in.
+- **Socket dropped during the answer** → Option-B reconnect must finish before capturing the new question.
+- **Rapid double-interrupt** → `stop()` is idempotent; each barge-in resets cleanly.
+- Expose all barge-in thresholds as consts for live tuning.
+
+**Fix 1 for 32C — pre-roll buffer: recover the clipped first word**  🔲 → branch `voice-preroll` (off `main`); **build + test ON THE BRANCH, merge to `main` only after it's verified**
+> **What/why:** the shipped VAD-gating (feed the STT only while the VAD hears speech — the fix that killed the
+> silence-hallucination) drops the **first ~200–300 ms** of an utterance: the quiet onset is below the VAD threshold,
+> so the STT isn't fed until the VAD fires — the first word or two are lost ("it listened late / skipped my first
+> words"). Fix = a small **pre-roll buffer** that recovers that onset.
+>
+> **Safe by construction — does NOT undo the earlier fixes:** the buffer is pushed to the STT **only when real speech
+> is detected** (never on silence → no `"i mean, i mean"` hallucination), and it changes only *what audio goes in*,
+> not how the transcript is assembled (Sarvam's clean `transcript.final` path is untouched → no `"X ×4"` repetition).
+
+**Step 1 — rolling pre-roll + flush on speech-start → `conversationSession.ts`.** Keep the last few PCM frames; on
+the VAD's silent→speaking transition, flush them to the STT first, then continue live:
+```ts
+const PREROLL_FRAMES = 3;                 // ~300ms at 100ms/frame — the onset before the VAD fires
+let preroll: Uint8Array<ArrayBuffer>[] = [];
+
+pcmCapture = await createPcmCapture(stream, (audio) => {
+  if (!listening) return;                 // (bot's turn / barge-in watch handled elsewhere)
+  const wasSpeaking = speaking;
+  vad.pushFrame(audio);                   // may flip speaking → true (onSpeechStart)
+  if (speaking) {
+    if (!wasSpeaking) {                   // speech just started — send the buffered onset FIRST
+      for (const frame of preroll) transcription?.pushAudio(frame);
+    }
+    transcription?.pushAudio(audio);
+    preroll = [];
+  } else {                               // still silent — keep a short rolling buffer, NEVER sent
+    preroll.push(audio);
+    if (preroll.length > PREROLL_FRAMES) preroll.shift();
+  }
+});
+```
+Reset `preroll = []` inside `setListening(...)` and on `stop()` so no stale audio carries over.
+
+**Verify (on the branch):** speak a sentence starting with a soft word ("Okay, what is…") → the **first word is in the
+transcript** (not clipped); stay silent → the input stays **empty** (no hallucination); ask several questions → **no
+`X ×4` repetition** returns. `npm run test` — frames buffered during silence are NOT sent; on speech-start the
+buffered frames are flushed before the live frame. `typecheck` / `lint`. **Do NOT merge to `main` until it's tested
+and good on the branch.**
 
 ---
 
-#### Task 32D — Idle & graceful close  🔲
+#### Task 32D — Idle & graceful close  ❌ DESCOPED — the "Are you there?" idle nudge was dropped by request (2026-08-26)
 **What this is.** After genuine silence (nothing asked), gently check in, then close.
 
 **Step 1 — idle timer → `PdfChat.tsx`.** In `listening` with **no speech since entering listening** (transcript

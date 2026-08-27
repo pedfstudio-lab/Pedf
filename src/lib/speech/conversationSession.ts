@@ -6,7 +6,10 @@ import type {
   PcmCapture,
   PcmCaptureFactory,
 } from '@/lib/speech/recordQuestion';
-import { createVad } from '@/lib/speech/vad';
+import {
+  createBargeInVad,
+  createVad,
+} from '@/lib/speech/vad';
 import type { Vad } from '@/lib/speech/vad';
 
 export type ConversationPhase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -16,6 +19,7 @@ export interface ConversationCallbacks {
   onFinal?(text: string): void;
   onSpeechStart?(): void;
   onSpeechEnd?(): void;
+  onBargeIn?(): void;
   onReconnect?(): void;
   onError?(error: unknown): void;
 }
@@ -31,6 +35,8 @@ export interface ConversationSession {
   readonly stream: MediaStream;
   /** Gate microphone frames without closing the persistent capture or STT socket. */
   setListening(listening: boolean): void;
+  /** Watch the muted microphone for a deliberate interruption without feeding STT. */
+  setBargeInEnabled(enabled: boolean): void;
   /** Flush the active utterance; its clean transcript arrives through onFinal. */
   requestFinal(): boolean;
   stop(): Promise<void>;
@@ -43,6 +49,7 @@ const CONVERSATION_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
 };
 const RECONNECT_BASE_DELAY_MS = 250;
 const RECONNECT_MAX_DELAY_MS = 4_000;
+export const CONVERSATION_PREROLL_FRAMES = 3;
 
 function releaseStream(stream: MediaStream): void {
   for (const track of stream.getTracks()) track.stop();
@@ -64,6 +71,7 @@ export async function startConversationSession(
   createPcmCapture: PcmCaptureFactory = createRealtimePcmCapture,
   vad: Vad = createVad(),
   reconnectBaseDelayMs = RECONNECT_BASE_DELAY_MS,
+  bargeVad: Vad = createBargeInVad(),
 ): Promise<ConversationSession> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Microphone recording is not supported in this browser.');
@@ -79,6 +87,8 @@ export async function startConversationSession(
   let stopped = false;
   let listening = true;
   let speaking = false;
+  let preroll: Uint8Array<ArrayBuffer>[] = [];
+  let bargeInEnabled = false;
   let stopPromise: Promise<void> | undefined;
 
   const onPartial = (text: string) => {
@@ -94,6 +104,26 @@ export async function startConversationSession(
   vad.onSpeechEnd = () => {
     speaking = false;
     if (!stopped) callbacks.onSpeechEnd?.();
+  };
+
+  const feedListeningFrame = (audio: Uint8Array<ArrayBuffer>) => {
+    const wasSpeaking = speaking;
+    vad.pushFrame(audio);
+    if (speaking) {
+      if (!wasSpeaking) {
+        for (const frame of preroll) transcription?.pushAudio(frame);
+      }
+      transcription?.pushAudio(audio);
+      preroll = [];
+      return;
+    }
+    preroll.push(audio.slice());
+    if (preroll.length > CONVERSATION_PREROLL_FRAMES) preroll.shift();
+  };
+  bargeVad.onSpeechStart = () => {
+    if (stopped || listening || !bargeInEnabled) return;
+    bargeInEnabled = false;
+    callbacks.onBargeIn?.();
   };
 
   const clearReconnectTimer = () => {
@@ -123,6 +153,7 @@ export async function startConversationSession(
     if (stopped || transcription !== source) return;
     transcription = undefined;
     speaking = false;
+    preroll = [];
     vad.reset();
     source.close();
     if (initial) return;
@@ -150,6 +181,7 @@ export async function startConversationSession(
         transcription = undefined;
         candidate.close();
         speaking = false;
+        preroll = [];
         vad.reset();
         if (!initial) {
           if (isRetryableTranscriptionError(error)) scheduleReconnect();
@@ -174,14 +206,19 @@ export async function startConversationSession(
   try {
     await connectTranscription(true);
     pcmCapture = await createPcmCapture(stream, (audio) => {
-      if (!listening) return;
-      vad.pushFrame(audio);
-      if (speaking) transcription?.pushAudio(audio);
+      if (listening) {
+        feedListeningFrame(audio);
+        return;
+      }
+      if (!bargeInEnabled) return;
+      bargeVad.pushFrame(audio);
     });
   } catch (error) {
     transcription?.close();
     await pcmCapture?.stop().catch(() => undefined);
     vad.reset();
+    preroll = [];
+    bargeVad.reset();
     releaseStream(stream);
     callbacks.onError?.(error);
     throw error;
@@ -193,12 +230,21 @@ export async function startConversationSession(
     setListening(next) {
       listening = next;
       speaking = false;
+      preroll = [];
+      bargeInEnabled = false;
       vad.reset();
+      bargeVad.reset();
+    },
+
+    setBargeInEnabled(next) {
+      bargeInEnabled = !stopped && !listening && next;
+      bargeVad.reset();
     },
 
     requestFinal() {
       if (stopped || !transcription) return false;
       speaking = false;
+      preroll = [];
       void transcription.finish().catch(() => undefined);
       return true;
     },
@@ -208,6 +254,8 @@ export async function startConversationSession(
       stopped = true;
       listening = false;
       speaking = false;
+      preroll = [];
+      bargeInEnabled = false;
       clearReconnectTimer();
       stopPromise = (async () => {
         let stopError: unknown;
@@ -219,6 +267,7 @@ export async function startConversationSession(
         transcription?.close();
         transcription = undefined;
         vad.reset();
+        bargeVad.reset();
         releaseStream(stream);
         if (stopError !== undefined) throw stopError;
       })();

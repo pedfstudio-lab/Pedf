@@ -114,6 +114,144 @@ describe('startConversationSession', () => {
     expect(stopTrack).toHaveBeenCalledOnce();
   });
 
+  it('flushes a rolling three-frame pre-roll before speech and clears it between turns', async () => {
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia: vi.fn(async () => stream) },
+    });
+    const transcription = fakeTranscription();
+    let emitAudio: ((audio: Uint8Array<ArrayBuffer>) => void) | undefined;
+    let detectSpeech = false;
+    const vad = {
+      pushFrame: vi.fn(),
+      reset: vi.fn(),
+      onSpeechStart: undefined as (() => void) | undefined,
+      onSpeechEnd: undefined as (() => void) | undefined,
+    };
+    vad.pushFrame.mockImplementation(() => {
+      if (!detectSpeech) return;
+      detectSpeech = false;
+      vad.onSpeechStart?.();
+    });
+    const session = await startConversationSession(
+      () => transcription,
+      {},
+      async (_stream, onAudio) => {
+        emitAudio = onAudio;
+        return { stop: async () => undefined };
+      },
+      vad,
+    );
+    const frame = (value: number) => {
+      const audio = new Uint8Array(new ArrayBuffer(2));
+      audio.set([value, value]);
+      return audio;
+    };
+
+    emitAudio?.(frame(1));
+    emitAudio?.(frame(2));
+    emitAudio?.(frame(3));
+    emitAudio?.(frame(4));
+    expect(transcription.pushAudio).not.toHaveBeenCalled();
+
+    detectSpeech = true;
+    emitAudio?.(frame(5));
+    expect(transcription.pushAudio.mock.calls.map(([audio]) => [...audio])).toEqual([
+      [2, 2],
+      [3, 3],
+      [4, 4],
+      [5, 5],
+    ]);
+
+    transcription.pushAudio.mockClear();
+    session.setListening(false);
+    session.setListening(true);
+    emitAudio?.(frame(6));
+    session.setListening(false);
+    session.setListening(true);
+    detectSpeech = true;
+    emitAudio?.(frame(7));
+    expect(transcription.pushAudio.mock.calls.map(([audio]) => [...audio])).toEqual([
+      [7, 7],
+    ]);
+
+    await session.stop();
+  });
+
+  it('watches muted playback without feeding STT and captures only live audio after barge-in', async () => {
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia: vi.fn(async () => stream) },
+    });
+    const transcription = fakeTranscription();
+    let emitAudio: ((audio: Uint8Array<ArrayBuffer>) => void) | undefined;
+    const vad = {
+      pushFrame: vi.fn(),
+      reset: vi.fn(),
+      onSpeechStart: undefined as (() => void) | undefined,
+      onSpeechEnd: undefined as (() => void) | undefined,
+    };
+    const bargeVad = {
+      pushFrame: vi.fn(),
+      reset: vi.fn(),
+      onSpeechStart: undefined as (() => void) | undefined,
+      onSpeechEnd: undefined as (() => void) | undefined,
+    };
+    let normalSpeechDetected = false;
+    vad.pushFrame.mockImplementation(() => {
+      if (normalSpeechDetected) return;
+      normalSpeechDetected = true;
+      vad.onSpeechStart?.();
+    });
+    const holder: { current?: Awaited<ReturnType<typeof startConversationSession>> } = {};
+    const onBargeIn = vi.fn(() => holder.current?.setListening(true));
+    const session = await startConversationSession(
+      () => transcription,
+      { onBargeIn },
+      async (_stream, onAudio) => {
+        emitAudio = onAudio;
+        return { stop: async () => undefined };
+      },
+      vad,
+      undefined,
+      bargeVad,
+    );
+    holder.current = session;
+
+    session.setListening(false);
+    const ignored = new Uint8Array(new ArrayBuffer(2));
+    ignored.set([9, 9]);
+    emitAudio?.(ignored);
+    expect(vad.pushFrame).not.toHaveBeenCalled();
+    expect(bargeVad.pushFrame).not.toHaveBeenCalled();
+    expect(transcription.pushAudio).not.toHaveBeenCalled();
+
+    session.setBargeInEnabled(true);
+    const frames = Array.from({ length: 4 }, (_, index) => {
+      const frame = new Uint8Array(new ArrayBuffer(2));
+      frame.set([index + 1, index + 2]);
+      return frame;
+    });
+    for (const frame of frames) emitAudio?.(frame);
+    expect(bargeVad.pushFrame).toHaveBeenCalledTimes(4);
+    expect(vad.pushFrame).not.toHaveBeenCalled();
+    expect(transcription.pushAudio).not.toHaveBeenCalled();
+
+    bargeVad.onSpeechStart?.();
+    expect(onBargeIn).toHaveBeenCalledOnce();
+    expect(vad.pushFrame).not.toHaveBeenCalled();
+    expect(transcription.pushAudio).not.toHaveBeenCalled();
+
+    const liveFrame = new Uint8Array(new ArrayBuffer(2));
+    liveFrame.set([8, 9]);
+    emitAudio?.(liveFrame);
+    expect(vad.pushFrame).toHaveBeenCalledWith(liveFrame);
+    expect(transcription.pushAudio).toHaveBeenCalledOnce();
+    expect(transcription.pushAudio).toHaveBeenCalledWith(liveFrame);
+
+    await session.stop();
+  });
+
   it('uses one realtime socket across 30 utterances', async () => {
     const stopTrack = vi.fn();
     const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
