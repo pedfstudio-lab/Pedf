@@ -4883,7 +4883,7 @@ normal text-undo, not document-undo.
 > **Task 34 — zoom** → branch `editor-zoom`. **Task 35 — insert + duplicate page** → branch `page-operations`.
 > Merge each to `main` on its own, only after it's tested on its branch.
 
-### Task 34 — Zoom in / zoom out  🔲 TODO → branch `editor-zoom`
+### Task 34 — Zoom in / zoom out  ✅ MERGED TO MAIN (2026-08-27, `d33574f`)
 > The viewer renders every page at a **fixed** scale (`zoom = 1.5`, hardcoded, no control). Goal: let the user
 > zoom the whole PDF in/out with toolbar buttons + a % readout, without breaking the edit overlays. **The hard part
 > is already done for us** — the coordinate math is fully zoom-driven, so the overlays follow automatically; this
