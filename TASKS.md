@@ -4936,7 +4936,7 @@ at every zoom level. `npm run test` / `typecheck` / `lint` green. **Test on the 
 
 ---
 
-### Task 35 — Insert a blank page + Duplicate a page (per-page controls)  🔲 TODO → branch `page-operations`
+### Task 35 — Insert a blank page + Duplicate a page (per-page controls)  ✅ MERGED TO MAIN (2026-08-27, `d1effa3`)
 > Above **every page**, show two labelled controls — **"Duplicate Page"** and **"Insert Page"** — so the new page
 > lands **right there** (no top-menu "add" that leaves you hunting where it went). Duplicate = an **exact copy** of
 > that page (same content, fonts, size) **including any edits you've made on it**. Insert = a **blank page** the
@@ -5103,7 +5103,7 @@ controls (Task 35)`.
 
 ---
 
-### Task 36 — Delete a page (per-page control)  🔲 TODO → **same branch `page-operations`** (extends Task 35)
+### Task 36 — Delete a page (per-page control)  ✅ MERGED TO MAIN (2026-08-27, `d1effa3`)
 > Add a third per-page control — **Delete Page** (a trash icon on every page) — that removes that page from the
 > document. It reuses Task 35's page-plan machinery **entirely**, so it's small. **Built on the same
 > `page-operations` branch** as insert/duplicate, so the whole page-operations feature (add / duplicate / delete)
