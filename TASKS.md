@@ -4563,7 +4563,7 @@ Stage commits — 32A: `Continuous listening: always-on mic + streaming STT`; 32
 
 ---
 
-### Task 33 — Hands-free voice over the full PDF (collapse the ask bar during conversation)  🔬 EXPERIMENT → branch `voice-handsfree`
+### Task 33 — Hands-free voice over the full PDF (collapse the ask bar during conversation)  ✅ MERGED TO MAIN (2026-08-27, `1d05f65`)
 > Today the ask bar is a modal that dims + blocks the PDF, so you can't scroll while talking. Goal: when voice
 > **conversation mode** is on, collapse the ask bar → the **full PDF is visible + scrollable** → the voice keeps
 > running in the background, with the **bot's answer shown as a caption** over the PDF and a small floating
