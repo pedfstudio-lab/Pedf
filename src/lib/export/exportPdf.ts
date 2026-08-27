@@ -1,6 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { groupBy } from '@/lib/util/groupBy';
 import { invariant } from '@/lib/util/assert';
+import { isIdentityPagePlan } from '@/state/pagePlan';
 import { makePageContext } from './context';
 import { HANDLERS } from './registry';
 import type { EditHandler } from './registry';
@@ -13,7 +14,28 @@ export interface ExportResult {
 
 /** Load pristine bytes, dispatch PDF-point edits in z-order, and serialize once. */
 export async function exportPdf(doc: EditDocument): Promise<ExportResult> {
-  const pdf = await PDFDocument.load(doc.originalBytes, { updateMetadata: false });
+  const source = await PDFDocument.load(doc.originalBytes, { updateMetadata: false });
+  const identityPlan = isIdentityPagePlan(doc.plan, source.getPageCount());
+  const pdf = identityPlan ? source : await PDFDocument.create({ updateMetadata: false });
+  if (!identityPlan) {
+    const plan = doc.plan;
+    invariant(plan, 'a structural export requires a page plan');
+    for (const entry of plan) {
+      if (entry.kind === 'blank') {
+        pdf.addPage([entry.widthPt, entry.heightPt]);
+        continue;
+      }
+      invariant(
+        Number.isInteger(entry.sourceIndex)
+          && entry.sourceIndex >= 0
+          && entry.sourceIndex < source.getPageCount(),
+        `invalid source page index ${entry.sourceIndex}`,
+      );
+      const [copied] = await pdf.copyPages(source, [entry.sourceIndex]);
+      invariant(copied, `failed to copy source page ${entry.sourceIndex}`);
+      pdf.addPage(copied);
+    }
+  }
   const warnings: string[] = [];
   const editsByPage = groupBy(doc.edits, (edit) => edit.pageIndex);
 

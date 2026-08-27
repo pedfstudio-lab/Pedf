@@ -11,11 +11,19 @@ import { clampZoom, ZOOM_STEP } from './lib/pdf/zoom';
 import type { PdfRect, Rgb } from './lib/export/types';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
+import { createPagePlan, planToGeometry } from './state/pagePlan';
 import { PrefsStoreProvider } from './state/prefsStore';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
 const DEFAULT_SAMPLE_FILE = 'Corporate-Governance.pdf';
 const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/${encodeURIComponent(DEFAULT_SAMPLE_FILE)}`;
+
+function pageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `page-${crypto.randomUUID()}`;
+  }
+  return `page-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement
@@ -87,7 +95,7 @@ function useZoomShortcuts(
 
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
-  const { edits, resetEdits } = useEdits();
+  const { edits, pagePlan, resetDocument } = useEdits();
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -114,7 +122,7 @@ function EditorApp() {
     try {
       const loaded = await loadDocument(source);
       setDocument({ loaded, fileName: name });
-      resetEdits();
+      resetDocument(createPagePlan(loaded.pages.length, pageId));
       setEditMode(false);
       setTextAddMode(false);
       setImageMode(false);
@@ -122,7 +130,7 @@ function EditorApp() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [resetEdits, setDocument]);
+  }, [resetDocument, setDocument]);
 
   // Try the bundled sample on first load. Silently ignore if it isn't present
   // (Vite's dev server answers unknown paths with index.html, so verify %PDF-).
@@ -187,10 +195,12 @@ function EditorApp() {
     setDownloadReady(null);
     setExporting(true);
     try {
+      const pages = planToGeometry(pagePlan, document.loaded.pages);
       const result = await exportPdf({
         originalBytes: document.loaded.originalBytes,
         edits: [...edits],
-        pages: document.loaded.pages,
+        pages,
+        plan: pagePlan,
         sampleBackground,
       });
       const blob = new Blob([result.bytes.slice().buffer], { type: 'application/pdf' });
@@ -211,7 +221,7 @@ function EditorApp() {
     } finally {
       setExporting(false);
     }
-  }, [document, edits, exporting, sampleBackground]);
+  }, [document, edits, exporting, pagePlan, sampleBackground]);
 
   return (
     <div className="flex h-full flex-col bg-neutral-100">
@@ -276,6 +286,7 @@ function EditorApp() {
         {document ? (
           <PdfViewer
             doc={document.loaded.doc}
+            originalPages={document.loaded.pages}
             zoom={zoom}
             editMode={editMode}
             textAddMode={textAddMode}

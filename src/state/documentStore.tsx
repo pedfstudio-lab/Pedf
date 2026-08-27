@@ -19,6 +19,7 @@ interface DocumentStoreValue {
   readonly document: OpenDocument | null;
   setDocument(document: OpenDocument | null): void;
   registerPageCanvas(pageIndex: number, registration: PageCanvasRegistration | null): void;
+  clearPageCanvases(): void;
   getPageCanvas(pageIndex: number): PageCanvasRegistration | undefined;
 }
 
@@ -38,9 +39,10 @@ export function DocumentStoreProvider({ children }: { readonly children: ReactNo
     (pageIndex: number) => pageCanvases.current.get(pageIndex),
     [],
   );
+  const clearPageCanvases = useCallback(() => pageCanvases.current.clear(), []);
   const value = useMemo(
-    () => ({ document, setDocument, registerPageCanvas, getPageCanvas }),
-    [document, getPageCanvas, registerPageCanvas],
+    () => ({ document, setDocument, registerPageCanvas, clearPageCanvases, getPageCanvas }),
+    [clearPageCanvases, document, getPageCanvas, registerPageCanvas],
   );
 
   return (

@@ -1,4 +1,5 @@
 import type { PageGeometry } from '@/lib/pdf/types';
+import type { PagePlan } from '@/state/pagePlan';
 
 /** An sRGB color with channels normalized to the inclusive range 0..1. */
 export interface Rgb {
@@ -95,5 +96,7 @@ export interface EditDocument {
   readonly originalBytes: Uint8Array;
   edits: Edit[];
   pages: PageGeometry[];
+  /** Ordered live pages. Omitted plans retain the legacy identity export path. */
+  plan?: PagePlan;
   sampleBackground?: (pageIndex: number, rect: PdfRect) => Rgb;
 }

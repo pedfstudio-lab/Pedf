@@ -17,7 +17,7 @@ import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 
 interface ImageOverlayProps {
-  readonly page: PDFPageProxy;
+  readonly page?: PDFPageProxy;
   readonly pageIndex: number;
   readonly viewport: PageViewport;
   readonly dpr: number;
@@ -151,6 +151,10 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
   const pendingTargetRef = useRef<PendingTarget>();
 
   useEffect(() => {
+    if (!page) {
+      setRegions([]);
+      return;
+    }
     let cancelled = false;
     void detectImageCandidates(page, pageIndex)
       .then((candidates) => {
@@ -439,6 +443,7 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
         const bytes = await cropImageBytes(cropTarget.edit.bytes, cropTarget.edit.rect, cropRect);
         updateEdit({ ...cropTarget.edit, rect: cropRect, bytes });
       } else {
+        if (!page) throw new Error('Cannot crop source content on a blank page.');
         const bytes = await capturePdfRegion(page, cropRect, 3);
         const z = nextZ();
         const cover = makeExistingCover(cropTarget.region.rect, 'image-crop-cover', z);

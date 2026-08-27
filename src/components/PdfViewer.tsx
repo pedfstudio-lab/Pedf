@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import type { PageGeometry } from '@/lib/pdf/types';
+import { planToGeometry } from '@/state/pagePlan';
+import { useDocumentStore } from '@/state/documentStore';
+import { useEdits } from '@/state/editsStore';
 import { PageCanvas } from './PageCanvas';
+import { PageToolbar } from './PageToolbar';
 
 interface PdfViewerProps {
   doc: PDFDocumentProxy;
+  originalPages: readonly PageGeometry[];
   zoom: number;
   editMode: boolean;
   textAddMode: boolean;
@@ -11,8 +17,14 @@ interface PdfViewerProps {
   peek: boolean;
 }
 
-export function PdfViewer({ doc, zoom, editMode, textAddMode, imageMode, peek }: PdfViewerProps) {
+export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, imageMode, peek }: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
+  const { pagePlan } = useEdits();
+  const { clearPageCanvases } = useDocumentStore();
+  const livePages = useMemo(
+    () => planToGeometry(pagePlan, originalPages),
+    [originalPages, pagePlan],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -31,20 +43,39 @@ export function PdfViewer({ doc, zoom, editMode, textAddMode, imageMode, peek }:
     };
   }, [doc]);
 
+  useEffect(() => {
+    clearPageCanvases();
+  }, [clearPageCanvases, pagePlan]);
+
   return (
     <div className="flex flex-col items-center gap-4 py-4">
-      {pages.map((page) => (
-        <PageCanvas
-          key={page.pageNumber}
-          page={page}
-          pageIndex={page.pageNumber - 1}
-          zoom={zoom}
-          editMode={editMode}
-          textAddMode={textAddMode}
-          imageMode={imageMode}
-          peek={peek}
-        />
-      ))}
+      {pagePlan.map((entry, position) => {
+        const geometry = livePages[position];
+        if (!geometry) return null;
+        const page = entry.kind === 'source' ? pages[entry.sourceIndex] : undefined;
+        if (entry.kind === 'source' && !page) return null;
+        const source = entry.kind === 'blank'
+          ? { kind: 'blank' as const, widthPt: entry.widthPt, heightPt: entry.heightPt }
+          : { kind: 'pdf' as const, page: page as PDFPageProxy };
+        return (
+          <div key={entry.id} className="flex flex-col items-center gap-1">
+            <PageToolbar
+              position={position}
+              widthPt={geometry.widthPt}
+              heightPt={geometry.heightPt}
+            />
+            <PageCanvas
+              source={source}
+              pageIndex={position}
+              zoom={zoom}
+              editMode={editMode}
+              textAddMode={textAddMode}
+              imageMode={imageMode}
+              peek={peek}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

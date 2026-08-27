@@ -5100,3 +5100,92 @@ round-trip**. **Test on the branch; merge only on your go.**
 
 **Land it (on your go):** merge `page-operations` → `main`. Commit: `Insert blank + duplicate page, per-page
 controls (Task 35)`.
+
+---
+
+### Task 36 — Delete a page (per-page control)  🔲 TODO → **same branch `page-operations`** (extends Task 35)
+> Add a third per-page control — **Delete Page** (a trash icon on every page) — that removes that page from the
+> document. It reuses Task 35's page-plan machinery **entirely**, so it's small. **Built on the same
+> `page-operations` branch** as insert/duplicate, so the whole page-operations feature (add / duplicate / delete)
+> lands together. Fully **undoable** (Ctrl+Z restores the page and its edits). **Guard: you can't delete the only
+> remaining page** (a PDF must keep ≥ 1 page).
+
+**Depends on:** Task 35 (page plan). Delete is the **inverse of insert**: remove the plan entry, drop that page's
+edits, and pull all later pages **back** by one (insert pushes forward → delete pulls back). Export needs **no
+change** — a shorter plan is already non-identity, so it routes through the existing build-path.
+
+**Step 1 — pure delete logic → `src/state/pagePlan.ts` (mirrors `duplicatePage` / `insertBlankPage`).**
+```ts
+/** Remove one live page: drop its edits and pull all later pages back by one. */
+export function deletePage(
+  plan: PagePlan,
+  edits: readonly Edit[],
+  position: number,
+): PageOperationResult {
+  pageAt(plan, position);                                   // validates the position (throws on a bad index)
+  if (plan.length <= 1) throw new RangeError('cannot delete the last remaining page');
+  const nextPlan = [...plan.slice(0, position), ...plan.slice(position + 1)];
+  const nextEdits = edits
+    .filter((edit) => edit.pageIndex !== position)          // edits on the deleted page are removed
+    .map((edit) => (edit.pageIndex > position ? { ...edit, pageIndex: edit.pageIndex - 1 } : edit));
+  return { plan: nextPlan, edits: nextEdits };
+}
+```
+No `newId` needed — delete creates nothing.
+
+**Step 2 — wire into the history reducer → `src/state/editsStore.tsx`.**
+- Import `deletePage as deletePageState` alongside the other two.
+- Add the action: `| { readonly type: 'delete-page'; readonly position: number }` (no `seed` — no new ids).
+- Add the reducer case, **guarding the last page so the reducer never throws**:
+```ts
+case 'delete-page': {
+  if (state.present.plan.length <= 1) return state;         // no-op: always keep ≥ 1 page
+  const next = deletePageState(state.present.plan, state.present.edits, action.position);
+  return pushPresent(state, { edits: next.edits, plan: next.plan });
+}
+```
+- Add the creator + expose it: `deletePage(position: number)` → `dispatch({ type: 'delete-page', position })`;
+  add `deletePage` to `EditsStoreValue`, the `value` object, and the `useMemo` deps (exactly the `duplicatePage`
+  pattern).
+
+**Step 3 — the Delete control → `src/components/PageToolbar.tsx`.**
+Pull `deletePage` and `pagePlan` from `useEdits()`. Add a **trash-icon** button (you asked for a "delete icon")
+after Insert Page — red, `aria-label="Delete Page"`, disabled when only one page remains:
+```tsx
+const { duplicatePage, insertBlankPage, deletePage, pagePlan } = useEdits();
+// …after the Insert Page button…
+<button
+  type="button"
+  onClick={() => deletePage(position)}
+  disabled={pagePlan.length <= 1}                           // can't delete the only page
+  aria-label="Delete Page"
+  title="Delete page"
+  className="rounded px-2 py-1 font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+>
+  {/* small 16px trash SVG */}
+</button>
+```
+> **Icon vs label:** the other two controls are text labels; a red **trash icon** matches your "delete icon"
+> wording and reads as destructive. If you'd rather stay consistent, make it a red **"Delete Page"** text button —
+> say which. **No confirmation dialog** — deletion is one **Ctrl+Z** away (undoable); add a confirm only if you
+> want one.
+
+**Step 4 — export needs no change (just confirm).** `isIdentityPagePlan` returns **false** after a delete (the plan
+is shorter and its `sourceIndex`es no longer equal their positions), so export already routes to the build-path,
+which builds exactly the pages the plan lists. Confirm in the export test that a deleted page is absent.
+
+**Tests:**
+- `pagePlan.test.ts`: delete at p → plan length −1, entry gone; edits on p **removed**; edits after p shift −1;
+  edits before p unchanged; delete on a 1-page plan **throws**; delete composes correctly after a duplicate/insert.
+- `editsStore.test.ts`: `delete-page` updates `present`; **undo restores** the page + its edits; the last-page
+  reducer guard is a no-op.
+- `exportPdf.test.ts`: delete a page → output page count −1 and the deleted page's content is absent.
+
+**Verify (live):** open a multi-page PDF → every page shows a **trash** control → delete page 2 → it vanishes,
+later pages renumber, edits stay on their correct pages → the trash is **disabled when one page remains** →
+**Ctrl+Z** brings the page back with its edits → **Export** → the deleted page is gone from the PDF.
+`npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** rides the **`page-operations`** branch with Task 35 — the whole feature merges together
+as **insert + duplicate + delete**. Commit (folded into the page-operations commit): `Delete page (per-page
+control)`.

@@ -54,7 +54,7 @@ import { ImageOverlay } from './ImageOverlay';
 import { LineEditOverlay } from './LineEditOverlay';
 
 interface OverlayLayerProps {
-  readonly page: PDFPageProxy;
+  readonly page?: PDFPageProxy;
   readonly pageIndex: number;
   readonly viewport: PageViewport;
   readonly dpr: number;
@@ -319,6 +319,13 @@ export function OverlayLayer({
   const { getPageCanvas } = useDocumentStore();
 
   useEffect(() => {
+    if (!page) {
+      setRuns([]);
+      setBlocks([]);
+      setImageRegions([]);
+      setRuleLines([]);
+      return;
+    }
     let cancelled = false;
     void Promise.all([
       extractTextRuns(page, pageIndex),
@@ -954,7 +961,7 @@ export function OverlayLayer({
                 maxHeightPt: availableBulletListHeight(
                   activeBulletList,
                   blocks,
-                  page.view[1] ?? 0,
+                  page?.view[1] ?? 0,
                 ),
               } : undefined}
               externalError={bulletCommitError}
@@ -974,7 +981,7 @@ export function OverlayLayer({
                     availableBulletListHeight(
                       activeBulletList,
                       blocks,
-                      page.view[1] ?? 0,
+                      page?.view[1] ?? 0,
                     ),
                     bulletBase,
                   );

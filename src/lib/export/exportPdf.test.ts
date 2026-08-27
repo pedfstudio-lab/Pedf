@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { degrees, PDFDocument } from 'pdf-lib';
+import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { planToGeometry } from '@/state/pagePlan';
+import type { PagePlan } from '@/state/pagePlan';
 import type { CoverEdit, EditDocument, LineEdit, PdfRect, TextEdit } from './types';
 
 async function makeTwoPageDocument(): Promise<EditDocument> {
   const pdf = await PDFDocument.create({ updateMetadata: false });
-  pdf.addPage([300, 400]);
+  const firstPage = pdf.addPage([300, 400]);
   const secondPage = pdf.addPage([500, 600]);
   secondPage.setRotation(degrees(90));
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  firstPage.drawText('First source marker', { x: 20, y: 350, size: 12, font });
+  secondPage.drawText('Second source marker', { x: 20, y: 550, size: 12, font });
 
   return {
     originalBytes: await pdf.save(),
@@ -36,6 +41,10 @@ async function makeTwoPageDocument(): Promise<EditDocument> {
 describe('exportPdf', () => {
   it('round-trips a zero-edit document as valid PDF bytes without changing page structure', async () => {
     const doc = await makeTwoPageDocument();
+    doc.plan = [
+      { id: 'source-0', kind: 'source', sourceIndex: 0 },
+      { id: 'source-1', kind: 'source', sourceIndex: 1 },
+    ];
     const pristineSnapshot = doc.originalBytes.slice();
 
     const result = await exportPdf(doc);
@@ -49,6 +58,117 @@ describe('exportPdf', () => {
     expect(reopened.getPage(0).getSize()).toEqual({ width: 300, height: 400 });
     expect(reopened.getPage(1).getSize()).toEqual({ width: 500, height: 600 });
     expect(reopened.getPage(1).getRotation().angle).toBe(90);
+  });
+
+  it('duplicates source content in plan order and stamps an edit onto the copy', async () => {
+    const doc = await makeTwoPageDocument();
+    const plan: PagePlan = [
+      { id: 'source-0', kind: 'source', sourceIndex: 0 },
+      { id: 'source-1', kind: 'source', sourceIndex: 1 },
+      { id: 'source-1-copy', kind: 'source', sourceIndex: 1 },
+    ];
+    doc.plan = plan;
+    doc.pages = planToGeometry(plan, doc.pages);
+    doc.edits = [{
+      id: 'copy-text',
+      kind: 'text',
+      pageIndex: 2,
+      rect: { x: 20, y: 510, w: 200, h: 18 },
+      z: 1,
+      text: 'Edit on duplicate',
+      origin: 'free',
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    }];
+
+    const result = await exportPdf(doc);
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      expect(reopened.numPages).toBe(3);
+      const secondText = await (await reopened.getPage(2)).getTextContent();
+      const copyText = await (await reopened.getPage(3)).getTextContent();
+      const extract = (items: typeof secondText.items) => items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str)
+        .join(' ');
+      expect(extract(secondText.items)).toContain('Second source marker');
+      expect(extract(copyText.items)).toContain('Second source marker');
+      expect(extract(copyText.items)).toContain('Edit on duplicate');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('inserts a same-size blank page and stamps its edit at the new position', async () => {
+    const doc = await makeTwoPageDocument();
+    const plan: PagePlan = [
+      { id: 'source-0', kind: 'source', sourceIndex: 0 },
+      { id: 'blank', kind: 'blank', widthPt: 300, heightPt: 400 },
+      { id: 'source-1', kind: 'source', sourceIndex: 1 },
+    ];
+    doc.plan = plan;
+    doc.pages = planToGeometry(plan, doc.pages);
+    doc.edits = [{
+      id: 'blank-text',
+      kind: 'text',
+      pageIndex: 1,
+      rect: { x: 20, y: 350, w: 200, h: 18 },
+      z: 1,
+      text: 'Text on inserted blank',
+      origin: 'free',
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    }];
+
+    const result = await exportPdf(doc);
+    const reopenedPdfLib = await PDFDocument.load(result.bytes, { updateMetadata: false });
+    expect(reopenedPdfLib.getPageCount()).toBe(3);
+    expect(reopenedPdfLib.getPage(1).getSize()).toEqual({ width: 300, height: 400 });
+
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const blankContent = await (await reopened.getPage(2)).getTextContent();
+      const text = blankContent.items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str)
+        .join(' ');
+      expect(text).toContain('Text on inserted blank');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('exports a shorter plan without the deleted source page or its content', async () => {
+    const doc = await makeTwoPageDocument();
+    const originalPages = doc.pages;
+    const plan: PagePlan = [{ id: 'source-1', kind: 'source', sourceIndex: 1 }];
+    doc.plan = plan;
+    doc.pages = planToGeometry(plan, originalPages);
+
+    const result = await exportPdf(doc);
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      expect(reopened.numPages).toBe(1);
+      const content = await (await reopened.getPage(1)).getTextContent();
+      const text = content.items
+        .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+        .map((item) => item.str)
+        .join(' ');
+      expect(text).toContain('Second source marker');
+      expect(text).not.toContain('First source marker');
+    } finally {
+      await reopened.destroy();
+    }
   });
 
   it('dispatches a sampled cover edit and keeps the exported document valid', async () => {
