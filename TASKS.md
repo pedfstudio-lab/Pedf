@@ -5351,7 +5351,7 @@ Re-check the resume still exports bold. `npm run test` / `typecheck` / `lint` gr
 
 ## Editor — Zoom focal point
 
-### Task 39 — Zoom keeps your focal point (anchor the scroll on zoom)  🔲 TODO → branch `zoom-anchor`
+### Task 39 — Zoom keeps your focal point (anchor the scroll on zoom)  ✅ MERGED TO MAIN (2026-08-28, `d912350`)
 > **Bug (reported):** zooming in/out jumps to a different page. Because zoom resizes **every** page, the scroll
 > container's total height changes — but the scroll position stays at the same pixel, so the content you were
 > looking at slides away (you end up several pages off, and scrolling from there feels like it goes the wrong way).
