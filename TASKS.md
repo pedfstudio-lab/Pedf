@@ -5424,7 +5424,7 @@ normally. `npm run test` / `typecheck` / `lint` green.
 
 ---
 
-### Task 40 — Faster zoom (stop re-analyzing every page on each zoom)  🔲 TODO → branch `zoom-perf`
+### Task 40 — Faster zoom (stop re-analyzing every page on each zoom)  ✅ MERGED TO MAIN (2026-08-28, `5a9dc44`) — both Part 1 (no re-analysis on zoom) + Part 2 (viewport-windowed rasterization) shipped
 > **Bug (reported):** zoom feels slow, and a single click sometimes seems to do nothing (so you click twice). Root
 > cause: on **every** zoom change, each page's `OverlayLayer` is **unmounted and remounted**, which **re-runs the
 > expensive text/image/rule-line/date analysis for every page** — even though none of that changes with zoom (it's
