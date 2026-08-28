@@ -5189,3 +5189,160 @@ later pages renumber, edits stay on their correct pages → the trash is **disab
 **Land it (on your go):** rides the **`page-operations`** branch with Task 35 — the whole feature merges together
 as **insert + duplicate + delete**. Commit (folded into the page-operations commit): `Delete page (per-page
 control)`.
+
+---
+
+## Editor — Fixes
+
+### Task 37 — Fix: bold/italic dropped on export for page-font text  🔲 TODO → branch `fix-bold-export`
+> **Bug (reported):** bolding a word shows bold **on screen** but the **exported/downloaded PDF shows normal
+> weight** — on the original page *and* duplicated pages. Root cause found: the whole-run page-font draw path never
+> applies weight.
+
+**Root cause (verified in code).** When you bold text that ends up **uniform** (all one weight — the common
+"bold this word/line" case), `finalizeTextSpans` (`src/lib/edit/richText.ts:41`) collapses it to a single
+`TextEdit` with `style.bold = true` and **no `spans`**. On export, a text edit **without spans** that reuses the
+page's own embedded font is drawn by **`drawTextWithPageFont`** (`src/lib/export/embeddedFont.ts:153`) — and that
+function applies **no** bold/italic. Its per-span sibling **`drawSpanWithPageFont`** (same file, line 181) *does*
+apply synthetic bold (stroke outline + `TextRenderingMode.FillAndOutline`) and synthetic italic (skew), but the
+whole-run path never got the same treatment. So:
+- **Bold a *word* inside mixed-weight text** → `spans` → `drawSpanWithPageFont` → bold shows. ✅
+- **Bold a whole word/line (uniform)** → no spans → `drawTextWithPageFont` → **bold dropped.** ❌ ← the bug
+- Happens on original **and** duplicated pages because both reuse the original embedded font (so both take the
+  page-font path). Free text on a standard font is unaffected (it falls back to `resolveEnglishFont`, which already
+  picks a real bold face).
+
+**The fix — make `drawTextWithPageFont` honor `style.bold` / `style.italic`, mirroring `drawSpanWithPageFont`.**
+`src/lib/export/embeddedFont.ts`. The two functions are nearly identical; the whole-run one just omits the weight
+operators. Cleanest option — **delegate** to the span path so there is one source of truth:
+```ts
+export function drawTextWithPageFont(
+  text: string,
+  style: TextStyle,
+  rect: PdfRect,
+  context: PageExportContext,
+): boolean {
+  return drawSpanWithPageFont(text, style, rect.x, rect.y, style.bold, style.italic, context) !== null;
+}
+```
+`drawSpanWithPageFont` already returns `null` when the page font can't be used, which **preserves this function's
+existing contract** ("return false when unsupported → the caller falls back to `resolveEnglishFont`"). If a test
+asserts the exact operator list of the old path, instead inline the same conditional operators into
+`drawTextWithPageFont` (`setStrokingRgbColor` + `setLineWidth(style.fontSizePt * SYNTHETIC_BOLD_STROKE_RATIO)`
+before `beginText`, `setTextRenderingMode(TextRenderingMode.FillAndOutline)` after `setFontAndSize`, and the italic
+skew in `setTextMatrix`) driven by `style.bold` / `style.italic`.
+
+**⚠ Watch:** the whole-run path must still return **false** (never throw) when the page font doesn't resolve, so
+unsupported text keeps falling back to the standard-font path. The delegation above preserves this.
+
+**Tests → `src/lib/export/embeddedFont.test.ts` (and/or `handlers/text.test.ts`):**
+- A uniform **bold** `TextEdit` on a resolvable page font now emits the synthetic-bold operators (`setLineWidth` +
+  `FillAndOutline`) — no longer draws plain. A **non-bold** edit does **not** emit them (no regression).
+- A uniform **italic** edit emits the skewed text matrix.
+- Page font unresolved → still returns `false` (falls back to the standard font).
+
+**Verify (live):** open a PDF → bold a whole word on the original page → **Export/download** → the word is **bold**
+in the output. Repeat on a **duplicated** page → also bold. Non-bold text is unchanged; a **mixed**-weight line
+still exports correctly (span path untouched). `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** merge `fix-bold-export` → `main`. Commit: `Fix: apply bold/italic on export for page-font
+text (Task 37)`.
+
+---
+
+### Task 38 — Fix: detect bold/italic from the embedded font program (generic-named / CID fonts)  🔲 TODO → **same branch `fix-bold-export`** (extends Task 37)
+> **Bug (root cause confirmed live on `Corporate-Governance.pdf`):** editing a **bold** word and exporting drops the
+> bold — but **only for some PDFs** (e.g. Corporate-Governance), while others (e.g. the Rahul-Rajput resume) work.
+> The difference: our bold detector reads only the **font name**. The resume's bold fonts are named `Arial Black` /
+> `Tahoma,Bold` (name has a keyword → detected). Corporate-Governance's are CID **subset** fonts named
+> `CIDFont+F1` with **no** name keyword, **no** descriptor `FontWeight`, and **no** ForceBold flag → detection
+> returns `bold:false`. The text still *looks* bold (bold glyphs are embedded), but `style.bold=false`, so a retyped
+> word — which can't reuse the CID font and **falls back to a standard font keyed on `style.bold`** — exports
+> **normal**. (Manual Ctrl+B works only because it force-sets inline bold.) **Same `fix-bold-export` branch** as
+> Task 37; they merge together.
+
+**The authoritative signal (verified live).** The embedded font **program** carries the real weight in its `OS/2`
+table, correct even when the name/descriptor are silent. On this exact file:
+`CIDFont+F1` (draws "CORPORATE GOVERNANCE…") → `OS/2.usWeightClass = 700` **and** `head.macStyle` bold bit set;
+`CIDFont+F2` (draws "Email…") → `usWeightClass = 400`. pdf.js exposes the program bytes as `fontObject.data`, **but
+only when the document is loaded with `fontExtraProperties: true`** (verified: without it, `fontObject.data` is
+empty; with it, it's the full sfnt). So the fix has two small parts.
+
+**Step 1 — retain the font program → `src/lib/pdf/loadDocument.ts`.**
+Add the one option so pdf.js keeps `fontObject.data`:
+```ts
+const doc = await pdfjs.getDocument({ data: forPdfjs, fontExtraProperties: true }).promise;
+```
+(Verified this is required — the default load strips `data`. Cost: pdf.js keeps the font program bytes in memory;
+negligible for a handful of fonts. Nothing else reads these extra props, so it's additive/low-risk.)
+
+**Step 2 — read the weight from the program → `src/lib/pdf/textContent.ts`.**
+Add a tiny sfnt reader and OR it with the existing name-based `classifyFontStyle` (OR so we **never remove** bold
+that the name already detects — no regression for the resume — only **add** what the name misses):
+```ts
+/** Read weight/slant straight from an embedded sfnt (TrueType/OpenType) font program. */
+export function fontStyleFromProgram(
+  data: Uint8Array | undefined,
+): { readonly bold: boolean; readonly italic: boolean } | null {
+  if (!data || data.length < 12) return null;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const numTables = dv.getUint16(4);
+  if (numTables === 0 || numTables > 64) return null;            // not a sane sfnt
+  let os2: number | null = null;
+  let head: number | null = null;
+  for (let i = 0; i < numTables; i += 1) {
+    const rec = 12 + i * 16;
+    if (rec + 16 > data.length) return null;
+    const tag = String.fromCharCode(data[rec], data[rec + 1], data[rec + 2], data[rec + 3]);
+    const offset = dv.getUint32(rec + 8);
+    if (tag === 'OS/2') os2 = offset;
+    else if (tag === 'head') head = offset;
+  }
+  if (os2 === null && head === null) return null;
+  let bold = false;
+  let italic = false;
+  if (os2 !== null && os2 + 6 <= data.length && dv.getUint16(os2 + 4) >= 600) bold = true;   // usWeightClass
+  if (head !== null && head + 46 <= data.length) {
+    const macStyle = dv.getUint16(head + 44);
+    if (macStyle & 0x1) bold = true;                             // bold bit
+    if (macStyle & 0x2) italic = true;                           // italic bit
+  }
+  return { bold, italic };
+}
+```
+Then in `extractTextRuns`, combine it with the name classification (the `fontObject` is already in scope):
+```ts
+const nameStyle = classifyFontStyle(weightSource);
+const programStyle = fontStyleFromProgram(fontObject?.data as Uint8Array | undefined);
+// …in the run's style:
+bold: nameStyle.bold || (programStyle?.bold ?? false),
+italic: nameStyle.italic || (programStyle?.italic ?? false),
+```
+(Replaces the current `...classifyFontStyle(weightSource)` spread with the combined `bold`/`italic`.)
+
+**⚠ Watch / scope:**
+- **No manual per-field work** — detection is fully automatic for every PDF.
+- **No regression:** OR-combining can only *add* bold, so the resume and every currently-working PDF stay working.
+  Fonts with no sfnt program (Type3, bare Type1) → `fontStyleFromProgram` returns `null` → falls back to the name
+  exactly as today.
+- **Known, pre-existing limitation (call out, don't fix here):** for a **CID** source font, a *retyped* word still
+  can't reuse that embedded font (new glyphs aren't in the subset), so it exports in a substituted standard font —
+  now correctly **bold**, but Helvetica-family, not the original face. That font *substitution* is the same
+  behavior as before / as the manual Ctrl+B workaround, and is out of scope for this bug (which is purely "bold is
+  lost"). Unchanged original text keeps its original font.
+- Works together with Task 37: Task 37 makes the page-font path apply bold; Task 38 makes `style.bold` **correct**
+  in the first place. Different PDFs exercise different paths; both are needed.
+
+**Tests:**
+- `src/lib/pdf/textContent.test.ts` — `fontStyleFromProgram`: build a minimal in-memory sfnt (sfnt header +
+  table directory + an `OS/2` with `usWeightClass` and a `head` with `macStyle`): `usWeightClass 700` → bold;
+  `400` → not bold; `head.macStyle` bold bit → bold; italic bit → italic; `undefined`/short/garbage data → `null`
+  (falls back to name).
+- Confirm `extractTextRuns` still detects the resume-style keyword names (name path intact).
+
+**Verify (live — the exact failing case):** open `Corporate-Governance.pdf` → edit a word in the bold
+"CORPORATE GOVERNANCE" heading → Done → **Export** → the retyped word is **bold** in the output (no manual Ctrl+B).
+Re-check the resume still exports bold. `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** rides the **`fix-bold-export`** branch with Task 37 — merge together. Commit (folded in):
+`Fix: detect bold/italic from the embedded font program (Task 38)`.

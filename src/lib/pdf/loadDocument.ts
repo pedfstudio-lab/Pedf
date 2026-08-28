@@ -29,7 +29,10 @@ export async function loadDocument(
   const originalBytes = bytes.slice();
   const forPdfjs = bytes.slice();
 
-  const doc = await pdfjs.getDocument({ data: forPdfjs }).promise;
+  const doc = await pdfjs.getDocument({
+    data: forPdfjs,
+    fontExtraProperties: true,
+  }).promise;
   const pages = await collectGeometry(doc);
   return { doc, originalBytes, pages };
 }

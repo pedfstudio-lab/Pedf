@@ -174,4 +174,70 @@ describe('page-owned embedded fonts', () => {
       context,
     )).toBeNull();
   });
+
+  it('emits synthetic bold and italic operators for a uniformly styled whole run', async () => {
+    const originalBytes = new Uint8Array(
+      await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'),
+    );
+    const browserDocument = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+    openDocuments.push(browserDocument);
+    const runs = await extractTextRuns(await browserDocument.getPage(1), 0);
+    const pdf = await PDFDocument.load(originalBytes, { updateMetadata: false });
+    const context = makeContext(pdf);
+    const sourceRun = runs.find((run) => (
+      resolvePageFontResource(context, run.style)?.name.decodeText() === 'F2'
+    ));
+    if (!sourceRun) throw new Error('Résumé F2 body font was not resolved');
+    const pushed = vi.spyOn(context.page, 'pushOperators');
+
+    expect(drawTextWithPageFont(
+      'Uniform bold italic',
+      { ...sourceRun.style, bold: true, italic: true },
+      { x: 40, y: 60, w: 180, h: sourceRun.style.fontSizePt },
+      context,
+    )).toBe(true);
+    const styledOperators = pushed.mock.calls
+      .flat()
+      .map((operator) => operator.toString())
+      .join('\n');
+    expect(styledOperators).toContain('2 Tr');
+    expect(styledOperators).toContain('0.21');
+    expect(styledOperators).toContain(' w');
+
+    pushed.mockClear();
+    expect(drawTextWithPageFont(
+      'Uniform plain',
+      { ...sourceRun.style, bold: false, italic: false },
+      { x: 40, y: 40, w: 180, h: sourceRun.style.fontSizePt },
+      context,
+    )).toBe(true);
+    const plainOperators = pushed.mock.calls
+      .flat()
+      .map((operator) => operator.toString())
+      .join('\n');
+    expect(plainOperators).not.toContain('2 Tr');
+    expect(plainOperators).not.toContain('0.21');
+    expect(plainOperators).not.toContain(' w');
+  });
+
+  it('keeps the whole-run fallback contract when no page font resolves', async () => {
+    const originalBytes = new Uint8Array(
+      await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'),
+    );
+    const pdf = await PDFDocument.load(originalBytes, { updateMetadata: false });
+    const context = makeContext(pdf);
+
+    expect(drawTextWithPageFont(
+      'Fallback text',
+      {
+        fontName: 'sans-serif',
+        fontSizePt: 10,
+        bold: true,
+        italic: true,
+        color: { r: 0, g: 0, b: 0 },
+      },
+      { x: 20, y: 20, w: 100, h: 10 },
+      context,
+    )).toBe(false);
+  });
 });

@@ -284,6 +284,47 @@ export function classifyFontStyle(fontName: string): {
   };
 }
 
+/** Read weight/slant straight from an embedded sfnt (TrueType/OpenType) font program. */
+export function fontStyleFromProgram(
+  data: Uint8Array | undefined,
+): { readonly bold: boolean; readonly italic: boolean } | null {
+  if (!data || data.length < 12) return null;
+
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const numTables = view.getUint16(4);
+  if (numTables === 0 || numTables > 64) return null;
+
+  let os2Offset: number | null = null;
+  let headOffset: number | null = null;
+  for (let index = 0; index < numTables; index += 1) {
+    const recordOffset = 12 + index * 16;
+    if (recordOffset + 16 > data.length) return null;
+
+    const tag = String.fromCharCode(
+      data[recordOffset] ?? 0,
+      data[recordOffset + 1] ?? 0,
+      data[recordOffset + 2] ?? 0,
+      data[recordOffset + 3] ?? 0,
+    );
+    const tableOffset = view.getUint32(recordOffset + 8);
+    if (tag === 'OS/2') os2Offset = tableOffset;
+    else if (tag === 'head') headOffset = tableOffset;
+  }
+  if (os2Offset === null && headOffset === null) return null;
+
+  let bold = false;
+  let italic = false;
+  if (os2Offset !== null && os2Offset + 6 <= data.length) {
+    bold = view.getUint16(os2Offset + 4) >= 600;
+  }
+  if (headOffset !== null && headOffset + 46 <= data.length) {
+    const macStyle = view.getUint16(headOffset + 44);
+    bold ||= (macStyle & 0x1) !== 0;
+    italic = (macStyle & 0x2) !== 0;
+  }
+  return { bold, italic };
+}
+
 function boundingBox(points: readonly PdfPt[]): PdfRect {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -355,6 +396,8 @@ export async function extractTextRuns(
     const weightSource = typeof fontObject?.name === 'string' && fontObject.name.trim() !== ''
       ? fontObject.name
       : fontName;
+    const nameStyle = classifyFontStyle(weightSource);
+    const programStyle = fontStyleFromProgram(fontObject?.data as Uint8Array | undefined);
     runs.push({
       pageIndex,
       text: item.str,
@@ -362,7 +405,8 @@ export async function extractTextRuns(
       style: {
         fontName,
         fontSizePt: verticalScale,
-        ...classifyFontStyle(weightSource),
+        bold: nameStyle.bold || (programStyle?.bold ?? false),
+        italic: nameStyle.italic || (programStyle?.italic ?? false),
         // PDF.js text content does not expose fill color reliably.
         color: { r: 0, g: 0, b: 0 },
         fontRef,

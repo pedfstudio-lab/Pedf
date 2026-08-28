@@ -156,25 +156,15 @@ export function drawTextWithPageFont(
   rect: PdfRect,
   context: PageExportContext,
 ): boolean {
-  if (!text) return false;
-  const resource = resolvePageFontResource(context, style);
-  if (!resource || !isSafePdfString(text, resource.dictionary)) return false;
-
-  // PDFString is a valid Tj operand. pdf-lib's public showText declaration is
-  // unnecessarily narrowed to PDFHexString, so bridge only this operator arg.
-  const literalText = PDFString.of(text) as unknown as Parameters<typeof showText>[0];
-
-  context.page.pushOperators(
-    pushGraphicsState(),
-    beginText(),
-    setFillingRgbColor(style.color.r, style.color.g, style.color.b),
-    setFontAndSize(resource.name, style.fontSizePt),
-    setTextMatrix(1, 0, 0, 1, rect.x, rect.y),
-    showText(literalText),
-    endText(),
-    popGraphicsState(),
-  );
-  return true;
+  return drawSpanWithPageFont(
+    text,
+    style,
+    rect.x,
+    rect.y,
+    style.bold,
+    style.italic,
+    context,
+  ) !== null;
 }
 
 /** Draw one rich span through the page's own font, applying synthetic weight/slant. */

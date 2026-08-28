@@ -11,12 +11,34 @@ import {
   classifyFontStyle,
   classifyFontFamily,
   extractTextRuns,
+  fontStyleFromProgram,
   groupRunsIntoBlocks,
   hitTestRun,
   mergeRunsIntoLines,
 } from './textContent';
 
 const openDocuments: PDFDocumentProxy[] = [];
+
+function makeSfnt(weight: number, macStyle = 0): Uint8Array {
+  const os2Offset = 44;
+  const headOffset = 52;
+  const data = new Uint8Array(headOffset + 46);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 0x00010000);
+  view.setUint16(4, 2);
+
+  data.set([0x4f, 0x53, 0x2f, 0x32], 12); // OS/2
+  view.setUint32(12 + 8, os2Offset);
+  view.setUint32(12 + 12, 6);
+
+  data.set([0x68, 0x65, 0x61, 0x64], 28); // head
+  view.setUint32(28 + 8, headOffset);
+  view.setUint32(28 + 12, 46);
+
+  view.setUint16(os2Offset + 4, weight);
+  view.setUint16(headOffset + 44, macStyle);
+  return data;
+}
 
 afterEach(async () => {
   await Promise.all(openDocuments.splice(0).map((document) => document.destroy()));
@@ -32,6 +54,33 @@ describe('classifyFontStyle', () => {
     ['Inter-700', true, false],
   ])('classifies %s', (fontName, bold, italic) => {
     expect(classifyFontStyle(fontName)).toEqual({ bold, italic });
+  });
+});
+
+describe('fontStyleFromProgram', () => {
+  it('detects bold from OS/2 usWeightClass', () => {
+    expect(fontStyleFromProgram(makeSfnt(700))).toEqual({ bold: true, italic: false });
+    expect(fontStyleFromProgram(makeSfnt(400))).toEqual({ bold: false, italic: false });
+  });
+
+  it('detects bold and italic from head.macStyle', () => {
+    expect(fontStyleFromProgram(makeSfnt(400, 0x1))).toEqual({ bold: true, italic: false });
+    expect(fontStyleFromProgram(makeSfnt(400, 0x2))).toEqual({ bold: false, italic: true });
+    expect(fontStyleFromProgram(makeSfnt(400, 0x3))).toEqual({ bold: true, italic: true });
+  });
+
+  it.each([
+    undefined,
+    new Uint8Array(0),
+    new Uint8Array(11),
+    new Uint8Array(12),
+    (() => {
+      const data = new Uint8Array(12);
+      new DataView(data.buffer).setUint16(4, 65);
+      return data;
+    })(),
+  ])('returns null for missing, short, or malformed data', (data) => {
+    expect(fontStyleFromProgram(data)).toBeNull();
   });
 });
 
@@ -108,6 +157,23 @@ describe('extractTextRuns', () => {
       run.text.includes('Managed customer interactions') && !run.style.bold && !run.style.italic
     ))).toBe(true);
     expect(runs.find((run) => run.text === 'WORK EXPERIENCE')?.style.fontName).toBe('sans-serif');
+  });
+
+  it('detects generic-named Corporate Governance heading weight from the font program', async () => {
+    const bytes = new Uint8Array(await readFile('public/samples/Corporate-Governance.pdf'));
+    const document = await getDocument({
+      data: bytes,
+      fontExtraProperties: true,
+      verbosity: 0,
+    }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+    const headingRuns = runs.filter((run) => /CORPORATE|GOVERNANCE/.test(run.text));
+    const bodyRun = runs.find((run) => run.text.includes('Email'));
+
+    expect(headingRuns.length).toBeGreaterThan(0);
+    expect(headingRuns.every((run) => run.style.bold)).toBe(true);
+    expect(bodyRun?.style.bold).toBe(false);
   });
 
   it('round-trips an edited heading through the résumé own bold font resource', async () => {
