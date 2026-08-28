@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
@@ -7,7 +7,13 @@ import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
 import { sampleDominantColor } from './lib/export/colorSample';
-import { clampZoom, ZOOM_STEP } from './lib/pdf/zoom';
+import {
+  captureZoomAnchor,
+  clampZoom,
+  scrollPositionForZoomAnchor,
+  type ZoomAnchor,
+  ZOOM_STEP,
+} from './lib/pdf/zoom';
 import type { PdfRect, Rgb } from './lib/export/types';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
@@ -99,13 +105,30 @@ function EditorApp() {
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const scrollRef = useRef<HTMLElement>(null);
+  const pendingAnchor = useRef<ZoomAnchor | null>(null);
+  const captureAnchor = useCallback(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    pendingAnchor.current = captureZoomAnchor(scroll);
+  }, []);
   const zoomIn = useCallback(() => {
-    setZoom((current) => clampZoom(current + ZOOM_STEP));
-  }, []);
+    const next = clampZoom(zoom + ZOOM_STEP);
+    if (next === zoom) return;
+    captureAnchor();
+    setZoom(next);
+  }, [captureAnchor, zoom]);
   const zoomOut = useCallback(() => {
-    setZoom((current) => clampZoom(current - ZOOM_STEP));
-  }, []);
-  const zoomReset = useCallback(() => setZoom(1), []);
+    const next = clampZoom(zoom - ZOOM_STEP);
+    if (next === zoom) return;
+    captureAnchor();
+    setZoom(next);
+  }, [captureAnchor, zoom]);
+  const zoomReset = useCallback(() => {
+    if (zoom === 1) return;
+    captureAnchor();
+    setZoom(1);
+  }, [captureAnchor, zoom]);
   useZoomShortcuts(zoomIn, zoomOut, zoomReset);
   const [editMode, setEditMode] = useState(false);
   const [textAddMode, setTextAddMode] = useState(false);
@@ -116,6 +139,33 @@ function EditorApp() {
   const [chatOpen, setChatOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    const content = scroll?.firstElementChild;
+    if (!scroll || !content || typeof ResizeObserver === 'undefined') return;
+
+    let settle: number | undefined;
+    const observer = new ResizeObserver(() => {
+      const anchor = pendingAnchor.current;
+      if (!anchor) return;
+
+      const position = scrollPositionForZoomAnchor(anchor, scroll);
+      scroll.scrollTop = position.top;
+      scroll.scrollLeft = position.left;
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        pendingAnchor.current = null;
+      }, 200);
+    });
+    observer.observe(content);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(settle);
+      pendingAnchor.current = null;
+    };
+  }, [document]);
 
   const open = useCallback(async (source: File | ArrayBuffer, name: string) => {
     setError(null);
@@ -279,7 +329,7 @@ function EditorApp() {
           setSettingsOpen(true);
         }}
       />
-      <main className="flex-1 overflow-auto">
+      <main ref={scrollRef} className="flex-1 overflow-auto">
         {error && (
           <div className="m-4 rounded bg-red-100 p-3 text-sm text-red-800">{error}</div>
         )}

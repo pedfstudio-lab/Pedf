@@ -5346,3 +5346,129 @@ Re-check the resume still exports bold. `npm run test` / `typecheck` / `lint` gr
 
 **Land it (on your go):** rides the **`fix-bold-export`** branch with Task 37 — merge together. Commit (folded in):
 `Fix: detect bold/italic from the embedded font program (Task 38)`.
+
+---
+
+## Editor — Zoom focal point
+
+### Task 39 — Zoom keeps your focal point (anchor the scroll on zoom)  🔲 TODO → branch `zoom-anchor`
+> **Bug (reported):** zooming in/out jumps to a different page. Because zoom resizes **every** page, the scroll
+> container's total height changes — but the scroll position stays at the same pixel, so the content you were
+> looking at slides away (you end up several pages off, and scrolling from there feels like it goes the wrong way).
+> Fix: hold the **focal point** — the content at the center of the viewport, both **vertically and horizontally**
+> (so the column you zoomed into stays in view) — steady across a zoom change.
+
+**Depends on:** Task 34 (zoom). Zoom state + handlers live in `src/App.tsx`; the scroll container is
+`<main className="flex-1 overflow-auto">` (App.tsx ~line 282), which currently has **no ref and no anchoring**.
+
+**Step 1 — ref the scroll container → `src/App.tsx`.** `const scrollRef = useRef<HTMLElement>(null);` and
+`<main ref={scrollRef} …>`.
+
+**Step 2 — capture the focal point when zoom changes.** Before applying a new zoom, record where the viewport
+center sits as a **fraction** of the total scrollable content (vertical + horizontal), in a ref:
+```ts
+const pendingAnchor = useRef<{ v: number; h: number } | null>(null);
+const captureAnchor = () => {
+  const el = scrollRef.current;
+  if (!el) return;
+  pendingAnchor.current = {
+    v: el.scrollHeight > 0 ? (el.scrollTop + el.clientHeight / 2) / el.scrollHeight : 0,
+    h: el.scrollWidth > 0 ? (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth : 0,
+  };
+};
+```
+Call `captureAnchor()` at the top of `zoomIn` / `zoomOut` / `zoomReset` (and the Ctrl+wheel / keyboard handlers, if
+present) **before** `setZoom`.
+
+**Step 3 — restore the focal point after the pages re-lay-out.** The catch: pages re-render **asynchronously**
+(pdf.js), so the content's new height/width appears *after* the zoom state changes — a plain layout effect keyed on
+`zoom` would run too early (stale `scrollHeight`). Use a **ResizeObserver** on the scroll content so the restore
+fires once the pages have actually resized:
+```ts
+useEffect(() => {
+  const el = scrollRef.current;
+  const content = el?.firstElementChild;   // the PdfViewer page column
+  if (!el || !content) return;
+  let settle: number | undefined;
+  const obs = new ResizeObserver(() => {
+    const a = pendingAnchor.current;
+    if (!a) return;
+    el.scrollTop = a.v * el.scrollHeight - el.clientHeight / 2;
+    el.scrollLeft = a.h * el.scrollWidth - el.clientWidth / 2;
+    // pages re-render incrementally; keep re-centering, then release so manual scroll isn't hijacked
+    window.clearTimeout(settle);
+    settle = window.setTimeout(() => { pendingAnchor.current = null; }, 200);
+  });
+  obs.observe(content);
+  return () => { obs.disconnect(); window.clearTimeout(settle); };
+}, []);
+```
+(The browser clamps `scrollTop` / `scrollLeft` to valid ranges automatically, so no manual clamping needed.)
+
+> **Alternative (cleaner but touches the viewer):** have `PdfViewer` reserve each page wrapper's box size
+> synchronously from `geometry × zoom` (it already computes `planToGeometry`), so the content resizes *immediately*
+> on zoom and the restore can run in a `useLayoutEffect` keyed on `zoom` — no ResizeObserver. Either is fine; the
+> ResizeObserver keeps the change contained to `App.tsx` and respects `renderPage` as the sole canvas-sizer.
+
+**⚠ Watch:**
+- Anchor to the **viewport center** (not the top), and preserve **horizontal** too — the complaint was zooming into
+  a *column*, which needs the horizontal center held.
+- Don't hijack normal scrolling: the pending anchor must clear shortly after the resize settles (the 200 ms release).
+- `zoomReset` (→ 100%) must anchor as well, so resetting doesn't jump.
+
+**Verify (live):** open a multi-page PDF, scroll so a specific paragraph/column is centered → **zoom in** → that
+same paragraph stays centered (not pages away) → **zoom out** → still centered → scrolling afterward behaves
+normally. `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** merge `zoom-anchor` → `main`. Commit: `Zoom keeps the focal point centered (Task 39)`.
+
+---
+
+### Task 40 — Faster zoom (stop re-analyzing every page on each zoom)  🔲 TODO → branch `zoom-perf`
+> **Bug (reported):** zoom feels slow, and a single click sometimes seems to do nothing (so you click twice). Root
+> cause: on **every** zoom change, each page's `OverlayLayer` is **unmounted and remounted**, which **re-runs the
+> expensive text/image/rule-line/date analysis for every page** — even though none of that changes with zoom (it's
+> all in PDF coordinates). With many pages (the test doc is ~34) that's a big stall per click, so the first click's
+> effect lags and you click again. (It also makes overlays flicker on zoom.)
+
+**Root cause (confirmed in code).** `PageCanvas` re-runs its render effect on `zoom` change and calls
+`setRenderInfo(null)` (`PageCanvas.tsx:34`), which unmounts `OverlayLayer` (it renders only when `renderInfo` is
+set — `PageCanvas.tsx:80`). Remounting re-runs `OverlayLayer`'s analysis effect — `extractTextRuns` +
+`groupRunsIntoBlocks` + `detectImages` + `detectRuleLines` + `detectDates` (`OverlayLayer.tsx` ~321-353) — for
+**every page, every zoom**. That analysis is **zoom-independent** and should run once per page, not once per zoom.
+
+**Part 1 — keep the overlay mounted across zoom (the quick, high-value fix) → `PageCanvas.tsx`.**
+On a zoom re-render, **don't tear down the overlay**. `renderPage` returns the new `viewport`/`dpr`
+**synchronously**, so update `renderInfo` in place (new viewport) instead of nulling it; defer only the
+canvas-registration to render completion:
+```ts
+// drop the eager setRenderInfo(null) on the zoom path
+const { task, viewport, dpr } = renderPage(page, canvas, zoom);
+setRenderInfo({ viewport, dpr });              // overlay stays mounted → no re-analysis; it just re-positions
+void task.promise.then(() => { if (!cancelled) registerPageCanvas(pageIndex, { canvas, viewport, dpr }); })…
+```
+Keep the full reset (`setRenderInfo(null)`) only when the **page identity** changes (page / pageIndex / blank), not
+on zoom. Net effect: zoom re-positions overlays (cheap) and re-rasters the canvas, but **skips the per-page
+analysis** — the big cost — and overlays no longer flicker.
+> Implementation note: the analysis lives in `OverlayLayer`'s `[page, pageIndex]` effect, so as long as the overlay
+> stays mounted (renderInfo not nulled) on zoom, it won't re-run. Split the `PageCanvas` effect if needed so a
+> page-change still resets while a zoom-change only updates the viewport.
+
+**Part 2 — (optional, for large docs) only render pages near the viewport.** Even without re-analysis, each zoom
+still re-rasters **all** pages via pdf.js. For big documents, render only the pages in/near the viewport (an
+`IntersectionObserver` or a visible-range calc); give off-screen pages a correctly-sized placeholder (so scroll
+height + the Task 39 anchor stay correct) and rasterize them when scrolled near. Makes zoom/scroll/first-load fast
+at any page count. Bigger change — **do Part 1 first, measure, add this only if still needed.**
+> Note: the current test doc has ~34 duplicated pages, which exaggerates the slowness; Part 1 alone should make
+> normal documents snappy.
+
+**⚠ Watch:**
+- `sampleBackground` (cover edits) reads the registered page canvas — keep registering it on render **completion**
+  so export still samples the right pixels.
+- Pairs with **Task 39** (zoom anchor) — both are zoom polish; can share a branch if you prefer.
+
+**Verify (live):** on a multi-page PDF, click zoom once → it responds on the **first** click, quickly, with no
+overlay flicker; rapid clicks step smoothly. Edits/overlays stay correctly placed. `npm run test` / `typecheck` /
+`lint` green.
+
+**Land it (on your go):** merge `zoom-perf` → `main`. Commit: `Faster zoom — stop re-analyzing pages on zoom (Task 40)`.
