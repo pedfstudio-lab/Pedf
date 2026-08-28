@@ -5194,7 +5194,7 @@ control)`.
 
 ## Editor — Fixes
 
-### Task 37 — Fix: bold/italic dropped on export for page-font text  🔲 TODO → branch `fix-bold-export`
+### Task 37 — Fix: bold/italic dropped on export for page-font text  ✅ MERGED TO MAIN (2026-08-28, `9afffc9`)
 > **Bug (reported):** bolding a word shows bold **on screen** but the **exported/downloaded PDF shows normal
 > weight** — on the original page *and* duplicated pages. Root cause found: the whole-run page-font draw path never
 > applies weight.
@@ -5250,7 +5250,7 @@ text (Task 37)`.
 
 ---
 
-### Task 38 — Fix: detect bold/italic from the embedded font program (generic-named / CID fonts)  🔲 TODO → **same branch `fix-bold-export`** (extends Task 37)
+### Task 38 — Fix: detect bold/italic from the embedded font program (generic-named / CID fonts)  ✅ MERGED TO MAIN (2026-08-28, `9afffc9`)
 > **Bug (root cause confirmed live on `Corporate-Governance.pdf`):** editing a **bold** word and exporting drops the
 > bold — but **only for some PDFs** (e.g. Corporate-Governance), while others (e.g. the Rahul-Rajput resume) work.
 > The difference: our bold detector reads only the **font name**. The resume's bold fonts are named `Arial Black` /
