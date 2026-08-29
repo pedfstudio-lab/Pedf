@@ -5472,3 +5472,59 @@ overlay flicker; rapid clicks step smoothly. Edits/overlays stay correctly place
 `lint` green.
 
 **Land it (on your go):** merge `zoom-perf` → `main`. Commit: `Faster zoom — stop re-analyzing pages on zoom (Task 40)`.
+
+---
+
+## Deploy — remote testing
+
+### Task 29A — Cloudflare static-assets deploy config (editing-only; no voice)  ✅ MERGED TO MAIN (2026-08-29, `9e89dd4`)
+> Just enough config to deploy the app on **Cloudflare Workers (Static Assets)** so a remote tester (e.g. a family
+> member) can open a public link. **Deploy config only — no app-code changes, no effect on the PDF editor.** Voice
+> is NOT included here (that's the Sarvam proxy, a later task); editing / zoom / pages / bold all work. A focused
+> subset of Task 29.
+
+**Why:** Cloudflare's current "Workers Builds" Git flow needs a `wrangler` config telling it to serve the built
+`dist/` folder as a static single-page app, plus a real **Deploy command** (`npx wrangler deploy`). Without it, the
+dashboard's Deploy step re-runs the build and publishes nothing (blank site).
+
+**Step 1 — add `wrangler.jsonc` at the repo root (new file).**
+```jsonc
+{
+  "name": "pedf",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
+```
+- `assets.directory: ./dist` → serve the Vite build output.
+- `not_found_handling: single-page-application` → serve `index.html` for any path (our editor is a single page;
+  the DEV-only `/verify` route is already gated out of prod, so this is safe).
+- **No `main` script** → a static-assets-only Worker that runs **no** server code.
+
+**Step 2 — pin wrangler (optional but safer).** `npm i -D wrangler` so `npx wrangler deploy` uses a known version
+in Cloudflare's build environment.
+
+**Step 3 — dashboard settings (user does this, ~1 min).** On Cloudflare's "Set up your application" screen:
+- **Build command:** `npm run build`
+- **Deploy command:** `npx wrangler deploy`  ← (not `npm run build`)
+Then **Deploy** → the link serves the app; auto-redeploys on every push to `main`.
+
+**⚠ Impact audit — does this touch the PDF app? NO.**
+- **Zero app-code changes** — no `src/` files touched. `wrangler.jsonc` is read only by Cloudflare at deploy time;
+  it is never imported by the app and never enters the client bundle.
+- **Local dev unchanged** (`npm run dev` ignores the wrangler config).
+- **Build output unchanged** — the same `dist/` from `npm run build`.
+- **Editing / zoom / pages / bold** behave identically.
+- **Voice:** not wired in this Worker deploy (the Task 28 `functions/api/sarvam` Pages-Function isn't used by the
+  Worker static-assets model). Voice simply stays off until a dedicated proxy task; editing is unaffected, and no
+  secret ever enters the bundle.
+- **The existing `functions/` folder** is ignored by the Worker deploy — harmless, dormant.
+
+**Verify:** `npm run build` still succeeds (unchanged); `npx wrangler deploy --dry-run` (or the dashboard build)
+validates the config; the deployed link loads the editor and opens a PDF. `npm run test` / `typecheck` / `lint`
+unaffected (no source changed).
+
+**Land it (on your go):** commit `wrangler.jsonc` (+ the wrangler devDep) to `main`. Commit message:
+`Cloudflare static-assets deploy config (Task 29A)`. Then re-run the Cloudflare dashboard **Deploy**.
