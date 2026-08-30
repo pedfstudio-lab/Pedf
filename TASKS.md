@@ -5533,7 +5533,7 @@ unaffected (no source changed).
 
 ## Editor — Fixes (cont.)
 
-### Task 41 — Fix: covers don't hide the original text's descenders ("black strokes" below edits)  🔲 TODO → branch `cover-descenders`
+### Task 41 — Fix: covers don't hide the original text's descenders ("black strokes" below edits)  ✅ MERGED TO MAIN (2026-08-30, `d9643e4`) — incl. Refinement 1
 > **Bug (reported + measured):** after editing a line, the tails of the *original* text's descenders (g, y, p, j, q,
 > commas) stick out **below** the edit as faint black strokes — the page looks obviously tampered-with. Measured on
 > real pages, the original ink extends **~0.3–0.55 of the font height *below* the cover's bottom edge**, because the
