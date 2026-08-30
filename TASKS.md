@@ -5657,7 +5657,7 @@ unchanged. `npm run test` / `typecheck` / `lint` green.
 **Land it (on your go):** merge `text-alignment` → `main`. Commit: `Preserve center/right text alignment when
 editing (Task 42)`.
 
-### Task 43 — Per-selection font size & family — across the WHOLE PDF (not just headings)  🔲 TODO → branch `per-span-style`
+### Task 43 — Per-selection font size & family — across the WHOLE PDF (not just headings)  ✅ MERGED TO MAIN (2026-08-30, `c2716fc`)
 > **Goal:** let the user change **font size and font family on a text selection** — like **Bold/Italic** already
 > work per selection — **anywhere in any text box in the PDF**, not only headings. Today **A− / A+** and the **font
 > dropdown** restyle the **whole box**; only bold/italic vary per selection (via `spans`). This extends that same
