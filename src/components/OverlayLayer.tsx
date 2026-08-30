@@ -9,6 +9,7 @@ import {
 import type { ScreenRect } from '@/lib/export/coordinates';
 import type { CoverEdit, LineEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import { sampleDominantColor } from '@/lib/export/colorSample';
+import { expandRectForInk, measureCanvasInkExtent } from '@/lib/export/inkExtent';
 import {
   buildBulletListEdits,
   buildFreeTextEdits,
@@ -129,6 +130,16 @@ function sameRect(left: PdfRect, right: PdfRect): boolean {
   );
 }
 
+function coversOriginalRect(cover: PdfRect, original: PdfRect): boolean {
+  const epsilon = 0.01;
+  return sameRect(cover, original) || (
+    Math.abs(cover.x - original.x) < epsilon &&
+    Math.abs(cover.w - original.w) < epsilon &&
+    cover.y <= original.y + epsilon &&
+    cover.y + cover.h >= original.y + original.h - epsilon
+  );
+}
+
 function containsRect(outer: PdfRect, inner: PdfRect): boolean {
   const epsilon = 0.01;
   return (
@@ -143,9 +154,9 @@ function isBlockAnchor(block: TextBlock, edit: CoverEdit): boolean {
   const firstLine = coverRectsForTextBlock(block)[0];
   return (
     block.pageIndex === edit.pageIndex &&
-    ((firstLine && sameRect(firstLine, edit.rect)) ||
-      sameRect(coverRectForTextBlock(block), edit.rect) ||
-      sameRect(block.rect, edit.rect))
+    ((firstLine && coversOriginalRect(edit.rect, firstLine)) ||
+      coversOriginalRect(edit.rect, coverRectForTextBlock(block)) ||
+      coversOriginalRect(edit.rect, block.rect))
   );
 }
 
@@ -423,6 +434,35 @@ export function OverlayLayer({
     }
   }, [getPageCanvas, pageIndex]);
 
+  const measureInkExtent = useCallback((
+    targetPageIndex: number,
+    rect: PdfRect,
+    fontSizePt: number,
+  ) => {
+    const registration = getPageCanvas(targetPageIndex);
+    if (!registration) return { above: 0, below: 0 };
+    const context = registration.canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return { above: 0, below: 0 };
+    return measureCanvasInkExtent(
+      {
+        width: registration.canvas.width,
+        height: registration.canvas.height,
+        read: (x, y, width, height) => context.getImageData(x, y, width, height).data,
+      },
+      registration.viewport,
+      rect,
+      fontSizePt,
+    );
+  }, [getPageCanvas]);
+
+  const extendCoverToSourceInk = useCallback((cover: CoverEdit, fontSizePt: number): CoverEdit => {
+    const rect = expandRectForInk(
+      cover.rect,
+      measureInkExtent(cover.pageIndex, cover.rect, fontSizePt),
+    );
+    return rect === cover.rect ? cover : { ...cover, rect };
+  }, [measureInkExtent]);
+
   const findExisting = (block: TextBlock): ExistingBlock | undefined => {
     const anchor = pageCoverEdits.find((edit) => isBlockAnchor(block, edit));
     if (!anchor) return undefined;
@@ -451,7 +491,7 @@ export function OverlayLayer({
   const findExistingBulletList = (list: BulletList): ExistingBlock | undefined => {
     const expectedCover = coverRectForBulletList(list);
     const anchor = pageCoverEdits.find((edit) => (
-      edit.pageIndex === list.block.pageIndex && sameRect(edit.rect, expectedCover)
+      edit.pageIndex === list.block.pageIndex && coversOriginalRect(edit.rect, expectedCover)
     ));
     if (!anchor) return undefined;
     const byZ = new Map(
@@ -989,11 +1029,14 @@ export function OverlayLayer({
                     setBulletCommitError('No room — the next section is in the way');
                     return;
                   }
+                  const covers = built.covers.map((cover) => (
+                    extendCoverToSourceInk(cover, activeBulletList.block.style.fontSizePt)
+                  ));
                   replaceEdits(
                     existing
                       ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
                       : [],
-                    [...built.covers, ...built.texts],
+                    [...covers, ...built.texts],
                   );
                   setActiveBlock(null);
                   setActiveBulletList(null);
@@ -1008,11 +1051,17 @@ export function OverlayLayer({
                   nextZ,
                   base,
                 );
+                const covers = built.covers.map((cover, index) => (
+                  extendCoverToSourceInk(
+                    cover,
+                    activeBlock.lines[index]?.style.fontSizePt ?? activeBlock.style.fontSizePt,
+                  )
+                ));
                 replaceEdits(
                   existing
                     ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
                     : [],
-                  [...built.covers, ...built.texts],
+                  [...covers, ...built.texts],
                 );
                 setActiveBlock(null);
               }}

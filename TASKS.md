@@ -5528,3 +5528,87 @@ unaffected (no source changed).
 
 **Land it (on your go):** commit `wrangler.jsonc` (+ the wrangler devDep) to `main`. Commit message:
 `Cloudflare static-assets deploy config (Task 29A)`. Then re-run the Cloudflare dashboard **Deploy**.
+
+---
+
+## Editor — Fixes (cont.)
+
+### Task 41 — Fix: covers don't hide the original text's descenders ("black strokes" below edits)  🔲 TODO → branch `cover-descenders`
+> **Bug (reported + measured):** after editing a line, the tails of the *original* text's descenders (g, y, p, j, q,
+> commas) stick out **below** the edit as faint black strokes — the page looks obviously tampered-with. Measured on
+> real pages, the original ink extends **~0.3–0.55 of the font height *below* the cover's bottom edge**, because the
+> cover's bottom padding is far too small to reach the descenders.
+
+**Root cause (confirmed in code + pixels).** A text edit paints a `cover` rectangle over the original text, sized by
+`paddedRect` in `src/lib/edit/buildTextEdits.ts` — `verticalPad = Math.max(1, style.fontSizePt * 0.14)`. The source
+text's **descenders extend well below** that. Measured ink overshoot below the current cover bottom: resume descender
+words ~0.30–0.35 em; Corporate-Governance-style fonts ~0.55 em. So the bottom tips of the original glyphs are never
+covered.
+
+**Why we can't just increase the padding (the danger).** Cranking `verticalPad` up by a **fixed** amount causes the
+opposite, worse bug — the cover extends into the **next line** and paints a blank patch over *its* text. Descender
+depth also varies a lot by font (measured 0.11–0.55 em), so no single fixed value is both safe *and* sufficient.
+
+**The fix — grow the cover only until the old ink ends, bounded by the blank gap between lines.**
+At text-edit commit time (in `OverlayLayer`, where the rendered page canvas is available via `documentStore`),
+after building the cover rect(s), **extend each cover's bottom edge downward to cover the original text's real ink**
+by scanning the page canvas:
+- Scan rows just below the cover, within its x-range, for dark (ink) pixels.
+- Keep extending while rows contain ink (the descenders).
+- **Stop at the first fully blank row** — the inter-line gap. This naturally bounds the cover to *this* line's
+  descenders and **never reaches the next line** (there is always a blank gap between them). This is the key that
+  makes it safe: it grows only through the tails, then halts in the empty space *before* the next sentence.
+- Cap the scan (≤ ~0.5 em of the font height) as a hard safety limit for pathological tight-leading layouts.
+- (Optional) do the same upward for rare tall-accent overshoot — the reported bug is the bottom.
+
+Store the extended rect in the `CoverEdit`, so **both** the on-screen preview **and** the exported PDF use the
+correct, fully-covering patch.
+
+**Implementation:**
+- Add `measureInkExtent(pageIndex, rect)` in `src/App.tsx` (a sibling of `sampleBackground`) that reads the
+  registered page canvas (`getPageCanvas`) and returns how far ink extends below (and above) `rect`, scanning to the
+  first blank row, capped.
+- In `OverlayLayer`, when committing a text edit, expand each cover rect's bottom (and top) by the measured extent
+  **before** dispatching. Keep `buildTextEdits` pure — do the expansion where the canvas is available.
+- Blank pages / no canvas → no extension (fall back to the current padding).
+
+**Verify (live):** edit a line with descenders (e.g. "…Ranjan… College, …,") → **no black strokes below** the edit,
+on screen **and** in the exported PDF → the line **below is untouched** (no blank patch over it). A descender-free
+line still looks right. `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** merge `cover-descenders` → `main`. Commit: `Fix: covers hide the original text's
+descenders (Task 41)`.
+
+**⚠ Refinement 1 (make the tip detection reliable) — the initial fix under-covers *intermittently*.**
+> **Symptom (user-tested):** the fix helps, but faint descender tips still poke out on **some** lines/zooms, not
+> all. **Root cause:** `measureCanvasInkExtent` counts a pixel as ink only below `INK_LUMINANCE_THRESHOLD = 225` and
+> **stops at the first row it judges blank** — but a descender's **anti-aliased tip fades** (dark → grey → white
+> over a few pixels), so its last rows are light enough to be called "blank," halting the scan a hair short.
+> Whether that faint row appears depends on font / size / zoom → hence "sometimes there, sometimes not."
+
+Refine `src/lib/export/inkExtent.ts`:
+1. **Count the faint fading pixels as ink.** Raise the cutoff so anti-aliased tips register while a clean inter-line
+   gap still reads blank — `INK_LUMINANCE_THRESHOLD` 225 → **~242**. (Tips fade through ~225–245; a clean white gap
+   is ~250–255, so ~242 catches the tip but not the gap.)
+2. **Add a small safety margin** below the deepest ink found — `MARGIN_PT = Math.max(0.5, fontSizePt * 0.05)` —
+   added to a **non-zero** `below` (and `above`) extent, to swallow the very last gradient pixel. Do **not** extend
+   when no ink was found (`below === 0` → leave the rect unchanged, as today).
+3. *(Secondary, optional)* **bridge a single 1-px blank** in `contiguousInkLines` (tolerate one blank row before
+   terminating) so a stray faint row inside a descender can't halt the scan early. Keep the tolerance at 1 px so it
+   can never bridge the real, multi-pixel inter-line gap.
+4. **Keep the hard cap** (`maxDistancePt = fontSizePt * 0.5`) — the looser threshold + margin stay far below both the
+   cap and a normal inter-line gap, so it still can **never** reach the line below.
+
+Thread the font size into the margin (OverlayLayer already passes `fontSizePt` into `measureInkExtent`).
+
+**Caveat to note:** the ~242 cutoff assumes a **white / near-white** page (verified true for the reported docs —
+background sampled at 255). On a strongly **tinted** background the gap rows could read as ink; if that ever
+surfaces, switch to a threshold relative to the sampled local background rather than absolute. Out of scope unless
+it appears.
+
+**Tests (`inkExtent.test.ts`):** a descender whose tip fades to ~235 luminance is now fully measured (previously
+missed); a pure-white gap (≥ 250) still terminates the scan; the margin is included in a non-zero extent but a
+zero extent stays zero; the cap still bounds a pathological all-ink column.
+
+**Verify (live — user):** on the Corporate-Governance body text, edit **several** descender lines at **2–3 zoom
+levels** → **no** black strokes below *any* of them, and the line below untouched. Only then commit.
