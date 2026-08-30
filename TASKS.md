@@ -5617,7 +5617,7 @@ levels** → **no** black strokes below *any* of them, and the line below untouc
 
 ## Editor — Alignment & rich styling
 
-### Task 42 — Preserve text alignment (center & right) when editing  🔲 TODO → branch `text-alignment`
+### Task 42 — Preserve text alignment (center & right) when editing  ✅ MERGED TO MAIN (2026-08-30, `d6e2a2d`)
 > **Bug (reported):** editing a **centered** heading (or right-aligned text like a date / page number) **left-aligns
 > it** — the text jumps to the left edge of the box. Root cause: the editor and export have **no alignment support**
 > (text is always drawn from the box's left, `rect.x` — confirmed: no `text-align` anywhere in the edit/export
