@@ -71,6 +71,30 @@ describe('wrapTextSpansToLines', () => {
       { text: 'b', spans: [{ text: 'b', bold: true, italic: true }] },
     ]);
   });
+
+  it('wraps two sizes by their own widths and preserves their overrides', () => {
+    const result = wrapTextSpansToLines([
+      { text: 'ab ', bold: false, italic: false, fontSizePt: 10 },
+      { text: 'CD', bold: false, italic: false, fontSizePt: 20, fontName: 'Times New Roman' },
+    ], 4, (text, span) => text.length * ((span.fontSizePt ?? 10) / 10));
+
+    expect(result).toEqual([
+      {
+        text: 'ab ',
+        spans: [{ text: 'ab ', bold: false, italic: false, fontSizePt: 10 }],
+      },
+      {
+        text: 'CD',
+        spans: [{
+          text: 'CD',
+          bold: false,
+          italic: false,
+          fontSizePt: 20,
+          fontName: 'Times New Roman',
+        }],
+      },
+    ]);
+  });
 });
 
 describe('fitTextToBlock', () => {

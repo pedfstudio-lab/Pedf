@@ -190,9 +190,8 @@ function sliceTextSpans(
     const to = Math.min(end, spanEnd);
     if (from < to) {
       sliced.push({
+        ...span,
         text: span.text.slice(from - spanStart, to - spanStart),
-        bold: span.bold,
-        italic: span.italic,
       });
     }
     offset = spanEnd;

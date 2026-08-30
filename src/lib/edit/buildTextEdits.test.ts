@@ -217,6 +217,44 @@ describe('buildTextEdits', () => {
     });
   });
 
+  it('uses the tallest span for each line and variable baseline spacing', () => {
+    const block: TextBlock = {
+      pageIndex: run.pageIndex,
+      text: 'Large small\nNormal',
+      rect: { x: 40, y: 450, w: 180, h: 70 },
+      topBaselineY: 500,
+      lineHeightPt: 16,
+      style: run.style,
+      lines: [],
+    };
+    const result = buildTextBlockEdits(
+      block,
+      {
+        text: 'Large small Normal',
+        style: run.style,
+        width: 180,
+        height: 70,
+        dx: 0,
+        dy: 0,
+      },
+      [
+        {
+          text: 'Large small',
+          spans: [
+            { text: 'Large', bold: false, italic: false, fontSizePt: 20 },
+            { text: ' small', bold: false, italic: false },
+          ],
+        },
+        { text: 'Normal', spans: [{ text: 'Normal', bold: false, italic: false }] },
+      ],
+      50,
+    );
+
+    expect(result.texts[0]?.rect).toMatchObject({ y: 500, h: 20 });
+    expect(result.texts[1]?.rect.h).toBe(12);
+    expect(result.texts[1]?.rect.y).toBeLessThan(480);
+  });
+
   it('emits per-line rich spans and retains the unwrapped spans for re-editing', () => {
     const block: TextBlock = {
       pageIndex: run.pageIndex,

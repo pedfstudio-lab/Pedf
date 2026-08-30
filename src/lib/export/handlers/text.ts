@@ -5,6 +5,7 @@ import { resolveEnglishFont } from '../englishFont';
 import { drawSpanWithPageFont, measureTextWithPageFont } from '../embeddedFont';
 import type { TextEdit } from '../types';
 import type { EditHandler } from '../registry';
+import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 
 function alignedTextX(edit: TextEdit, textWidth: number): number {
   const align = edit.align ?? 'left';
@@ -26,16 +27,14 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
 
   if (edit.spans) {
     const measured = await Promise.all(edit.spans.filter((span) => span.text).map(async (span) => {
-      const pageFontWidth = measureTextWithPageFont(span.text, edit.style, context);
-      if (pageFontWidth !== null) return { span, width: pageFontWidth };
-      const font = await resolveEnglishFont({
-        ...edit.style,
-        bold: span.bold,
-        italic: span.italic,
-      }, context);
+      const style = effectiveTextSpanStyle(edit.style, span);
+      const pageFontWidth = measureTextWithPageFont(span.text, style, context);
+      if (pageFontWidth !== null) return { span, style, width: pageFontWidth };
+      const font = await resolveEnglishFont(style, context);
       return {
         span,
-        width: font.widthOfTextAtSize(span.text, edit.style.fontSizePt),
+        style,
+        width: font.widthOfTextAtSize(span.text, style.fontSizePt),
         font,
       };
     }));
@@ -46,7 +45,7 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
     for (const item of measured) {
       const advance = drawSpanWithPageFont(
         item.span.text,
-        edit.style,
+        item.style,
         cursorX,
         edit.rect.y,
         item.span.bold,
@@ -57,9 +56,9 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
         context.page.drawText(item.span.text, {
           x: cursorX,
           y: edit.rect.y,
-          size: edit.style.fontSizePt,
+          size: item.style.fontSizePt,
           font: item.font,
-          color: rgb(edit.style.color.r, edit.style.color.g, edit.style.color.b),
+          color: rgb(item.style.color.r, item.style.color.g, item.style.color.b),
         });
       }
       cursorX += item.width;

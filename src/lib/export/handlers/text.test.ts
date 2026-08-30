@@ -142,6 +142,47 @@ describe('drawText rich spans', () => {
     expect(fallbackDraw).toHaveBeenCalledTimes(1);
     expect(fallbackDraw).toHaveBeenCalledWith('•', expect.any(Object));
   });
+
+  it('draws mixed size and family spans on one baseline with matching advances', async () => {
+    const context = await makeContext();
+    const draw = vi.spyOn(context.page, 'drawText');
+    const edit: TextEdit = {
+      id: 'mixed-size-family',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 20, y: 260, w: 220, h: 20 },
+      z: 1,
+      text: 'Small Large',
+      spans: [
+        { text: 'Small ', bold: false, italic: false, fontSizePt: 10 },
+        {
+          text: 'Large',
+          bold: false,
+          italic: false,
+          fontSizePt: 20,
+          fontName: 'Times New Roman',
+        },
+      ],
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    };
+
+    await drawText(edit, context);
+
+    const small = context.pdf.embedStandardFont(StandardFonts.Helvetica);
+    expect(draw).toHaveBeenCalledTimes(2);
+    expect(draw.mock.calls.map(([, options]) => options?.size)).toEqual([10, 20]);
+    expect(draw.mock.calls.map(([, options]) => options?.y)).toEqual([260, 260]);
+    expect(draw.mock.calls[1]?.[1]?.x).toBeCloseTo(
+      20 + small.widthOfTextAtSize('Small ', 10),
+      6,
+    );
+  });
 });
 
 it('draws an owned bullet glyph with the standard English font', async () => {

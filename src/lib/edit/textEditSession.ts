@@ -31,6 +31,7 @@ function normalizeText(text: string): string {
 export function sameStyle(left: TextStyle, right: TextStyle): boolean {
   return (
     left.fontName === right.fontName &&
+    left.fontRef === right.fontRef &&
     left.fontSizePt === right.fontSizePt &&
     left.bold === right.bold &&
     left.italic === right.italic &&
@@ -51,7 +52,10 @@ export function sameSpans(
       other &&
       span.text === other.text &&
       span.bold === other.bold &&
-      span.italic === other.italic
+      span.italic === other.italic &&
+      span.fontSizePt === other.fontSizePt &&
+      span.fontName === other.fontName &&
+      span.fontRef === other.fontRef
     );
   });
 }

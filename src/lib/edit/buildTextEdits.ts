@@ -120,6 +120,31 @@ export function freeTextLineHeight(style: TextStyle): number {
   return style.fontSizePt * 1.2;
 }
 
+export function wrappedLineFontSize(
+  line: string | WrappedTextLine,
+  baseStyle: TextStyle,
+): number {
+  if (typeof line === 'string' || !line.spans || line.spans.length === 0) {
+    return baseStyle.fontSizePt;
+  }
+  return Math.max(...line.spans.map((span) => span.fontSizePt ?? baseStyle.fontSizePt));
+}
+
+function baselinesForLines(
+  lines: readonly (string | WrappedTextLine)[],
+  firstBaseline: number,
+  lineHeight: (line: string | WrappedTextLine) => number,
+): number[] {
+  const baselines: number[] = [];
+  let baseline = firstBaseline;
+  lines.forEach((line, index) => {
+    baselines.push(baseline);
+    const next = lines[index + 1];
+    if (next !== undefined) baseline -= Math.max(lineHeight(line), lineHeight(next));
+  });
+  return baselines;
+}
+
 export function buildFreeTextEdits(
   pageIndex: number,
   rect: PdfRect,
@@ -128,19 +153,28 @@ export function buildFreeTextEdits(
   z: number,
   boxId = id(),
 ): readonly TextEdit[] {
-  const lineHeight = freeTextLineHeight(next.style);
+  const firstBaseline = rect.y + rect.h + next.dy;
+  const baselines = baselinesForLines(
+    wrappedLines,
+    firstBaseline,
+    (line) => freeTextLineHeight({
+      ...next.style,
+      fontSizePt: wrappedLineFontSize(line, next.style),
+    }),
+  );
   return wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
     const spans = typeof line === 'string' ? undefined : line.spans;
+    const fontSizePt = wrappedLineFontSize(line, next.style);
     return {
       id: id(),
       kind: 'text',
       pageIndex,
       rect: {
         x: rect.x + next.dx,
-        y: rect.y + rect.h + next.dy - index * lineHeight,
+        y: baselines[index] ?? firstBaseline,
         w: next.width,
-        h: next.style.fontSizePt,
+        h: fontSizePt,
       },
       z: z + index,
       text,
@@ -170,7 +204,15 @@ export function buildTextBlockEdits(
     z: z + index,
     sampleBackground: true,
   }));
-  const lineHeight = textBlockLineHeight(block, next.style);
+  const firstBaseline = base.topBaselineY + next.dy;
+  const baselines = baselinesForLines(
+    wrappedLines,
+    firstBaseline,
+    (line) => textBlockLineHeight(block, {
+      ...next.style,
+      fontSizePt: wrappedLineFontSize(line, next.style),
+    }),
+  );
   const align = next.align ?? block.align ?? 'left';
   const usesAlignmentColumn = align !== 'left';
   const alignLeftPt = next.alignLeftPt ?? block.alignLeftPt ?? base.x;
@@ -180,15 +222,16 @@ export function buildTextBlockEdits(
   const texts = wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
     const spans = typeof line === 'string' ? undefined : line.spans;
+    const fontSizePt = wrappedLineFontSize(line, next.style);
     return {
       id: id(),
       kind: 'text',
       pageIndex: block.pageIndex,
       rect: {
         x: textLeft,
-        y: base.topBaselineY + next.dy - index * lineHeight,
+        y: baselines[index] ?? firstBaseline,
         w: textWidth,
-        h: next.style.fontSizePt,
+        h: fontSizePt,
       },
       z: z + covers.length + index,
       text,
@@ -254,23 +297,29 @@ export function buildBulletListEdits(
     topBaselineY: list.block.topBaselineY,
   },
 ): BuiltBulletListEdits {
-  const lineHeight = textBlockLineHeight(list.block, next.style);
   const spacingScale = next.style.fontSizePt / Math.max(1, list.block.style.fontSizePt);
   const itemSpacing = list.itemSpacingPt * spacingScale;
   const firstBaseline = base.topBaselineY + next.dy;
-  let baseline = firstBaseline;
-  let lastBaseline = firstBaseline;
-
-  for (const [itemIndex, item] of items.entries()) {
-    const lineCount = Math.max(1, item.lines.length);
-    lastBaseline = baseline - (lineCount - 1) * lineHeight;
-    baseline = lastBaseline - lineHeight;
-    if (itemIndex < items.length - 1) baseline -= itemSpacing;
-  }
+  let nextItemBaseline = firstBaseline;
+  const itemLayouts = items.map((item, itemIndex) => {
+    const lines = item.lines.length > 0 ? item.lines : [''];
+    const lineHeight = (line: string | WrappedTextLine) => textBlockLineHeight(list.block, {
+      ...next.style,
+      fontSizePt: wrappedLineFontSize(line, next.style),
+    });
+    const baselines = baselinesForLines(lines, nextItemBaseline, lineHeight);
+    const lastLine = lines.at(-1) ?? '';
+    const lastBaseline = baselines.at(-1) ?? nextItemBaseline;
+    nextItemBaseline = lastBaseline - lineHeight(lastLine);
+    if (itemIndex < items.length - 1) nextItemBaseline -= itemSpacing;
+    return { item, lines, baselines };
+  });
+  const lastBaseline = itemLayouts.at(-1)?.baselines.at(-1) ?? firstBaseline;
+  const firstLine = itemLayouts[0]?.lines[0] ?? '';
 
   const usedHeightPt = items.length === 0
     ? 0
-    : next.style.fontSizePt + firstBaseline - lastBaseline;
+    : wrappedLineFontSize(firstLine, next.style) + firstBaseline - lastBaseline;
   if (usedHeightPt > availableHeightPt + 0.5) {
     return { covers: [], texts: [], usedHeightPt, overflow: true };
   }
@@ -299,8 +348,6 @@ export function buildBulletListEdits(
     : next.style.fontSizePt;
   const bulletGlyphStyle: TextStyle = { ...next.style, fontSizePt: bulletGlyphSizePt, fontRef: undefined };
   const bulletGlyphDy = BULLET_GLYPH_DOT_RISE * (bulletGlyphSizePt - next.style.fontSizePt);
-  baseline = firstBaseline;
-
   // Retain a non-painting session anchor when every item is removed so the
   // now-empty list can still be reopened and edited without revealing source text.
   if (items.length === 0) {
@@ -322,15 +369,15 @@ export function buildBulletListEdits(
     });
   }
 
-  for (const [itemIndex, item] of items.entries()) {
-    const lines = item.lines.length > 0 ? item.lines : [''];
+  for (const { lines, baselines } of itemLayouts) {
+    const itemBaseline = baselines[0] ?? firstBaseline;
     texts.push({
       id: id(),
       kind: 'text',
       pageIndex: list.block.pageIndex,
       rect: {
         x: bulletX,
-        y: baseline - bulletGlyphDy,
+        y: itemBaseline - bulletGlyphDy,
         w: next.width,
         h: bulletGlyphSizePt,
       },
@@ -344,15 +391,16 @@ export function buildBulletListEdits(
     for (const [lineIndex, line] of lines.entries()) {
       const text = typeof line === 'string' ? line : line.text;
       const spans = typeof line === 'string' ? undefined : line.spans;
+      const fontSizePt = wrappedLineFontSize(line, next.style);
       texts.push({
         id: id(),
         kind: 'text',
         pageIndex: list.block.pageIndex,
         rect: {
           x: textX,
-          y: baseline - lineIndex * lineHeight,
+          y: baselines[lineIndex] ?? itemBaseline,
           w: textWidth,
-          h: next.style.fontSizePt,
+          h: fontSizePt,
         },
         z: z + 1 + texts.length,
         text,
@@ -363,8 +411,6 @@ export function buildBulletListEdits(
         boxHeight: usedHeightPt,
       });
     }
-    baseline -= lines.length * lineHeight;
-    if (itemIndex < items.length - 1) baseline -= itemSpacing;
   }
 
   return { covers: [cover], texts, usedHeightPt, overflow: false };

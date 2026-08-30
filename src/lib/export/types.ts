@@ -31,11 +31,14 @@ export interface TextStyle {
   readonly fontRef?: string;
 }
 
-/** Inline weight/style override; family, size, and color inherit from the containing TextEdit. */
+/** Inline overrides; absent size/family values inherit from the containing TextEdit. */
 export interface TextSpan {
   readonly text: string;
   readonly bold: boolean;
   readonly italic: boolean;
+  readonly fontSizePt?: number;
+  readonly fontName?: string;
+  readonly fontRef?: string;
 }
 
 export type TextAlignment = 'left' | 'center' | 'right';

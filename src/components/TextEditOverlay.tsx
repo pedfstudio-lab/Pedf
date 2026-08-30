@@ -28,6 +28,7 @@ const FAMILY_KEYWORD = {
   serif: 'Times New Roman',
   mono: 'Courier New',
 } as const;
+type FamilyKey = keyof typeof FAMILY_KEYWORD;
 
 const MIN_BOX_WIDTH = 12;
 const MIN_BOX_HEIGHT = 8;
@@ -67,6 +68,46 @@ function insertPlainText(root: HTMLElement, text: string): boolean {
   selection.removeAllRanges();
   selection.addRange(range);
   return true;
+}
+
+function elementAtRangeStart(range: Range, root: HTMLElement): HTMLElement {
+  const node = range.startContainer;
+  if (node.nodeType === Node.ELEMENT_NODE) return node as HTMLElement;
+  return node.parentElement ?? root;
+}
+
+function selectWrappedRange(wrapper: HTMLElement): Range {
+  const range = window.document.createRange();
+  range.selectNodeContents(wrapper);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return range;
+}
+
+function wrapSelectionWithStyle(
+  range: Range,
+  styles: Record<string, string>,
+  data: Record<string, string>,
+  clearedProperties: readonly ('fontSize' | 'fontFamily')[],
+): Range {
+  const fragment = range.extractContents();
+  const wrapper = window.document.createElement('span');
+  for (const [property, value] of Object.entries(styles)) {
+    (wrapper.style as unknown as Record<string, string>)[property] = value;
+  }
+  for (const [name, value] of Object.entries(data)) wrapper.dataset[name] = value;
+  for (const descendant of Array.from(fragment.querySelectorAll<HTMLElement>('*'))) {
+    for (const property of clearedProperties) descendant.style[property] = '';
+    if (clearedProperties.includes('fontSize')) delete descendant.dataset.fontSizePt;
+    if (clearedProperties.includes('fontFamily')) {
+      delete descendant.dataset.fontName;
+      delete descendant.dataset.fontRef;
+    }
+  }
+  wrapper.append(fragment);
+  range.insertNode(wrapper);
+  return selectWrappedRange(wrapper);
 }
 
 function measureWidestInitialLine(text: string, style: TextStyle): number {
@@ -131,11 +172,13 @@ export function TextEditOverlay({
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
   const usesAlignmentColumn = initialAlign !== 'left';
-  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans));
+  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans, zoom));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
   const [selectionStyle, setSelectionStyle] = useState({
     bold: initialStyle.bold,
     italic: initialStyle.italic,
+    fontSizePt: initialStyle.fontSizePt,
+    family: classifyFontFamily(initialStyle.fontName) as FamilyKey,
   });
   const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
   const [initialWidth] = useState(() => bulletMode
@@ -248,7 +291,7 @@ export function TextEditOverlay({
   const commit = () => {
     const editable = editableRef.current;
     if (!editable) return;
-    const serialized = serializeRichText(editable, style);
+    const serialized = serializeRichText(editable, style, zoom);
     const next: NextTextEdit = {
       text: serialized.text,
       style: serialized.style,
@@ -320,12 +363,18 @@ export function TextEditOverlay({
     selectionRangeRef.current = range.cloneRange();
     const bold = window.document.queryCommandState('bold');
     const italic = window.document.queryCommandState('italic');
+    const computed = window.getComputedStyle(elementAtRangeStart(range, editable));
+    const fontSizePt = Number.parseFloat(computed.fontSize) / zoom || style.fontSizePt;
+    const family = classifyFontFamily(computed.fontFamily) as FamilyKey;
     setSelectionStyle((current) => (
-      current.bold === bold && current.italic === italic
+      current.bold === bold &&
+      current.italic === italic &&
+      current.fontSizePt === fontSizePt &&
+      current.family === family
         ? current
-        : { bold, italic }
+        : { bold, italic, fontSizePt, family }
     ));
-  }, []);
+  }, [style.fontSizePt, zoom]);
 
   useEffect(() => {
     window.document.addEventListener('selectionchange', refreshSelectionStyle);
@@ -345,6 +394,63 @@ export function TextEditOverlay({
       selection?.addRange(savedRange.cloneRange());
     }
     window.document.execCommand(command, false);
+    refreshSelectionStyle();
+    resizeToContent();
+  };
+
+  const editableRange = (): Range | undefined => {
+    const editable = editableRef.current;
+    if (!editable) return undefined;
+    const current = selectionRangeInside(editable);
+    const range = current ?? selectionRangeRef.current?.cloneRange();
+    if (!range || !editable.contains(range.commonAncestorContainer)) return undefined;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return range;
+  };
+
+  const changeFontSize = (delta: number) => {
+    const editable = editableRef.current;
+    const range = editableRange();
+    if (!editable || !range || range.collapsed) {
+      setStyle((value) => ({ ...value, fontSizePt: Math.max(4, value.fontSizePt + delta) }));
+      setSelectionStyle((value) => ({
+        ...value,
+        fontSizePt: Math.max(4, value.fontSizePt + delta),
+      }));
+      return;
+    }
+    const computed = window.getComputedStyle(elementAtRangeStart(range, editable));
+    const currentSize = Number.parseFloat(computed.fontSize) / zoom || style.fontSizePt;
+    const fontSizePt = Math.max(4, Math.round((currentSize + delta) * 100) / 100);
+    const selected = wrapSelectionWithStyle(
+      range,
+      { fontSize: `${fontSizePt * zoom}px` },
+      { fontSizePt: String(fontSizePt) },
+      ['fontSize'],
+    );
+    selectionRangeRef.current = selected.cloneRange();
+    refreshSelectionStyle();
+    resizeToContent();
+  };
+
+  const changeFontFamily = (family: FamilyKey) => {
+    const editable = editableRef.current;
+    const range = editableRange();
+    const fontName = FAMILY_KEYWORD[family];
+    if (!editable || !range || range.collapsed) {
+      setStyle((value) => ({ ...value, fontName, fontRef: undefined }));
+      setSelectionStyle((value) => ({ ...value, family }));
+      return;
+    }
+    const selected = wrapSelectionWithStyle(
+      range,
+      { fontFamily: fontName },
+      { fontName },
+      ['fontFamily'],
+    );
+    selectionRangeRef.current = selected.cloneRange();
     refreshSelectionStyle();
     resizeToContent();
   };
@@ -376,20 +482,15 @@ export function TextEditOverlay({
         {bulletMode && (
           <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
         )}
-        <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: Math.max(4, value.fontSizePt - 1) }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Decrease text size">A−</button>
-        <button type="button" onClick={() => setStyle((value) => ({ ...value, fontSizePt: value.fontSizePt + 1 }))} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Increase text size">A+</button>
+        <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeFontSize(-1)} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Decrease text size">A−</button>
+        <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeFontSize(1)} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Increase text size">A+</button>
         <button type="button" aria-pressed={selectionStyle.bold} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
         <button type="button" aria-pressed={selectionStyle.italic} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
         <select
           aria-label="Font family"
-          value={classifyFontFamily(style.fontName)}
+          value={selectionStyle.family}
           onChange={(event) => {
-            const family = event.target.value as keyof typeof FAMILY_KEYWORD;
-            setStyle((value) => ({
-              ...value,
-              fontName: FAMILY_KEYWORD[family],
-              fontRef: undefined,
-            }));
+            changeFontFamily(event.target.value as FamilyKey);
           }}
           className="rounded border border-neutral-200 bg-white px-1 py-1 text-sm"
         >
@@ -445,7 +546,7 @@ export function TextEditOverlay({
         className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
         style={{
           ...textStyleToCss(style, zoom),
-          lineHeight: `${lineHeight * zoom}px`,
+          lineHeight: lineHeight / style.fontSizePt,
           textAlign: initialAlign,
         }}
       />

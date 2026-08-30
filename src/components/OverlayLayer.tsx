@@ -21,6 +21,7 @@ import {
 } from '@/lib/edit/buildTextEdits';
 import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
+import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import {
@@ -246,14 +247,11 @@ function wrapNextText(next: NextTextEdit) {
       next.spans,
       next.width,
       (text, span) => {
+        const spanStyle = effectiveTextSpanStyle(next.style, span);
         if (context) {
-          context.font = textStyleToCanvasFont({
-            ...next.style,
-            bold: span.bold,
-            italic: span.italic,
-          });
+          context.font = textStyleToCanvasFont(spanStyle);
         }
-        return context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55;
+        return context?.measureText(text).width ?? text.length * spanStyle.fontSizePt * 0.55;
       },
     );
   }
@@ -276,14 +274,11 @@ function wrapBulletItems(list: BulletList, next: NextTextEdit): BulletListItemLa
         item.spans,
         textWidth,
         (value, span) => {
+          const spanStyle = effectiveTextSpanStyle(next.style, span);
           if (context) {
-            context.font = textStyleToCanvasFont({
-              ...next.style,
-              bold: span.bold,
-              italic: span.italic,
-            });
+            context.font = textStyleToCanvasFont(spanStyle);
           }
-          return context?.measureText(value).width ?? value.length * next.style.fontSizePt * 0.55;
+          return context?.measureText(value).width ?? value.length * spanStyle.fontSizePt * 0.55;
         },
       ),
     }));
@@ -698,17 +693,17 @@ export function OverlayLayer({
             }}
           >
             {edit.spans
-              ? edit.spans.map((span, index) => (
-                  <span
-                    key={`${index}:${span.text}`}
-                    style={{
-                      fontWeight: span.bold ? 700 : 400,
-                      fontStyle: span.italic ? 'italic' : 'normal',
-                    }}
-                  >
-                    {span.text}
-                  </span>
-                ))
+              ? edit.spans.map((span, index) => {
+                  const spanStyle = effectiveTextSpanStyle(edit.style, span);
+                  return (
+                    <span
+                      key={`${index}:${span.text}`}
+                      style={textStyleToCss(spanStyle, zoom)}
+                    >
+                      {span.text}
+                    </span>
+                  );
+                })
               : edit.text}
           </div>
         );

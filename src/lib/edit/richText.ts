@@ -8,16 +8,38 @@ export interface SerializedRichText {
 
 const BLOCK_ELEMENTS = new Set(['DIV', 'LI', 'P']);
 
+function sameSpanStyle(left: TextSpan, right: TextSpan): boolean {
+  return (
+    left.bold === right.bold &&
+    left.italic === right.italic &&
+    left.fontSizePt === right.fontSizePt &&
+    left.fontName === right.fontName &&
+    left.fontRef === right.fontRef
+  );
+}
+
+export function effectiveTextSpanStyle(baseStyle: TextStyle, span: TextSpan): TextStyle {
+  const changesFamily = span.fontName !== undefined && span.fontName !== baseStyle.fontName;
+  return {
+    ...baseStyle,
+    bold: span.bold,
+    italic: span.italic,
+    fontSizePt: span.fontSizePt ?? baseStyle.fontSizePt,
+    fontName: span.fontName ?? baseStyle.fontName,
+    fontRef: changesFamily ? span.fontRef : (span.fontRef ?? baseStyle.fontRef),
+  };
+}
+
 export function normalizeTextSpans(spans: readonly TextSpan[]): TextSpan[] {
   const normalized: TextSpan[] = [];
   for (const span of spans) {
     const text = span.text.replace(/\r\n?/g, '\n');
     if (!text) continue;
     const previous = normalized.at(-1);
-    if (previous && previous.bold === span.bold && previous.italic === span.italic) {
+    if (previous && sameSpanStyle(previous, span)) {
       normalized[normalized.length - 1] = { ...previous, text: previous.text + text };
     } else {
-      normalized.push({ text, bold: span.bold, italic: span.italic });
+      normalized.push({ ...span, text });
     }
   }
   return normalized;
@@ -45,13 +67,11 @@ export function finalizeTextSpans(
   const normalized = normalizeTextSpans(spans);
   const text = textFromSpans(normalized);
   const first = normalized[0];
-  const uniform = first && normalized.every(
-    (span) => span.bold === first.bold && span.italic === first.italic,
-  );
+  const uniform = first && normalized.every((span) => sameSpanStyle(span, first));
   if (uniform) {
     return {
       text,
-      style: { ...baseStyle, bold: first.bold, italic: first.italic },
+      style: effectiveTextSpanStyle(baseStyle, first),
     };
   }
   return normalized.length > 0
@@ -75,34 +95,77 @@ function italicFromElement(element: HTMLElement, inherited: boolean): boolean {
   return italic;
 }
 
+function fontSizeFromElement(element: HTMLElement, inherited: number, zoom: number): number {
+  const dataSize = Number.parseFloat(element.dataset?.fontSizePt ?? '');
+  if (Number.isFinite(dataSize) && dataSize > 0) return dataSize;
+  const fontSize = Number.parseFloat(element.style?.fontSize ?? '');
+  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize / zoom : inherited;
+}
+
+function fontNameFromElement(element: HTMLElement, inherited: string): string {
+  const dataName = element.dataset?.fontName?.trim();
+  if (dataName) return dataName;
+  const inline = element.style?.fontFamily?.split(',')[0]?.trim().replace(/^['"]|['"]$/g, '');
+  return inline || inherited;
+}
+
+function fontRefFromElement(
+  element: HTMLElement,
+  inherited: string | undefined,
+  familyChanged: boolean,
+): string | undefined {
+  const dataRef = element.dataset?.fontRef?.trim();
+  if (dataRef) return dataRef;
+  return familyChanged ? undefined : inherited;
+}
+
 /** Serialize an uncontrolled contentEditable tree into absolute bold/italic runs. */
-export function serializeRichText(root: HTMLElement, baseStyle: TextStyle): SerializedRichText {
+export function serializeRichText(
+  root: HTMLElement,
+  baseStyle: TextStyle,
+  zoom = 1,
+): SerializedRichText {
   const spans: TextSpan[] = [];
-  const append = (text: string, bold: boolean, italic: boolean) => {
-    if (text) spans.push({ text, bold, italic });
+  const append = (text: string, current: TextStyle) => {
+    if (!text) return;
+    spans.push({
+      text,
+      bold: current.bold,
+      italic: current.italic,
+      ...(current.fontSizePt !== baseStyle.fontSizePt ? { fontSizePt: current.fontSizePt } : {}),
+      ...(current.fontName !== baseStyle.fontName ? { fontName: current.fontName } : {}),
+      ...(current.fontRef !== baseStyle.fontRef && current.fontRef ? { fontRef: current.fontRef } : {}),
+    });
   };
-  const visit = (node: Node, bold: boolean, italic: boolean) => {
+  const visit = (node: Node, inherited: TextStyle) => {
     if (node.nodeType === 3) {
-      append(node.nodeValue ?? '', bold, italic);
+      append(node.nodeValue ?? '', inherited);
       return;
     }
     if (node.nodeType !== 1) return;
     const element = node as HTMLElement;
     if (element.tagName === 'BR') {
-      append('\n', bold, italic);
+      append('\n', inherited);
       return;
     }
     if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return;
     if (element !== root && BLOCK_ELEMENTS.has(element.tagName) && textFromSpans(spans) !== '' && !textFromSpans(spans).endsWith('\n')) {
-      append('\n', bold, italic);
+      append('\n', inherited);
     }
-    const nextBold = weightFromElement(element, bold);
-    const nextItalic = italicFromElement(element, italic);
-    for (const child of Array.from(element.childNodes)) visit(child, nextBold, nextItalic);
+    const fontName = fontNameFromElement(element, inherited.fontName);
+    const next: TextStyle = {
+      ...inherited,
+      bold: weightFromElement(element, inherited.bold),
+      italic: italicFromElement(element, inherited.italic),
+      fontSizePt: fontSizeFromElement(element, inherited.fontSizePt, zoom),
+      fontName,
+      fontRef: fontRefFromElement(element, inherited.fontRef, fontName !== inherited.fontName),
+    };
+    for (const child of Array.from(element.childNodes)) visit(child, next);
   };
 
   for (const child of Array.from(root.childNodes)) {
-    visit(child, baseStyle.bold, baseStyle.italic);
+    visit(child, baseStyle);
   }
   return finalizeTextSpans(spans, baseStyle);
 }
@@ -117,15 +180,38 @@ function escapeHtml(text: string): string {
     .replace(/\n/g, '<br>');
 }
 
+function escapeAttribute(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function cssFontFamily(span: TextSpan): string | undefined {
+  if (!span.fontName && !span.fontRef) return undefined;
+  const family = span.fontName ?? 'sans-serif';
+  return span.fontRef ? `"${span.fontRef.replace(/"/g, '\\"')}", ${family}` : family;
+}
+
 /** Build the editor's initial DOM once; subsequent keystrokes never flow back through React. */
 export function richTextToHtml(
   text: string,
-  style: Pick<TextStyle, 'bold' | 'italic'>,
+  style: TextStyle,
   spans?: readonly TextSpan[],
+  zoom = 1,
 ): string {
   if (!spans) return escapeHtml(text.replace(/\r\n?/g, '\n'));
   return effectiveTextSpans(text, style, spans).map((span) => {
     const content = escapeHtml(span.text);
-    return `<span style="font-weight:${span.bold ? 'bold' : 'normal'};font-style:${span.italic ? 'italic' : 'normal'}">${content}</span>`;
+    const family = cssFontFamily(span);
+    const declarations = [
+      `font-weight:${span.bold ? 'bold' : 'normal'}`,
+      `font-style:${span.italic ? 'italic' : 'normal'}`,
+      ...(span.fontSizePt ? [`font-size:${span.fontSizePt * zoom}px`] : []),
+      ...(family ? [`font-family:${family}`] : []),
+    ].join(';');
+    const data = [
+      ...(span.fontSizePt ? [` data-font-size-pt="${span.fontSizePt}"`] : []),
+      ...(span.fontName ? [` data-font-name="${escapeAttribute(span.fontName)}"`] : []),
+      ...(span.fontRef ? [` data-font-ref="${escapeAttribute(span.fontRef)}"`] : []),
+    ].join('');
+    return `<span style="${declarations}"${data}>${content}</span>`;
   }).join('');
 }

@@ -1,7 +1,7 @@
 import type { TextSpan } from '@/lib/export/types';
 
 export type MeasureText = (text: string) => number;
-export type MeasureTextSpan = (text: string, span: Pick<TextSpan, 'bold' | 'italic'>) => number;
+export type MeasureTextSpan = (text: string, span: TextSpan) => number;
 
 export interface WrappedTextLine {
   readonly text: string;
@@ -97,16 +97,36 @@ interface StyledCharacter {
   readonly character: string;
   readonly bold: boolean;
   readonly italic: boolean;
+  readonly fontSizePt?: number;
+  readonly fontName?: string;
+  readonly fontRef?: string;
+}
+
+function sameCharacterStyle(span: TextSpan, character: StyledCharacter): boolean {
+  return (
+    span.bold === character.bold &&
+    span.italic === character.italic &&
+    span.fontSizePt === character.fontSizePt &&
+    span.fontName === character.fontName &&
+    span.fontRef === character.fontRef
+  );
 }
 
 function charactersToSpans(characters: readonly StyledCharacter[]): TextSpan[] {
   const spans: TextSpan[] = [];
   for (const character of characters) {
     const previous = spans.at(-1);
-    if (previous && previous.bold === character.bold && previous.italic === character.italic) {
+    if (previous && sameCharacterStyle(previous, character)) {
       spans[spans.length - 1] = { ...previous, text: previous.text + character.character };
     } else {
-      spans.push({ text: character.character, bold: character.bold, italic: character.italic });
+      spans.push({
+        text: character.character,
+        bold: character.bold,
+        italic: character.italic,
+        ...(character.fontSizePt ? { fontSizePt: character.fontSizePt } : {}),
+        ...(character.fontName ? { fontName: character.fontName } : {}),
+        ...(character.fontRef ? { fontRef: character.fontRef } : {}),
+      });
     }
   }
   return spans;
@@ -204,7 +224,14 @@ export function wrapTextSpansToLines(
     for (const character of Array.from(span.text.replace(/\r\n?/g, '\n'))) {
       hasText = true;
       if (character === '\n') logicalLines.push([]);
-      else logicalLines.at(-1)?.push({ character, bold: span.bold, italic: span.italic });
+      else logicalLines.at(-1)?.push({
+        character,
+        bold: span.bold,
+        italic: span.italic,
+        ...(span.fontSizePt ? { fontSizePt: span.fontSizePt } : {}),
+        ...(span.fontName ? { fontName: span.fontName } : {}),
+        ...(span.fontRef ? { fontRef: span.fontRef } : {}),
+      });
     }
   }
   if (!hasText) return [];
