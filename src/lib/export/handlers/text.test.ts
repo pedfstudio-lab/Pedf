@@ -166,3 +166,71 @@ it('draws an owned bullet glyph with the standard English font', async () => {
   const bytes = await context.pdf.save();
   expect(bytes.length).toBeGreaterThan(100);
 });
+
+describe('drawText alignment', () => {
+  it('centers replacement glyphs inside the stored alignment column', async () => {
+    const context = await makeContext();
+    const draw = vi.spyOn(context.page, 'drawText');
+    const edit: TextEdit = {
+      id: 'centered',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 30, y: 300, w: 240, h: 12 },
+      z: 1,
+      text: 'Centered title',
+      align: 'center',
+      alignLeftPt: 30,
+      alignWidthPt: 240,
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    };
+
+    await drawText(edit, context);
+
+    const font = context.pdf.embedStandardFont(StandardFonts.Helvetica);
+    const expectedX = 30 + (
+      240 - font.widthOfTextAtSize(edit.text, edit.style.fontSizePt)
+    ) / 2;
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(draw.mock.calls[0]?.[1]?.x).toBeCloseTo(expectedX, 6);
+  });
+
+  it('right-aligns rich spans by their combined measured width', async () => {
+    const context = await makeContext();
+    const draw = vi.spyOn(context.page, 'drawText');
+    const edit: TextEdit = {
+      id: 'right-rich',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 30, y: 280, w: 240, h: 12 },
+      z: 1,
+      text: 'Date 2026',
+      spans: [
+        { text: 'Date ', bold: false, italic: false },
+        { text: '2026', bold: true, italic: false },
+      ],
+      align: 'right',
+      alignLeftPt: 30,
+      alignWidthPt: 240,
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    };
+
+    await drawText(edit, context);
+
+    const regular = context.pdf.embedStandardFont(StandardFonts.Helvetica);
+    const bold = context.pdf.embedStandardFont(StandardFonts.HelveticaBold);
+    const totalWidth = regular.widthOfTextAtSize('Date ', 12) + bold.widthOfTextAtSize('2026', 12);
+    expect(draw.mock.calls[0]?.[1]?.x).toBeCloseTo(30 + 240 - totalWidth, 6);
+  });
+});

@@ -1,4 +1,10 @@
-import type { CoverEdit, TextEdit, TextSpan, TextStyle } from '@/lib/export/types';
+import type {
+  CoverEdit,
+  TextAlignment,
+  TextEdit,
+  TextSpan,
+  TextStyle,
+} from '@/lib/export/types';
 import type { PdfRect } from '@/lib/export/types';
 import type { TextRun } from '@/lib/pdf/textContent';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
@@ -24,6 +30,9 @@ export interface NextTextEdit {
   readonly height: number;
   readonly dx: number;
   readonly dy: number;
+  readonly align?: TextAlignment;
+  readonly alignLeftPt?: number;
+  readonly alignWidthPt?: number;
 }
 
 export function buildTextEdits(
@@ -162,6 +171,12 @@ export function buildTextBlockEdits(
     sampleBackground: true,
   }));
   const lineHeight = textBlockLineHeight(block, next.style);
+  const align = next.align ?? block.align ?? 'left';
+  const usesAlignmentColumn = align !== 'left';
+  const alignLeftPt = next.alignLeftPt ?? block.alignLeftPt ?? base.x;
+  const alignWidthPt = next.alignWidthPt ?? block.alignWidthPt ?? next.width;
+  const textLeft = usesAlignmentColumn ? alignLeftPt + next.dx : base.x + next.dx;
+  const textWidth = usesAlignmentColumn ? alignWidthPt : next.width;
   const texts = wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
     const spans = typeof line === 'string' ? undefined : line.spans;
@@ -170,9 +185,9 @@ export function buildTextBlockEdits(
       kind: 'text',
       pageIndex: block.pageIndex,
       rect: {
-        x: base.x + next.dx,
+        x: textLeft,
         y: base.topBaselineY + next.dy - index * lineHeight,
-        w: next.width,
+        w: textWidth,
         h: next.style.fontSizePt,
       },
       z: z + covers.length + index,
@@ -182,6 +197,11 @@ export function buildTextBlockEdits(
       boxText: next.text,
       ...(next.spans ? { boxSpans: next.spans } : {}),
       boxHeight: next.height,
+      ...(usesAlignmentColumn ? {
+        align,
+        alignLeftPt: textLeft,
+        alignWidthPt: textWidth,
+      } : {}),
     };
   });
 

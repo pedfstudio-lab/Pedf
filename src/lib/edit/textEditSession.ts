@@ -1,4 +1,4 @@
-import type { TextSpan, TextStyle } from '@/lib/export/types';
+import type { TextAlignment, TextSpan, TextStyle } from '@/lib/export/types';
 
 export interface TextEditSessionValue {
   readonly text: string;
@@ -8,6 +8,9 @@ export interface TextEditSessionValue {
   readonly height: number;
   readonly dx: number;
   readonly dy: number;
+  readonly align?: TextAlignment;
+  readonly alignLeftPt?: number;
+  readonly alignWidthPt?: number;
 }
 
 const HEIGHT_EPSILON_PT = 0.5;
@@ -61,6 +64,9 @@ export function sameTextEditSession(
     normalizeText(initial.text) === normalizeText(current.text) &&
     sameStyle(initial.style, current.style) &&
     sameSpans(initial.spans, current.spans) &&
+    initial.align === current.align &&
+    initial.alignLeftPt === current.alignLeftPt &&
+    initial.alignWidthPt === current.alignWidthPt &&
     initial.width === current.width &&
     Math.abs(initial.height - current.height) <= HEIGHT_EPSILON_PT &&
     current.dx === 0 &&

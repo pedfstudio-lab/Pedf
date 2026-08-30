@@ -38,6 +38,8 @@ export interface TextSpan {
   readonly italic: boolean;
 }
 
+export type TextAlignment = 'left' | 'center' | 'right';
+
 export type EditKind = 'text' | 'cover' | 'image' | 'line';
 
 export interface BaseEdit {
@@ -64,6 +66,12 @@ export interface TextEdit extends BaseEdit {
   readonly boxSpans?: readonly TextSpan[];
   /** Manual editor-box height in PDF points; repeated on wrapped line edits for re-editing. */
   readonly boxHeight?: number;
+  /** Horizontal alignment inherited from the source PDF text line. */
+  readonly align?: TextAlignment;
+  /** Left edge of the alignment column in PDF points. */
+  readonly alignLeftPt?: number;
+  /** Width of the alignment column in PDF points. */
+  readonly alignWidthPt?: number;
 }
 
 export interface CoverEdit extends BaseEdit {

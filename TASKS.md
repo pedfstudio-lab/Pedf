@@ -5612,3 +5612,91 @@ zero extent stays zero; the cap still bounds a pathological all-ink column.
 
 **Verify (live — user):** on the Corporate-Governance body text, edit **several** descender lines at **2–3 zoom
 levels** → **no** black strokes below *any* of them, and the line below untouched. Only then commit.
+
+---
+
+## Editor — Alignment & rich styling
+
+### Task 42 — Preserve text alignment (center & right) when editing  🔲 TODO → branch `text-alignment`
+> **Bug (reported):** editing a **centered** heading (or right-aligned text like a date / page number) **left-aligns
+> it** — the text jumps to the left edge of the box. Root cause: the editor and export have **no alignment support**
+> (text is always drawn from the box's left, `rect.x` — confirmed: no `text-align` anywhere in the edit/export
+> path). Fix: detect each block's alignment and keep it, in the edit box **and** on export.
+
+**Step 1 — detect alignment → `src/lib/pdf/textContent.ts`.** For each line/block, compare its horizontal position
+within the page's text content width:
+- **centered** when the left gap (`line.rect.x − contentLeft`) ≈ the right gap (`contentRight − line.rect.right`),
+  within ~one font size, and both gaps are meaningfully > 0.
+- **right** when the right gap ≈ 0 and the left gap is large.
+- else **left**.
+`contentLeft`/`contentRight` = the page's text content bounds (min/max run x across the page). A block's alignment =
+its lines' common alignment. Attach `align` to `TextLine`/`TextBlock`.
+
+**Step 2 — carry alignment on the edit → `src/lib/export/types.ts`.** Add `align?: 'left' | 'center' | 'right'` to
+`TextEdit` (undefined = left = today's behavior). Also record the **alignment column** (`alignLeftPt`,
+`alignWidthPt`) — the region to center/right *within* (the page content column, not the tight text box).
+
+**Step 3 — editor shows it aligned → `TextEditOverlay.tsx`.** For a centered/right block, size the edit box to the
+**alignment-column width** (room to center) and set `text-align: center` / `right` on the contentEditable. The user
+edits and it stays centered/right; changing the wording re-centers live.
+
+**Step 4 — export draws it aligned → `buildTextEdits.ts` + `handlers/text.ts`.** Position each wrapped line by
+alignment: centered → `x = alignLeft + (alignWidth − lineWidth) / 2`; right → `x = alignLeft + alignWidth −
+lineWidth`; left → unchanged. `lineWidth` from font metrics (page-font advance / standard-font width).
+
+**⚠ Scope:** center + right only. **Justified** (both edges flush, newspaper-style) is rare here and much harder —
+treat as left for now.
+
+**Tests:** alignment detection (centered line → 'center'; right-margin → 'right'; flush-left → 'left'); export
+geometry positions a centered line's x at the column center.
+
+**Verify (live):** open the Corporate-Governance title page → edit the centered heading → it **stays centered** in
+the box and the export; retype a line → re-centers. A right-aligned date/page-number stays right; left text is
+unchanged. `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** merge `text-alignment` → `main`. Commit: `Preserve center/right text alignment when
+editing (Task 42)`.
+
+### Task 43 — Per-selection font size & family — across the WHOLE PDF (not just headings)  🔲 TODO → branch `per-span-style`
+> **Goal:** let the user change **font size and font family on a text selection** — like **Bold/Italic** already
+> work per selection — **anywhere in any text box in the PDF**, not only headings. Today **A− / A+** and the **font
+> dropdown** restyle the **whole box**; only bold/italic vary per selection (via `spans`). This extends that same
+> span model to size + family so, within one box, you can make the title line bigger, a word a different font, etc.
+> **Applies to all text editing across the whole document.**
+
+**Step 1 — extend the span model → `src/lib/export/types.ts`.** `TextSpan` gains optional per-span overrides:
+`fontSizePt?`, `fontName?`, `fontRef?`. Absent → the span inherits the edit's base `style` (unchanged behavior).
+
+**Step 2 — capture & render per-span size/family → `src/lib/edit/richText.ts`.** `serializeRichText` reads each DOM
+node's inline `font-size` / `font-family` (alongside bold/italic) into its span; `richTextToHtml` renders each span
+with its size/family; `normalizeTextSpans`/`finalizeTextSpans` treat size/family as part of a span's identity (don't
+merge spans that differ).
+
+**Step 3 — selection controls → `TextEditOverlay.tsx`.** Make **A− / A+** and the **font dropdown** apply to the
+current **selection** (surround it with a `<span style="font-size:…;font-family:…">`), like a manual version of what
+Bold does — browser `execCommand('fontSize')` is only the crude 1–7 scale, so wrap the selection with the exact px.
+With **no** selection, they still set the box default (today's behavior).
+
+**Step 4 — layout with mixed sizes → `src/lib/edit/textLayout.ts` + `TextEditOverlay`.** ⚠ **The substantial part:**
+a box can now hold multiple sizes, so **line height becomes per-line (the tallest span on that line)** and wrapping
+must measure each span at its own size. The contentEditable renders this natively; the export wrap
+(`textLayout` / `buildTextEdits`) must match — per-line height from the tallest span, advance-width per span size.
+
+**Step 5 — export per-span size/family → `handlers/text.ts` + `embeddedFont.ts`.** Draw each span at its own
+`fontSizePt` and font (`drawSpanWithPageFont` / `resolveEnglishFont` already take a style — pass the span's
+effective size/font and advance the cursor by the per-span width). Sit all spans on a **common baseline** so
+different sizes align on the line.
+
+**⚠ Complexity / phasing:** Step 4 (mixed-size layout: variable line heights, wrapping, baseline alignment) is the
+heavy part. If it proves too large in one go, phase it: ship **per-selection family** + **per-line size** first,
+then true per-word size within a line. The target is full per-selection size.
+
+**Tests:** span identity keeps size/family distinct; a two-size line wraps + measures correctly; export advances by
+per-span width; a mixed-size line shares one baseline.
+
+**Verify (live):** in **any** paragraph (not just headings) select part of the text → **A+** enlarges just that part
+→ select another part → pick a different font → **Done** → export shows the mixed sizes/fonts correctly on a shared
+baseline. `npm run test` / `typecheck` / `lint` green.
+
+**Land it (on your go):** merge `per-span-style` → `main`. Commit: `Per-selection font size & family across the PDF
+(Task 43)`.

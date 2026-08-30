@@ -149,6 +149,18 @@ function pageFontAdvanceWidth(
   return widthUnits * fontSizePt / 1000;
 }
 
+/** Measure text with the same page-owned font metrics used by the strict draw path. */
+export function measureTextWithPageFont(
+  text: string,
+  style: TextStyle,
+  context: PageExportContext,
+): number | null {
+  if (!text) return null;
+  const resource = resolvePageFontResource(context, style);
+  if (!resource) return null;
+  return pageFontAdvanceWidth(text, resource.dictionary, style.fontSizePt);
+}
+
 /** Draw through a page-owned WinAnsi font. Returns false when the strict path is unsupported. */
 export function drawTextWithPageFont(
   text: string,
@@ -180,7 +192,7 @@ export function drawSpanWithPageFont(
   if (!text) return null;
   const resource = resolvePageFontResource(context, style);
   if (!resource) return null;
-  const advance = pageFontAdvanceWidth(text, resource.dictionary, style.fontSizePt);
+  const advance = measureTextWithPageFont(text, style, context);
   if (advance === null) return null;
 
   const literalText = PDFString.of(text) as unknown as Parameters<typeof showText>[0];

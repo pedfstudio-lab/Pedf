@@ -10,6 +10,7 @@ import type { TextRun } from './textContent';
 import {
   classifyFontStyle,
   classifyFontFamily,
+  detectTextAlignment,
   extractTextRuns,
   fontStyleFromProgram,
   groupRunsIntoBlocks,
@@ -283,6 +284,42 @@ describe('natural text blocks', () => {
     text,
     rect: { x, y, w, h: 10 },
     style,
+  });
+
+  it('detects centered, right-aligned, and ordinary left-aligned lines', () => {
+    expect(detectTextAlignment({ x: 210, y: 500, w: 180, h: 20 }, 50, 550, 18)).toBe('center');
+    expect(detectTextAlignment({ x: 430, y: 500, w: 120, h: 12 }, 50, 550, 10)).toBe('right');
+    expect(detectTextAlignment({ x: 50, y: 500, w: 320, h: 12 }, 50, 550, 10)).toBe('left');
+  });
+
+  it('carries the page alignment column onto lines and blocks', () => {
+    const blocks = groupRunsIntoBlocks([
+      run('Left edge', 50, 460, 80),
+      run('Centered title', 220, 500, 160),
+      run('Right date', 470, 440, 80),
+    ]);
+
+    expect(blocks.map((block) => ({
+      text: block.text,
+      align: block.align,
+      left: block.alignLeftPt,
+      width: block.alignWidthPt,
+    }))).toEqual([
+      { text: 'Centered title', align: 'center', left: 50, width: 500 },
+      { text: 'Left edge', align: 'left', left: 50, width: 500 },
+      { text: 'Right date', align: 'right', left: 50, width: 500 },
+    ]);
+  });
+
+  it('detects the Corporate Governance cover title as centered', async () => {
+    const bytes = new Uint8Array(await readFile('public/samples/Corporate-Governance.pdf'));
+    const document = await getDocument({ data: bytes, verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(await document.getPage(1), 0));
+    const title = blocks.find((block) => block.text === 'CORPORATE GOVERNANCE');
+    expect(title).toMatchObject({
+      align: 'center',
+    });
   });
 
   it('rejoins touching fragments, spaces words, and splits distant columns', () => {

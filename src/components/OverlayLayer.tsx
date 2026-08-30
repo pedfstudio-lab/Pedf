@@ -177,6 +177,21 @@ function textBoxRect(texts: readonly TextEdit[]): PdfRect {
   return { x: union.x, y: top - height, w: union.w, h: height };
 }
 
+function alignmentEditorRect(
+  block: TextBlock,
+  texts: readonly TextEdit[] | undefined,
+  fallback: PdfRect,
+): PdfRect {
+  const base = texts && texts.length > 0 ? textBoxRect(texts) : fallback;
+  const align = texts?.[0]?.align ?? block.align ?? 'left';
+  if (align === 'left') return base;
+  return {
+    ...base,
+    x: texts?.[0]?.alignLeftPt ?? block.alignLeftPt ?? base.x,
+    w: texts?.[0]?.alignWidthPt ?? block.alignWidthPt ?? base.w,
+  };
+}
+
 function sourceText(texts: readonly TextEdit[]): string {
   return texts[0]?.boxText ?? texts.map((edit) => edit.text).join('\n');
 }
@@ -573,9 +588,10 @@ export function OverlayLayer({
     const existing = activeBulletList
       ? findExistingBulletList(activeBulletList)
       : findExisting(activeBlock);
-    const sourceRect = existing && existing.texts.length > 0
-      ? textBoxRect(existing.texts)
-      : activeBulletList?.coverRect ?? activeBlock.rect;
+    const fallback = activeBulletList?.coverRect ?? activeBlock.rect;
+    const sourceRect = activeBulletList
+      ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
+      : alignmentEditorRect(activeBlock, existing?.texts, fallback);
     return pdfRectToScreenRect(sourceRect, viewport, dpr);
   })();
   const activeSnapLeft = activeSnapScreenRect?.left;
@@ -678,6 +694,7 @@ export function OverlayLayer({
               width: rect.width,
               height: Math.max(rect.height, edit.style.fontSizePt * zoom),
               ...textStyleToCss(edit.style, zoom),
+              textAlign: edit.align ?? 'left',
             }}
           >
             {edit.spans
@@ -941,9 +958,10 @@ export function OverlayLayer({
         const existing = activeBulletList
           ? findExistingBulletList(activeBulletList)
           : findExisting(activeBlock);
-        const sourceRect = existing && existing.texts.length > 0
-          ? textBoxRect(existing.texts)
-          : activeBulletList?.coverRect ?? activeBlock.rect;
+        const fallback = activeBulletList?.coverRect ?? activeBlock.rect;
+        const sourceRect = activeBulletList
+          ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
+          : alignmentEditorRect(activeBlock, existing?.texts, fallback);
         const screenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
         const activeCovers = activeBulletList
           ? [coverRectForBulletList(activeBulletList)]

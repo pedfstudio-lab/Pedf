@@ -127,23 +127,29 @@ export function TextEditOverlay({
     return body.fontRef ? body : { ...body, fontRef: block.style.fontRef };
   })();
   const initialSpans = existing?.[0]?.boxSpans ?? (existing?.length === 1 ? existing[0]?.spans : undefined);
+  const initialAlign = bulletMode ? 'left' : (existing?.[0]?.align ?? block.align ?? 'left');
+  const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
+  const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
+  const usesAlignmentColumn = initialAlign !== 'left';
   const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
   const [selectionStyle, setSelectionStyle] = useState({
     bold: initialStyle.bold,
     italic: initialStyle.italic,
   });
-  const naturalWidth = block.rect.w;
+  const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
   const [initialWidth] = useState(() => bulletMode
     ? Math.max(naturalWidth, existing?.[0]?.rect.w ?? 0)
-    : calculateInitialEditorWidth({
-      blockWidthPt: naturalWidth,
-      blockXPt: block.rect.x,
-      existingWidthPt: existing?.[0]?.rect.w,
-      fontSizePt: initialStyle.fontSizePt,
-      measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
-      pageWidthPt,
-    }));
+    : usesAlignmentColumn
+      ? Math.max(MIN_BOX_WIDTH, initialAlignWidthPt)
+      : calculateInitialEditorWidth({
+        blockWidthPt: naturalWidth,
+        blockXPt: block.rect.x,
+        existingWidthPt: existing?.[0]?.rect.w,
+        fontSizePt: initialStyle.fontSizePt,
+        measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
+        pageWidthPt,
+      }));
   const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);
   const [width, setWidth] = useState(initialWidth);
   const [height, setHeight] = useState(initialHeight);
@@ -251,6 +257,11 @@ export function TextEditOverlay({
       height,
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
+      ...(usesAlignmentColumn ? {
+        align: initialAlign,
+        alignLeftPt: initialAlignLeftPt,
+        alignWidthPt: width,
+      } : {}),
     };
     if (bulletOverflow) return;
     finishTextEdit(
@@ -262,6 +273,11 @@ export function TextEditOverlay({
         height: initialRenderedHeightRef.current,
         dx: 0,
         dy: 0,
+        ...(usesAlignmentColumn ? {
+          align: initialAlign,
+          alignLeftPt: initialAlignLeftPt,
+          alignWidthPt: initialWidth,
+        } : {}),
       },
       next,
       onDone,
@@ -427,7 +443,11 @@ export function TextEditOverlay({
           }
         }}
         className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
-        style={{ ...textStyleToCss(style, zoom), lineHeight: `${lineHeight * zoom}px` }}
+        style={{
+          ...textStyleToCss(style, zoom),
+          lineHeight: `${lineHeight * zoom}px`,
+          textAlign: initialAlign,
+        }}
       />
       <button
         type="button"

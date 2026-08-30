@@ -177,6 +177,46 @@ describe('buildTextEdits', () => {
     });
   });
 
+  it('stores centered text in its full alignment column while covers stay local', () => {
+    const block: TextBlock = {
+      pageIndex: run.pageIndex,
+      text: 'Centered title',
+      rect: { x: 110, y: 500, w: 100, h: 14 },
+      topBaselineY: 500,
+      lineHeightPt: 16,
+      style: run.style,
+      lines: [],
+      align: 'center',
+      alignLeftPt: 40,
+      alignWidthPt: 240,
+    };
+    const result = buildTextBlockEdits(
+      block,
+      {
+        text: 'New title',
+        style: run.style,
+        width: 240,
+        height: 20,
+        dx: 5,
+        dy: 0,
+        align: 'center',
+        alignLeftPt: 40,
+        alignWidthPt: 240,
+      },
+      ['New title'],
+      30,
+    );
+
+    expect(result.covers[0]?.rect.x).toBeLessThan(110);
+    expect(result.covers[0]?.rect.w).toBeLessThan(110);
+    expect(result.texts[0]).toMatchObject({
+      rect: { x: 45, w: 240 },
+      align: 'center',
+      alignLeftPt: 45,
+      alignWidthPt: 240,
+    });
+  });
+
   it('emits per-line rich spans and retains the unwrapped spans for re-editing', () => {
     const block: TextBlock = {
       pageIndex: run.pageIndex,

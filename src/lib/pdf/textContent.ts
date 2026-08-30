@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfRect, TextStyle } from '@/lib/export/types';
+import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
@@ -18,6 +18,9 @@ export interface TextLine {
   readonly baselineY: number;
   readonly style: TextStyle;
   readonly runs: readonly TextRun[];
+  readonly align?: TextAlignment;
+  readonly alignLeftPt?: number;
+  readonly alignWidthPt?: number;
 }
 
 export interface TextBlock {
@@ -28,6 +31,9 @@ export interface TextBlock {
   readonly lineHeightPt: number;
   readonly style: TextStyle;
   readonly lines: readonly TextLine[];
+  readonly align?: TextAlignment;
+  readonly alignLeftPt?: number;
+  readonly alignWidthPt?: number;
 }
 
 export type FontFamilyClass = 'serif' | 'sans' | 'mono';
@@ -101,6 +107,37 @@ function isStandaloneNumber(text: string): boolean {
   return /^[\d.,/-]{1,6}$/.test(text.trim());
 }
 
+/** Infer a line's alignment against the horizontal content bounds of its page. */
+export function detectTextAlignment(
+  rect: PdfRect,
+  contentLeft: number,
+  contentRight: number,
+  fontSizePt: number,
+): TextAlignment {
+  const contentWidth = Math.max(0, contentRight - contentLeft);
+  const leftGap = Math.max(0, rect.x - contentLeft);
+  const rightGap = Math.max(0, contentRight - (rect.x + rect.w));
+  const tolerance = Math.max(1, fontSizePt);
+  // A cover-page heading can nearly span the widest text on the page; a small,
+  // balanced inset is still meaningful alignment evidence.
+  const meaningfulGap = Math.max(1.5, fontSizePt * 0.12);
+
+  if (
+    leftGap >= meaningfulGap &&
+    rightGap >= meaningfulGap &&
+    Math.abs(leftGap - rightGap) <= tolerance
+  ) {
+    return 'center';
+  }
+  if (
+    rightGap <= tolerance &&
+    leftGap >= Math.max(fontSizePt * 2, contentWidth * 0.2)
+  ) {
+    return 'right';
+  }
+  return 'left';
+}
+
 /** Merge PDF.js fragments first by baseline and then by natural horizontal gaps. */
 export function mergeRunsIntoLines(runs: readonly TextRun[]): TextLine[] {
   const rows: Array<{ pageIndex: number; baselineY: number; runs: TextRun[] }> = [];
@@ -152,7 +189,35 @@ export function mergeRunsIntoLines(runs: readonly TextRun[]): TextLine[] {
     if (segment.length > 0) lines.push(makeLine(segment));
   }
 
-  return lines.sort(
+  const contentBounds = new Map<number, { left: number; right: number }>();
+  for (const run of runs) {
+    const existing = contentBounds.get(run.pageIndex);
+    const right = run.rect.x + run.rect.w;
+    if (existing) {
+      existing.left = Math.min(existing.left, run.rect.x);
+      existing.right = Math.max(existing.right, right);
+    } else {
+      contentBounds.set(run.pageIndex, { left: run.rect.x, right });
+    }
+  }
+
+  return lines.map((line) => {
+    const bounds = contentBounds.get(line.pageIndex) ?? {
+      left: line.rect.x,
+      right: line.rect.x + line.rect.w,
+    };
+    return {
+      ...line,
+      align: detectTextAlignment(
+        line.rect,
+        bounds.left,
+        bounds.right,
+        line.style.fontSizePt,
+      ),
+      alignLeftPt: bounds.left,
+      alignWidthPt: Math.max(0, bounds.right - bounds.left),
+    };
+  }).sort(
     (left, right) =>
       left.pageIndex - right.pageIndex ||
       right.baselineY - left.baselineY ||
@@ -243,6 +308,9 @@ export function groupRunsIntoBlocks(runs: readonly TextRun[]): TextBlock[] {
     const gaps = lines.slice(1).map((line, index) => (
       (lines[index]?.baselineY ?? line.baselineY) - line.baselineY
     ));
+    const commonAlign = lines.every((line) => line.align === lines[0]?.align)
+      ? (lines[0]?.align ?? 'left')
+      : 'left';
     return {
       pageIndex: lines[0]?.pageIndex ?? 0,
       text: lines.map((line) => line.text).join('\n'),
@@ -251,6 +319,9 @@ export function groupRunsIntoBlocks(runs: readonly TextRun[]): TextBlock[] {
       lineHeightPt: median(gaps) || style.fontSizePt * 1.2,
       style,
       lines,
+      align: commonAlign,
+      alignLeftPt: lines[0]?.alignLeftPt,
+      alignWidthPt: lines[0]?.alignWidthPt,
     };
   });
 }
