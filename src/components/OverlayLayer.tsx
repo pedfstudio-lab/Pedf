@@ -10,6 +10,7 @@ import type { ScreenRect } from '@/lib/export/coordinates';
 import type { CoverEdit, LineEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import { sampleDominantColor } from '@/lib/export/colorSample';
 import { expandRectForInk, measureCanvasInkExtent } from '@/lib/export/inkExtent';
+import type { InkExtent } from '@/lib/export/inkExtent';
 import {
   buildBulletListEdits,
   buildFreeTextEdits,
@@ -23,6 +24,7 @@ import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdi
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import { coversOriginalRect } from '@/lib/edit/coverMatch';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import {
   buildLineDelete,
@@ -128,16 +130,6 @@ function sameRect(left: PdfRect, right: PdfRect): boolean {
     Math.abs(left.y - right.y) < epsilon &&
     Math.abs(left.w - right.w) < epsilon &&
     Math.abs(left.h - right.h) < epsilon
-  );
-}
-
-function coversOriginalRect(cover: PdfRect, original: PdfRect): boolean {
-  const epsilon = 0.01;
-  return sameRect(cover, original) || (
-    Math.abs(cover.x - original.x) < epsilon &&
-    Math.abs(cover.w - original.w) < epsilon &&
-    cover.y <= original.y + epsilon &&
-    cover.y + cover.h >= original.y + original.h - epsilon
   );
 }
 
@@ -450,9 +442,9 @@ export function OverlayLayer({
     fontSizePt: number,
   ) => {
     const registration = getPageCanvas(targetPageIndex);
-    if (!registration) return { above: 0, below: 0 };
+    if (!registration) return { topTrim: 0, below: 0 };
     const context = registration.canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return { above: 0, below: 0 };
+    if (!context) return { topTrim: 0, below: 0 };
     return measureCanvasInkExtent(
       {
         width: registration.canvas.width,
@@ -465,10 +457,14 @@ export function OverlayLayer({
     );
   }, [getPageCanvas]);
 
-  const extendCoverToSourceInk = useCallback((cover: CoverEdit, fontSizePt: number): CoverEdit => {
+  const extendCoverToSourceInk = useCallback((
+    cover: CoverEdit,
+    fontSizePt: number,
+    measured?: InkExtent,
+  ): CoverEdit => {
     const rect = expandRectForInk(
       cover.rect,
-      measureInkExtent(cover.pageIndex, cover.rect, fontSizePt),
+      measured ?? measureInkExtent(cover.pageIndex, cover.rect, fontSizePt),
     );
     return rect === cover.rect ? cover : { ...cover, rect };
   }, [measureInkExtent]);
@@ -516,6 +512,43 @@ export function OverlayLayer({
     }
     return { covers: [anchor], texts };
   };
+
+  const activeCoverGeometry = useMemo(() => {
+    if (!activeBlock) return [];
+    const covers = activeBulletList
+      ? [coverRectForBulletList(activeBulletList)]
+      : coverRectsForTextBlock(activeBlock);
+    return covers.map((cover, index) => {
+      const fontSizePt = activeBulletList
+        ? activeBulletList.block.style.fontSizePt
+        : (activeBlock.lines[index]?.style.fontSizePt ?? activeBlock.style.fontSizePt);
+      const extent = measureInkExtent(activeBlock.pageIndex, cover, fontSizePt);
+      return {
+        sourceRect: cover,
+        displayRect: expandRectForInk(cover, { topTrim: extent.topTrim, below: 0 }),
+        extent,
+        fontSizePt,
+      };
+    });
+  }, [activeBlock, activeBulletList, measureInkExtent]);
+
+  const activeInkScreenTop = useMemo(() => {
+    if (activeCoverGeometry.length === 0) return undefined;
+    return Math.min(...activeCoverGeometry.map(({ displayRect }) => (
+      pdfRectToScreenRect(displayRect, viewport, dpr).top
+    )));
+  }, [activeCoverGeometry, dpr, viewport]);
+
+  const activeCoverUntrimmedTop = useMemo(() => {
+    if (activeCoverGeometry.length === 0) return undefined;
+    return Math.min(...activeCoverGeometry.map(({ sourceRect }) => (
+      pdfRectToScreenRect(sourceRect, viewport, dpr).top
+    )));
+  }, [activeCoverGeometry, dpr, viewport]);
+
+  const inkTopDelta = activeInkScreenTop === undefined || activeCoverUntrimmedTop === undefined
+    ? 0
+    : Math.max(0, activeInkScreenTop - activeCoverUntrimmedTop);
 
   const beginFreeTextPlacement = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || freeTextSession) return;
@@ -587,7 +620,8 @@ export function OverlayLayer({
     const sourceRect = activeBulletList
       ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
       : alignmentEditorRect(activeBlock, existing?.texts, fallback);
-    return pdfRectToScreenRect(sourceRect, viewport, dpr);
+    const screenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
+    return { ...screenRect, top: screenRect.top + inkTopDelta };
   })();
   const activeSnapLeft = activeSnapScreenRect?.left;
   const activeSnapTop = activeSnapScreenRect?.top;
@@ -957,10 +991,11 @@ export function OverlayLayer({
         const sourceRect = activeBulletList
           ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
           : alignmentEditorRect(activeBlock, existing?.texts, fallback);
-        const screenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
-        const activeCovers = activeBulletList
-          ? [coverRectForBulletList(activeBulletList)]
-          : coverRectsForTextBlock(activeBlock);
+        const sourceScreenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
+        const screenRect = {
+          ...sourceScreenRect,
+          top: sourceScreenRect.top + inkTopDelta,
+        };
         const base = !activeBulletList && existing && existing.texts.length > 0
           ? {
               x: Math.min(...existing.texts.map((edit) => edit.rect.x)),
@@ -981,8 +1016,8 @@ export function OverlayLayer({
           : undefined;
         return (
           <>
-            {activeCovers.map((cover, index) => {
-              const rect = pdfRectToScreenRect(cover, viewport, dpr);
+            {activeCoverGeometry.map(({ sourceRect: cover, displayRect }, index) => {
+              const rect = pdfRectToScreenRect(displayRect, viewport, dpr);
               return (
                 <div
                   key={`active-cover-${index}`}
@@ -1043,7 +1078,11 @@ export function OverlayLayer({
                     return;
                   }
                   const covers = built.covers.map((cover) => (
-                    extendCoverToSourceInk(cover, activeBulletList.block.style.fontSizePt)
+                    extendCoverToSourceInk(
+                      cover,
+                      activeBulletList.block.style.fontSizePt,
+                      activeCoverGeometry[0]?.extent,
+                    )
                   ));
                   replaceEdits(
                     existing
@@ -1068,6 +1107,7 @@ export function OverlayLayer({
                   extendCoverToSourceInk(
                     cover,
                     activeBlock.lines[index]?.style.fontSizePt ?? activeBlock.style.fontSizePt,
+                    activeCoverGeometry[index]?.extent,
                   )
                 ));
                 replaceEdits(

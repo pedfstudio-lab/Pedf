@@ -1,7 +1,7 @@
 import type { PdfRect } from './types';
 
 export interface InkExtent {
-  readonly above: number;
+  readonly topTrim: number;
   readonly below: number;
 }
 
@@ -15,7 +15,7 @@ export interface ViewportPointConverter {
   convertToViewportPoint(x: number, y: number): ArrayLike<number>;
 }
 
-const NO_INK: InkExtent = { above: 0, below: 0 };
+const NO_INK: InkExtent = { topTrim: 0, below: 0 };
 const INK_LUMINANCE_THRESHOLD = 242;
 const MIN_VISIBLE_ALPHA = 24;
 
@@ -90,11 +90,44 @@ function contiguousInkLines(
   return deepestInk;
 }
 
+function blankBandBeforeSubstantialInk(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  axis: 'x' | 'y',
+  start: number,
+  step: -1 | 1,
+  limit: number,
+  substantialInkPixels: number,
+): number | null {
+  let offset = 0;
+  while (offset < limit) {
+    const position = start + offset * step;
+    if (!lineHasInk(data, width, height, axis, position)) {
+      offset += 1;
+      continue;
+    }
+    const bandPixels = contiguousInkLines(
+      data,
+      width,
+      height,
+      axis,
+      position,
+      step,
+      limit - offset,
+    );
+    if (bandPixels >= substantialInkPixels) return offset;
+    // This was a rule/underline-sized band. Move beyond it; the next loop
+    // naturally skips its trailing blank gap before testing the next band.
+    offset += Math.max(1, bandPixels);
+  }
+  return null;
+}
+
 /**
- * Measure contiguous source-page ink immediately outside a PDF-space cover.
- * One isolated blank scan line may be bridged, while the normal multi-pixel
- * inter-line gap terminates the measurement. Half the font size is the hard
- * safety cap, including the small anti-aliasing margin.
+ * Measure the blank band inside the cover's top edge and contiguous source-page
+ * ink immediately below its bottom edge. The top band lets the cover hug the
+ * real glyphs; the below scan retains Task 41's half-font-size safety cap.
  */
 export function measureCanvasInkExtent(
   reader: InkPixelReader,
@@ -150,16 +183,21 @@ export function measureCanvasInkExtent(
   const downStep: -1 | 1 = upStep === 1 ? -1 : 1;
   const minimum = axis === 'x' ? coverLeft - scanLeft : coverTop - scanTop;
   const maximum = axis === 'x' ? coverRight - scanLeft : coverBottom - scanTop;
-  const upStart = upStep === -1 ? minimum - 1 : maximum;
+  const topStart = downStep === 1 ? minimum : maximum - 1;
   const downStart = downStep === -1 ? minimum - 1 : maximum;
-  const abovePixels = contiguousInkLines(
+  const substantialInkPixels = Math.max(
+    2,
+    Math.ceil(fontSizePt * 0.2 * pixelsPerPoint),
+  );
+  const topBlankPixels = blankBandBeforeSubstantialInk(
     data,
     scanWidth,
     scanHeight,
     axis,
-    upStart,
-    upStep,
-    maxPixels,
+    topStart,
+    downStep,
+    maximum - minimum,
+    substantialInkPixels,
   );
   const belowPixels = contiguousInkLines(
     data,
@@ -175,17 +213,20 @@ export function measureCanvasInkExtent(
     ? 0
     : Math.min(maxDistancePt, pixels / pixelsPerPoint + marginPt);
   return {
-    above: extentWithMargin(abovePixels),
+    topTrim: topBlankPixels === null
+      ? 0
+      : Math.max(0, topBlankPixels / pixelsPerPoint - marginPt),
     below: extentWithMargin(belowPixels),
   };
 }
 
 export function expandRectForInk(rect: PdfRect, extent: InkExtent): PdfRect {
-  if (extent.above <= 0 && extent.below <= 0) return rect;
+  if (extent.topTrim <= 0 && extent.below <= 0) return rect;
+  const topTrim = Math.min(Math.max(0, extent.topTrim), rect.h);
   return {
     x: rect.x,
     y: rect.y - extent.below,
     w: rect.w,
-    h: rect.h + extent.above + extent.below,
+    h: rect.h - topTrim + extent.below,
   };
 }

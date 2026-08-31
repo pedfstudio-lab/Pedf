@@ -42,6 +42,7 @@ const uprightViewport: ViewportPointConverter = {
   convertToViewportPoint: (x, y) => [x, 20 - y],
 };
 const sourceRect = { x: 2, y: 8, w: 10, h: 4 };
+const headingRect = { x: 2, y: 0, w: 10, h: 12 };
 
 describe('measureCanvasInkExtent', () => {
   it('counts a faded 235-luminance tip and adds the font-relative margin', () => {
@@ -51,7 +52,7 @@ describe('measureCanvasInkExtent', () => {
     ]);
 
     const extent = measureCanvasInkExtent(reader, uprightViewport, sourceRect, 12);
-    expect(extent.above).toBe(0);
+    expect(extent.topTrim).toBe(0);
     expect(extent.below).toBeCloseTo(2.6, 5);
   });
 
@@ -78,7 +79,7 @@ describe('measureCanvasInkExtent', () => {
       .toBeCloseTo(3.6, 5);
   });
 
-  it('measures rare ink above the cover independently from descenders', () => {
+  it('does not extend toward ink above the cover while measuring descenders', () => {
     const reader = makeReader(20, 20, [
       [6, 7],
       [6, 6],
@@ -86,8 +87,76 @@ describe('measureCanvasInkExtent', () => {
     ]);
 
     const extent = measureCanvasInkExtent(reader, uprightViewport, sourceRect, 12);
-    expect(extent.above).toBeCloseTo(2.6, 5);
+    expect(extent.topTrim).toBe(0);
     expect(extent.below).toBeCloseTo(1.6, 5);
+  });
+
+  it('skips a thin rule inside the cover and trims to the substantial heading caps', () => {
+    const reader = makeReader(20, 20, [
+      [6, 9], // A one-row rule inside the cover's top band.
+      [6, 13],
+      [6, 14],
+      [6, 15],
+      [6, 16],
+      [6, 17],
+      [6, 18],
+    ]);
+
+    const extent = measureCanvasInkExtent(reader, uprightViewport, headingRect, 12);
+    expect(extent.topTrim).toBeCloseTo(4.4, 5);
+    expect(extent.below).toBe(0);
+
+    const adjusted = expandRectForInk(headingRect, extent);
+    expect(uprightViewport.convertToViewportPoint(0, adjusted.y + adjusted.h)[1])
+      .toBeGreaterThan(9);
+  });
+
+  it('trims a blank top band with no rule down to the heading caps', () => {
+    const reader = makeReader(20, 20, [
+      [6, 13],
+      [6, 14],
+      [6, 15],
+      [6, 16],
+      [6, 17],
+      [6, 18],
+    ]);
+
+    expect(measureCanvasInkExtent(reader, uprightViewport, headingRect, 12).topTrim)
+      .toBeCloseTo(4.4, 5);
+  });
+
+  it('ignores a rule above the cover and still trims to the heading caps', () => {
+    const reader = makeReader(20, 20, [
+      [6, 7],
+      [6, 13],
+      [6, 14],
+      [6, 15],
+      [6, 16],
+      [6, 17],
+      [6, 18],
+    ]);
+
+    expect(measureCanvasInkExtent(reader, uprightViewport, headingRect, 12).topTrim)
+      .toBeCloseTo(4.4, 5);
+  });
+
+  it('does not trim a cover that is already tight to ink at the top', () => {
+    const extent = measureCanvasInkExtent(
+      makeReader(20, 20, [
+        [6, 8],
+        [6, 9],
+        [6, 10],
+        [6, 11],
+        [6, 12],
+        [6, 13],
+      ]),
+      uprightViewport,
+      headingRect,
+      12,
+    );
+
+    expect(extent).toEqual({ topTrim: 0, below: 0 });
+    expect(expandRectForInk(headingRect, extent)).toBe(headingRect);
   });
 
   it('honors the hard scan cap even when ink continues', () => {
@@ -114,7 +183,7 @@ describe('measureCanvasInkExtent', () => {
     ]);
 
     const extent = measureCanvasInkExtent(reader, rotatedViewport, sourceRect, 12);
-    expect(extent.above).toBe(0);
+    expect(extent.topTrim).toBe(0);
     expect(extent.below).toBeCloseTo(2.6, 5);
   });
 
@@ -124,7 +193,7 @@ describe('measureCanvasInkExtent', () => {
       uprightViewport,
       sourceRect,
       12,
-    )).toEqual({ above: 0, below: 0 });
+    )).toEqual({ topTrim: 0, below: 0 });
   });
 
   it('falls back to no extension when canvas pixels cannot be read', () => {
@@ -137,19 +206,19 @@ describe('measureCanvasInkExtent', () => {
     };
 
     expect(measureCanvasInkExtent(reader, uprightViewport, sourceRect, 12)).toEqual({
-      above: 0,
+      topTrim: 0,
       below: 0,
     });
   });
 });
 
 describe('expandRectForInk', () => {
-  it('preserves horizontal bounds while expanding above and below', () => {
-    expect(expandRectForInk(sourceRect, { above: 1.5, below: 2.5 })).toEqual({
+  it('preserves horizontal bounds while trimming the top and expanding below', () => {
+    expect(expandRectForInk(sourceRect, { topTrim: 1.5, below: 2.5 })).toEqual({
       x: 2,
       y: 5.5,
       w: 10,
-      h: 8,
+      h: 5,
     });
   });
 });

@@ -5700,3 +5700,131 @@ baseline. `npm run test` / `typecheck` / `lint` green.
 
 **Land it (on your go):** merge `per-span-style` → `main`. Commit: `Per-selection font size & family across the PDF
 (Task 43)`.
+
+---
+
+### Task 44 — Fix: heading cover & edit box sit too high, covering the line above  🔲 TODO → **fresh branch `cover-hug-top`**
+> **⚠ START FRESH from `main`.** The earlier `cover-top-reach` branch (the asymmetric ink-cap attempt) is
+> **abandoned and discarded** — it was chasing the wrong thing and never reached `main`. Do **not** build on it.
+> Create a **new** branch `cover-hug-top` off current `main` and implement only the fix below. This is the real
+> solution.
+> **Bug (reported):** editing a **heading** covers the **rule line / text line directly above it**, and the heading
+> text **visibly jumps up** the moment you click edit — headings only, not paragraphs.
+>
+> **Confirmed NOT the ink extension.** The earlier attempt (asymmetric `maxAbovePt = fontSizePt * 0.1`) is on this
+> branch and verified correct in code — yet the bug persists. That **proves** the cause is the cover/box **base
+> position**, not the ink growth. (So this rewrite **removes** that earlier change — it was chasing the wrong thing.)
+>
+> **Real root cause:** the detected text rectangle's **top sits above the actual letters.** pdf.js reports a text
+> item's height as ~1 em, which is **taller than the cap height**, so `run.rect.top` (= baseline + height) overshoots
+> the real top of the glyphs by ~0.3 em. The cover (`paddedRect`, top = `rect.top + verticalPad`) **and** the edit box
+> (positioned at the block-rect top) therefore both **start above the letters** — most visibly on large headings (big
+> font → big overshoot; headings usually have a rule line pressed right above) → the cover swallows the line above,
+> and the box text jumps up.
+
+**The fix — measure where the letters actually start and hug that, instead of the too-tall rectangle.**
+Self-calibrating (it measures the real ink at runtime), so there are no magic offsets to guess.
+
+> **⚙ Do Part A and Part C TOGETHER in one pass.** They share the *same* measurement — "where is the real top of
+> the letters" — so compute that top **once** and apply it to **both** the export cover (A) and the on-screen edit box
+> (C). Part B is not work: it's the standing rule "**do not touch the descender / bottom logic (Task 41)** — only the
+> top edge changes." Ship A + C in a single branch/commit; verify all three effects at once (see Verify).
+
+> **⚠⚠ REVISION 1 — the first `cover-hug-top` attempt FAILED live; here is the exact flaw and the required fix.**
+> The first attempt (`blankBandBeforeInk`) trimmed the cover top down to the **first ink row it hit**. But the whole
+> reason the bug exists is that the cover **overshoots upward and swallows a rule line that is therefore *inside* the
+> cover's top band.** So "the first ink below the cover top" **is that rule line** — the scan stops *on the rule*,
+> trims a tiny sliver (~0.4 px), and the cover **still covers the rule.** Claude confirmed this with a diagnostic:
+> for a rule at canvas row 9 with the heading caps at row 13, the attempt produced `topTrim = 0.4`, moving the cover
+> top only to row 8.4 — **still above the rule.** Codex's earlier test only modelled the rule *above* (outside) the
+> cover, which is not the failing case. **The measurement must skip the thin rule and keep going down to the heading.**
+
+**Part A — cover top hugs the topmost *heading* ink, skipping a thin rule → `src/lib/export/inkExtent.ts` +
+`extendCoverToSourceInk` (OverlayLayer).**
+- Scan **down** from the cover's top edge, within the cover's x-range, using the same `242` threshold + single-blank
+  bridge as the descender scan.
+- At **each** ink you encounter, measure how **tall** its contiguous ink band is (reuse `contiguousInkLines` with its
+  bridge). Then classify:
+  - **Thin band = a rule / underline / hairline** (contiguous height **below** a "substantial ink" threshold, e.g.
+    `fontSizePt * 0.2` converted to pixels). **Skip past it *and* its trailing blank gap and keep scanning down.**
+  - **Tall band = the heading's actual glyphs** (contiguous height **≥** that threshold — caps are ~0.6–0.7 em, always
+    far taller than a rule). **This is the real top.** The blank band from the cover top down to *this* band is what
+    the cover is wrongly painting over the line above.
+- **Move the cover top *down* to that tall band** (leaving the small anti-alias margin so caps/accents stay covered).
+  Now the cover top sits at the letters — **below** any rule that was above them.
+- If **no** tall band is found inside the cover, **trim nothing** (`topTrim = 0`) — safe fallback, never clip.
+- **Remove the upward *extension* entirely** — the earlier `maxAbovePt` path is superseded. Delete/zero it.
+- ⚠ Do **not** just stop at the first ink (that is the exact bug). The threshold is what separates a rule from a cap.
+
+**Part B — descender / bottom (Task 41) — UNCHANGED.** Keep the below extension exactly as it is on `main` — same cap
+(`fontSizePt * 0.5`), threshold, margin, and bridging. Do **not** touch it.
+
+**Part C — edit box top hugs the ink *relative to where the box actually is* → `OverlayLayer`.** The box top must be
+its own (move-aware) source top, nudged **down by the trim delta** — so the text stops jumping up on edit **without**
+losing track of a moved / re-edited block.
+
+> **⚠⚠ REVISION 2 — Part A is CORRECT and works (the line no longer hides — user confirmed). Part C REGRESSED
+> moving/re-editing; fix ONLY Part C. Do NOT touch Part A or the measurement in `inkExtent.ts`.**
+>
+> **Symptom (live, user):** move a heading to a new spot, then click it again → the editor opens back at the heading's
+> **original** position, and the word shows **twice** (a ghost: the edit box up at the old spot *and* the moved text at
+> the new spot). The block feels like it "won't move."
+>
+> **Cause:** the first attempt set the edit box top to **`activeInkScreenTop`** — an **absolute** screen coordinate
+> derived **only from `activeBlock` (the original detected position)** through `coverRectsForTextBlock(activeBlock)`.
+> But the box's real position comes from `alignmentEditorRect(activeBlock, existing?.texts, …)`, which **does** follow
+> the moved / committed text (`existing.texts`). The two lines that do `{ ...screenRect, top: activeInkScreenTop }`
+> **throw away that move-aware top** and snap the box back to the original spot. (`activeInkScreenTop` and
+> `activeCoverGeometry` never look at `existing` — that is the bug.)
+>
+> **Fix — apply the trim as a *relative delta*, not an absolute top.** Both sites currently doing
+> `{ ...screenRect, top: activeInkScreenTop }` — the `activeSnapScreenRect` calc (~line 622) **and** the active-block
+> render (~line 997) — must keep `screenRect.top` from the **move-aware** source rect and add a position-independent
+> trim delta:
+> ```ts
+> // the un-trimmed cover top (original position), in screen px:
+> const activeCoverUntrimmedTop = activeCoverGeometry.length === 0 ? undefined
+>   : Math.min(...activeCoverGeometry.map((g) => pdfRectToScreenRect(g.sourceRect, viewport, dpr).top));
+> // the trim itself, in screen px (>= 0), independent of where the box currently is:
+> const inkTopDelta = (activeInkScreenTop === undefined || activeCoverUntrimmedTop === undefined)
+>   ? 0 : activeInkScreenTop - activeCoverUntrimmedTop;
+> // box top: hug the ink AT the box's real (possibly moved) position:
+> const screenRect = { ...sourceScreenRect, top: sourceScreenRect.top + inkTopDelta };
+> ```
+> - **Only the box `top` shifts, by `inkTopDelta`.** Do **NOT** change the box width/height or any internal text
+>   layout — that internal shift is what produced the doubling. Same delta for a fresh edit (opens hugging the ink) and
+>   a moved edit (opens at the moved spot, hugging the ink there).
+> - **Keep `activeCoverGeometry` and the on-screen active cover exactly as they are** — the cover *should* stay at the
+>   original position (it covers the original glyphs, which never move). Only the **edit box** follows the move.
+> - **Keep the cover-commit path** (`extendCoverToSourceInk(cover, …, activeCoverGeometry[i]?.extent)`) — correct.
+> - If `activeCoverGeometry` is empty (no covers), `inkTopDelta = 0` → box top unchanged (safe fallback).
+
+**⚠⚠ DO NOT regress Task 41 (the user's explicit requirement):**
+- The **below / descender** behaviour must be **identical** to `main` — same numbers, existing tests stay green.
+- **Only the top edge changes** (cover top clamped down to the ink; box top aligned to it). Nothing about the bottom.
+
+**Tests (`inkExtent.test.ts`):**
+- **⭐ THE REAL CASE (must pass — the earlier attempt fails it): a thin rule line *inside* the cover's top band, with
+  the heading caps below it.** e.g. cover spanning canvas rows 8–20, a 1-row rule at row 9, a blank gap at rows 10–12,
+  and a tall contiguous cap band at rows 13–18 → the cover top must be trimmed **past row 9 down to ~row 13**, so the
+  final top edge is **below** the rule (rule no longer covered). *(This is the exact scenario Claude's diagnostic used;
+  the first attempt gave `topTrim ≈ 0.4` and left the top at row 8.4 — that must now clear the rule.)*
+- A cover whose top edge is blank above the caps (no rule) → trimmed **down to the caps**. *(Basic hug.)*
+- The descender case below → measured/extended **exactly as before**. *(Proves no Task-41 regression.)*
+- A cover already tight to the ink at the top → **no change** (nothing to trim).
+- Keep the existing "rule *above* (outside) the cover" test too — it should still pass (that rule is out of scan range).
+
+**Verify (live — user):**
+1. **Line / no-jump (Part A + C):** edit a **heading with a rule line right above it** → the line above **stays
+   intact**, the heading text **no longer jumps up** when you click edit, **and** descenders below are still fully
+   covered (Task 41 intact). Check a **heading** (large font) *and* a normal **paragraph**.
+2. **⭐ Move + ghost (REVISION 2 — the new must-pass):** edit a heading, **move it to a new spot**, commit, then
+   **click it again** → the editor opens **at the moved text** (not the original position), there is **no second/ghost
+   copy**, and you can move it again freely. Repeat with a paragraph.
+3. `npm run test` / `typecheck` / `lint` green. Only then commit.
+
+> **Deferred (not this task):** the general safeguard — bound the cover by the **neighbouring line's known position**
+> so it can never cross into an adjacent line in either direction — stays noted for later. Not built now.
+
+**Land it (on your go):** merge `cover-hug-top` → `main`. Commit: `Fix: cover & edit box hug the real top of the
+text — no longer cover the line above headings (Task 44)`.
