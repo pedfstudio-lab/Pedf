@@ -5703,7 +5703,10 @@ baseline. `npm run test` / `typecheck` / `lint` green.
 
 ---
 
-### Task 44 — Fix: heading cover & edit box sit too high, covering the line above  🔲 TODO → **fresh branch `cover-hug-top`**
+### Task 44 — Fix: heading cover & edit box sit too high, covering the line above  ✅ MERGED (`ed90b00`) → branch `cover-hug-top`
+> ✅ **Done & merged to `main`.** Part A (cover trims past a thin rule to the caps) + REVISION 1 (skip thin bands) +
+> REVISION 2 (edit box hugs the ink at its own move-aware position → no ghost, moving works). User verified live;
+> typecheck / 427 tests / lint all green.
 > **⚠ START FRESH from `main`.** The earlier `cover-top-reach` branch (the asymmetric ink-cap attempt) is
 > **abandoned and discarded** — it was chasing the wrong thing and never reached `main`. Do **not** build on it.
 > Create a **new** branch `cover-hug-top` off current `main` and implement only the fix below. This is the real
