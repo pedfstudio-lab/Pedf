@@ -5836,7 +5836,11 @@ text — no longer cover the line above headings (Task 44)`.
 
 ## Editor — Bullets (cont.)
 
-### Task 45 — Word "symbol-character" bullets (e.g. `U+F0B7`) render as ☐ when edited — detect them and route into the existing bullet feature  🔲 TODO → **new branch `symbol-bullets`**
+### Task 45 — Word "symbol-character" bullets (e.g. `U+F0B7`) render as ☐ when edited — detect them and route into the existing bullet feature  ✅ MERGED (`1c5bb36`) → branch `symbol-bullets`
+> ✅ **Done & merged to `main`.** Detect `U+F0B7` bullets → Task 10H pipeline; Rev 1 normalizes `U+F0B7`→`"•"` (fontRef
+> dropped) so even a lone bullet renders correctly; Rev 2 groups short `"•"` lines into one list so it edits as one box
+> with consistent font/size. User verified live; image bullets + paragraph grouping unchanged; 433 tests / typecheck /
+> lint green. (Wider dingbat family ▪ ➢ ✓ still deferred — see note below.)
 
 > **Grounded in the real file.** Claude inspected `public/samples/Corporate-Governance.pdf` (page 7): each bullet is a
 > **text character `U+F0B7` in a symbol font** (`g_d0_f10`) — the classic **Microsoft Word Symbol-font bullet**
