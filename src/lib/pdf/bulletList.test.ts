@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import { buildBulletListEdits } from '@/lib/edit/buildTextEdits';
+import { buildBulletListEdits, buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
 import type { PageGeometry } from './types';
 import { detectImages } from './images';
@@ -11,6 +11,7 @@ import {
   bulletListHeadingBlock,
   detectBulletListFromRegions,
   detectBulletMarkers,
+  detectTextBulletMarkers,
   formatBulletEditorText,
   isBulletListBlock,
   nextBlockBelowBulletList,
@@ -25,6 +26,9 @@ let firstPage: PDFPageProxy;
 let blocks: TextBlock[];
 let imageRegions: Awaited<ReturnType<typeof detectImages>>;
 let resumeBytes: Uint8Array;
+let governanceDocumentProxy: PDFDocumentProxy;
+let governancePageSevenBlocks: TextBlock[];
+let governanceBytes: Uint8Array;
 
 beforeAll(async () => {
   const bytes = await readFile('public/samples/RAHUL RAJPUT RESUME.pdf');
@@ -33,10 +37,23 @@ beforeAll(async () => {
   firstPage = await documentProxy.getPage(1);
   blocks = groupRunsIntoBlocks(await extractTextRuns(firstPage, 0));
   imageRegions = await detectImages(firstPage, 0);
+
+  governanceBytes = new Uint8Array(
+    await readFile('public/samples/Corporate-Governance.pdf'),
+  );
+  governanceDocumentProxy = await getDocument({
+    data: governanceBytes.slice(),
+    verbosity: 0,
+  }).promise;
+  const governancePageSeven = await governanceDocumentProxy.getPage(7);
+  governancePageSevenBlocks = groupRunsIntoBlocks(
+    await extractTextRuns(governancePageSeven, 6),
+  );
 });
 
 afterAll(async () => {
   await documentProxy?.destroy();
+  await governanceDocumentProxy?.destroy();
 });
 
 function fixtureBlock(firstText: string, lastText: string): TextBlock {
@@ -287,10 +304,143 @@ describe('RAHUL résumé bullet detection', () => {
   });
 });
 
+describe('Corporate Governance symbol-character bullet detection', () => {
+  function governanceListFixture(): TextBlock {
+    const block = governancePageSevenBlocks.find((candidate) => (
+      detectTextBulletMarkers(candidate).length === 18
+    ));
+    if (!block) throw new Error('Corporate Governance page-7 bullet block not found');
+    return block;
+  }
+
+  it('detects all eighteen normalized Word-symbol markers in one page-7 list block', () => {
+    const matches = governancePageSevenBlocks
+      .map((block) => ({ block, markers: detectTextBulletMarkers(block) }))
+      .filter(({ markers }) => markers.length > 0);
+
+    const target = matches.find(({ markers }) => markers.length === 18);
+    expect(target?.block.text).toContain('Introduction of CG & an overview');
+    expect(target?.block.text).toContain('Significance of good governance');
+    expect(target?.markers).toHaveLength(18);
+    expect(target?.markers.every((marker) => (
+      marker.line.runs[0]?.text.trim() === '•' &&
+      marker.line.runs[0]?.style.fontRef === undefined
+    ))).toBe(true);
+  });
+
+  it('routes the symbols through marker-free list editing and standard bullet redraws', () => {
+    const list = detectBulletListFromRegions(governanceListFixture(), []);
+    expect(list).not.toBeNull();
+    if (!list) return;
+
+    expect(list.items).toHaveLength(18);
+    expect(list.items.every((item) => !/[\uF0B7☐]/u.test(item.text))).toBe(true);
+    expect(list.block.text).not.toContain('\uF0B7');
+    expect(list.textX).toBeCloseTo(89.76, 1);
+    expect(list.coverRect.x).toBeLessThan(list.textX);
+    expect(list.coverRect.x).toBeCloseTo(80.76, 1);
+
+    const layouts = list.items.map((item) => ({
+      text: item.text,
+      lines: item.lines.map((line) => line.text),
+    }));
+    const built = buildBulletListEdits(
+      list,
+      {
+        text: formatBulletEditorText(layouts.map((item) => item.text)),
+        style: list.block.style,
+        width: list.coverRect.w,
+        height: list.coverRect.h,
+        dx: 0,
+        dy: 0,
+      },
+      layouts,
+      1,
+      500,
+    );
+    const bullets = built.texts.filter((edit) => edit.text === '•');
+    expect(bullets).toHaveLength(18);
+    expect(bullets.every((edit) => edit.style.fontRef === undefined)).toBe(true);
+    expect(built.texts.every((edit) => !edit.text.includes('\uF0B7'))).toBe(true);
+  });
+
+  it('commits a lone normalized bullet through plain-text editing without a box glyph', async () => {
+    const source = governanceListFixture();
+    const line = source.lines.find((candidate) => candidate.text === '• Need for CG');
+    if (!line) throw new Error('Need for CG bullet line not found');
+    const block: TextBlock = {
+      ...source,
+      text: line.text,
+      rect: line.rect,
+      topBaselineY: line.baselineY,
+      style: line.style,
+      lines: [line],
+    };
+
+    expect(detectTextBulletMarkers(block)).toHaveLength(1);
+    expect(detectBulletListFromRegions(block, [])).toBeNull();
+    expect(block.text).not.toMatch(/[\uF0B7☐]/u);
+
+    const replacement = '• Need for CG — checked';
+    const built = buildTextBlockEdits(
+      block,
+      {
+        text: replacement,
+        style: block.style,
+        width: block.rect.w,
+        height: block.rect.h,
+        dx: 0,
+        dy: 0,
+      },
+      [replacement],
+      1,
+    );
+    const pages: PageGeometry[] = [];
+    for (let pageNumber = 1; pageNumber <= 7; pageNumber += 1) {
+      const page = await governanceDocumentProxy.getPage(pageNumber);
+      const [left = 0, bottom = 0, right = 0, top = 0] = page.view;
+      pages.push({
+        pageIndex: pageNumber - 1,
+        widthPt: right - left,
+        heightPt: top - bottom,
+        rotation: ((page.rotate % 360) + 360) % 360 as PageGeometry['rotation'],
+        boxOffset: { x: left, y: bottom },
+      });
+    }
+
+    const exported = await exportPdf({
+      originalBytes: governanceBytes,
+      edits: [...built.covers, ...built.texts],
+      pages,
+    });
+    const reopened = await getDocument({ data: exported.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const page = await reopened.getPage(7);
+      const runs = await extractTextRuns(page, 6);
+      const committed = runs.find((run) => run.text === replacement);
+      const fontRef = committed?.style.fontRef;
+      const font = fontRef && page.commonObjs.has(fontRef)
+        ? page.commonObjs.get(fontRef)
+        : undefined;
+
+      expect(committed?.text).toBe(replacement);
+      expect(committed?.text).not.toMatch(/[\uF0B7☐]/u);
+      expect(font?.name).toMatch(/Times|Helvetica|Courier/i);
+      expect(font?.name).not.toMatch(/Symbol/i);
+    } finally {
+      await reopened.destroy();
+    }
+  });
+});
+
 it('formats editor bullets and drops an emptied item on parse', () => {
   const formatted = formatBulletEditorText(['First', 'Second']);
   expect(formatted).toBe('• First\n• Second');
   expect(parseBulletEditorItems('• First\n•   \nSecond')).toEqual(['First', 'Second']);
+  expect(parseBulletEditorItems('\uF0B7 Legacy symbol\n▪ Unicode square')).toEqual([
+    'Legacy symbol',
+    'Unicode square',
+  ]);
 });
 
 describe('parseBulletEditorItemSpans', () => {

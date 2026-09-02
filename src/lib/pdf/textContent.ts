@@ -38,6 +38,9 @@ export interface TextBlock {
 
 export type FontFamilyClass = 'serif' | 'sans' | 'mono';
 
+const WORD_SYMBOL_BULLET = '\uF0B7';
+const STANDARD_BULLET = '\u2022';
+
 /** Reduce arbitrary PDF font names to the three families both renderers support. */
 export function classifyFontFamily(fontName: string): FontFamilyClass {
   if (/sans[-_\s]*serif/i.test(fontName)) return 'sans';
@@ -252,11 +255,15 @@ function canJoinBlock(lines: readonly TextLine[], line: TextLine): boolean {
     return false;
   }
 
+  const bulletLike =
+    previous.runs[0]?.text.trim() === STANDARD_BULLET &&
+    line.runs[0]?.text.trim() === STANDARD_BULLET;
   const paragraphLike =
     previous.text.length >= 24 ||
     line.text.length >= 24 ||
     previous.runs.length >= 3 ||
-    line.runs.length >= 3;
+    line.runs.length >= 3 ||
+    bulletLike;
   if (!paragraphLike) return false;
 
   const startDelta = Math.abs(previous.rect.x - line.rect.x);
@@ -436,6 +443,7 @@ export async function extractTextRuns(
 
   for (const item of content.items) {
     if (!('str' in item) || item.str.trim() === '' || item.width === 0) continue;
+    const isWordSymbolBullet = item.str.trim() === WORD_SYMBOL_BULLET;
 
     const matrix = transform(viewport.transform, item.transform);
     const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0] = matrix;
@@ -471,7 +479,10 @@ export async function extractTextRuns(
     const programStyle = fontStyleFromProgram(fontObject?.data as Uint8Array | undefined);
     runs.push({
       pageIndex,
-      text: item.str,
+      // Word maps Symbol's 0xB7 bullet into this private-use character. It is
+      // valid only with that embedded Symbol font, so normalize it before any
+      // editor path can redraw it as an unknown-glyph box.
+      text: isWordSymbolBullet ? STANDARD_BULLET : item.str,
       rect: boundingBox(corners),
       style: {
         fontName,
@@ -480,7 +491,7 @@ export async function extractTextRuns(
         italic: nameStyle.italic || (programStyle?.italic ?? false),
         // PDF.js text content does not expose fill color reliably.
         color: { r: 0, g: 0, b: 0 },
-        fontRef,
+        fontRef: isWordSymbolBullet ? undefined : fontRef,
       },
     });
   }

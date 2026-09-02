@@ -3,7 +3,7 @@ import type { PdfRect, TextSpan } from '@/lib/export/types';
 import { normalizeTextSpans, textFromSpans } from '@/lib/edit/richText';
 import { detectImages } from './images';
 import type { ImageRegion } from './images';
-import type { TextBlock, TextLine } from './textContent';
+import type { TextBlock, TextLine, TextRun } from './textContent';
 
 const MIN_MARKER_SIZE_PT = 1;
 const MAX_MARKER_SIZE_PT = 7;
@@ -11,12 +11,39 @@ const MAX_LEFT_GAP_PT = 16;
 const MIN_LEFT_GAP_PT = 0.5;
 const MIN_LIST_ITEMS = 2;
 
+/** Text glyphs commonly used as list markers by Word and other PDF producers. */
+export const TEXT_BULLET_CHARACTERS: ReadonlySet<string> = new Set([
+  '\uF0B7',
+  '\uF0A7',
+  '\uF0A8',
+  '\uF0D8',
+  '\uF06C',
+  '\uF075',
+  '\uF0FC',
+  '\uF0FD',
+  '\u2022',
+  '\u25CF',
+  '\u25AA',
+  '\u25E6',
+  '\u2023',
+  '\u2043',
+  '\u00B7',
+  '\u2219',
+]);
+
 export interface BulletMarker {
   readonly lineIndex: number;
   readonly line: TextLine;
   readonly rect: PdfRect;
   readonly centerX: number;
   readonly centerY: number;
+  /** Present only when the marker came from a text run rather than an image. */
+  readonly textCharacter?: string;
+}
+
+interface TextBulletMatch {
+  readonly markerRun: TextRun;
+  readonly bodyRun: TextRun;
 }
 
 export interface BulletListItem {
@@ -151,6 +178,84 @@ export function detectBulletMarkers(
   return markers;
 }
 
+function textBulletMatch(line: TextLine): TextBulletMatch | undefined {
+  const [markerRun, ...remainingRuns] = line.runs.filter((run) => run.text.trim() !== '');
+  const markerText = markerRun?.text.trim() ?? '';
+  if (!markerRun || !TEXT_BULLET_CHARACTERS.has(markerText)) return undefined;
+
+  const bodyRun = remainingRuns.find((run) => run.text.trim() !== '');
+  if (!bodyRun) return undefined;
+
+  // A text item's box is the font em-box, so its height is usually the same as
+  // the body text. Its narrow width is the useful equivalent of the image
+  // detector's square-marker size check.
+  const markerSize = Math.min(markerRun.rect.w, markerRun.rect.h);
+  if (
+    markerSize < MIN_MARKER_SIZE_PT ||
+    markerSize > Math.min(MAX_MARKER_SIZE_PT, line.style.fontSizePt * 0.85)
+  ) {
+    return undefined;
+  }
+
+  const leftGap = bodyRun.rect.x - (markerRun.rect.x + markerRun.rect.w);
+  if (leftGap < MIN_LEFT_GAP_PT || leftGap > MAX_LEFT_GAP_PT) return undefined;
+
+  const baselineDistance = Math.abs(markerRun.rect.y - bodyRun.rect.y);
+  if (baselineDistance > Math.max(1.5, line.style.fontSizePt * 0.25)) return undefined;
+
+  return { markerRun, bodyRun };
+}
+
+/** Match recognized symbol-character bullets at the left edge of text lines. */
+export function detectTextBulletMarkers(block: TextBlock): BulletMarker[] {
+  return block.lines.flatMap((line, lineIndex) => {
+    const match = textBulletMatch(line);
+    if (!match) return [];
+    const { rect } = match.markerRun;
+    return [{
+      lineIndex,
+      line,
+      rect,
+      centerX: rect.x + rect.w / 2,
+      centerY: rect.y + rect.h / 2,
+      textCharacter: match.markerRun.text.trim(),
+    }];
+  });
+}
+
+function bulletPrefixLength(text: string): number {
+  const leadingWhitespace = text.match(/^\s*/u)?.[0].length ?? 0;
+  const remainder = text.slice(leadingWhitespace);
+  const character = Array.from(remainder)[0];
+  if (!character || !TEXT_BULLET_CHARACTERS.has(character)) return 0;
+  const afterCharacter = leadingWhitespace + character.length;
+  const trailingWhitespace = text.slice(afterCharacter).match(/^\s*/u)?.[0].length ?? 0;
+  return afterCharacter + trailingWhitespace;
+}
+
+function withoutTextBulletMarker(line: TextLine, marker: BulletMarker): TextLine {
+  if (!marker.textCharacter) return line;
+  const markerRunIndex = line.runs.findIndex((run) => (
+    TEXT_BULLET_CHARACTERS.has(run.text.trim()) &&
+    run.rect.x === marker.rect.x &&
+    run.rect.y === marker.rect.y
+  ));
+  if (markerRunIndex < 0) return line;
+  const bodyRuns = line.runs.slice(markerRunIndex + 1).filter((run) => run.text.trim() !== '');
+  const firstBodyRun = bodyRuns[0];
+  if (!firstBodyRun) return line;
+  return {
+    ...line,
+    text: line.text.slice(bulletPrefixLength(line.text)),
+    rect: unionRects(bodyRuns.map((run) => run.rect)),
+    baselineY: bodyRuns.reduce((sum, run) => sum + run.rect.y, 0) / bodyRuns.length,
+    style: bodyRuns.reduce((best, run) => (
+      run.text.trim().length > best.text.trim().length ? run : best
+    ), firstBodyRun).style,
+    runs: bodyRuns,
+  };
+}
+
 function itemText(lines: readonly TextLine[]): string {
   return lines
     .map((line) => line.text.trim())
@@ -167,7 +272,7 @@ export function parseBulletEditorItems(text: string): string[] {
   return text
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map((line) => line.replace(/^\s*•\s?/, '').trim())
+    .map((line) => line.slice(bulletPrefixLength(line)).trim())
     .filter(Boolean);
 }
 
@@ -224,7 +329,7 @@ export function parseBulletEditorItemSpans(
   return lines.flatMap((lineSpans) => {
     const normalizedLine = normalizeTextSpans(lineSpans);
     const lineText = textFromSpans(normalizedLine);
-    const markerLength = lineText.match(/^\s*•\s?/)?.[0].length ?? 0;
+    const markerLength = bulletPrefixLength(lineText);
     const markerless = lineText.slice(markerLength);
     const leadingWhitespace = markerless.length - markerless.trimStart().length;
     const start = markerLength + leadingWhitespace;
@@ -283,17 +388,20 @@ export function availableBulletListHeight(
 }
 
 /** Build an editable list model only when at least two bullet starts are proven. */
-export function detectBulletListFromRegions(
+export function buildBulletList(
   block: TextBlock,
-  imageRegions: readonly ImageRegion[],
+  markers: readonly BulletMarker[],
 ): BulletList | null {
-  const markers = detectBulletMarkers(block, imageRegions);
   const firstMarker = markers[0];
   if (markers.length < MIN_LIST_ITEMS || !firstMarker) return null;
 
   // PDF generators often group a job heading and its following bullets into one
   // paragraph block. Own only the marker-started suffix; the heading stays pristine.
-  const listLines = block.lines.slice(firstMarker.lineIndex);
+  const markerByLineIndex = new Map(markers.map((marker) => [marker.lineIndex, marker]));
+  const listLines = block.lines.slice(firstMarker.lineIndex).map((line, relativeIndex) => {
+    const marker = markerByLineIndex.get(firstMarker.lineIndex + relativeIndex);
+    return marker ? withoutTextBulletMarker(line, marker) : line;
+  });
   const listRect = unionRects(listLines.map((line) => line.rect));
   const listBlock: TextBlock = {
     ...block,
@@ -306,7 +414,9 @@ export function detectBulletListFromRegions(
 
   const items = markers.map<BulletListItem>((marker, markerIndex) => {
     const nextLineIndex = markers[markerIndex + 1]?.lineIndex ?? block.lines.length;
-    const lines = block.lines.slice(marker.lineIndex, nextLineIndex);
+    const relativeStart = marker.lineIndex - firstMarker.lineIndex;
+    const relativeEnd = nextLineIndex - firstMarker.lineIndex;
+    const lines = listLines.slice(relativeStart, relativeEnd);
     return {
       bulletX: marker.rect.x,
       baselineY: marker.line.baselineY,
@@ -330,14 +440,31 @@ export function detectBulletListFromRegions(
     items,
     bulletX: median(items.map((item) => item.bulletX)),
     textX: median(items.map((item) => item.lines[0]?.rect.x ?? block.rect.x)),
-    bulletSizePt: median(items.map((item) => Math.max(item.markerRect.w, item.markerRect.h))),
+    // Text runs expose a full em-box height rather than the visible dot height;
+    // their narrow dimension is the useful glyph measurement. Preserve the
+    // image-marker calculation exactly for Task 10H lists.
+    bulletSizePt: median(markers.map((marker) => (
+      marker.textCharacter
+        ? Math.min(marker.rect.w, marker.rect.h)
+        : Math.max(marker.rect.w, marker.rect.h)
+    ))),
     lineHeightPt: block.lineHeightPt,
     itemSpacingPt: median(itemSpacing),
     coverRect: unionRects([listRect, ...items.map((item) => item.markerRect)]),
   };
 }
 
-/** Detect a bullet list from the page's painted image markers. */
+/** Prefer image markers; fall back to recognized text-symbol markers only if needed. */
+export function detectBulletListFromRegions(
+  block: TextBlock,
+  imageRegions: readonly ImageRegion[],
+): BulletList | null {
+  const imageList = buildBulletList(block, detectBulletMarkers(block, imageRegions));
+  if (imageList) return imageList;
+  return buildBulletList(block, detectTextBulletMarkers(block));
+}
+
+/** Detect a bullet list from painted image markers, then text symbols as a fallback. */
 export async function detectBulletList(
   block: TextBlock,
   page: PDFPageProxy,

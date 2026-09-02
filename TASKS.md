@@ -5831,3 +5831,173 @@ losing track of a moved / re-edited block.
 
 **Land it (on your go):** merge `cover-hug-top` → `main`. Commit: `Fix: cover & edit box hug the real top of the
 text — no longer cover the line above headings (Task 44)`.
+
+---
+
+## Editor — Bullets (cont.)
+
+### Task 45 — Word "symbol-character" bullets (e.g. `U+F0B7`) render as ☐ when edited — detect them and route into the existing bullet feature  🔲 TODO → **new branch `symbol-bullets`**
+
+> **Grounded in the real file.** Claude inspected `public/samples/Corporate-Governance.pdf` (page 7): each bullet is a
+> **text character `U+F0B7` in a symbol font** (`g_d0_f10`) — the classic **Microsoft Word Symbol-font bullet**
+> (Symbol `0xB7` mapped into the Private-Use Area → `0xF0B7`). pdf.js extracts it with an empty/`""` unicode value; no
+> normal font (Times/Arial) has a glyph at that slot. So the pristine page shows it fine (drawn with the PDF's own
+> symbol font), but the moment the block is **edited**, the app redraws the text in a standard font and that character
+> becomes the "unknown glyph" box → **☐**, in both the editor preview and the exported result.
+
+**Why the existing bullet feature (Task 10H) misses it — and why that's the whole fix.**
+Task 10H's detector (`detectBulletMarkers`, `bulletList.ts`) only matches **rendered image/vector markers** (GOA-style
+drawings). This PDF's bullets are **characters**, so detection finds nothing → the list falls back to plain-text
+editing → ☐. **Task 10H's *pipeline* is not broken — it just never receives these bullets.** Its pipeline already
+covers the original marker and **redraws a real "•" in a standard font** (`buildTextEdits.ts:349` —
+`bulletGlyphStyle = { ...next.style, fontSizePt, fontRef: undefined }`, comment: *"use a standard font — the '•' glyph
+isn't in the embedded subset"*), and it already glues + reflows + aligns. **Feeding these bullets into that pipeline
+both kills the ☐ (a proper "•" is redrawn) and gives Task-10H-quality alignment for free.**
+
+**The fix — add a second, *character-based* bullet detector alongside the image one, then reuse everything downstream.**
+
+**Part A — new detector `detectTextBulletMarkers(block)` → `src/lib/pdf/bulletList.ts` (PROVE THIS FIRST).**
+- For each `block.lines[i]`, look at the **leftmost run**. If its text is a **recognized bullet character** AND it sits
+  as a left marker (small run, a clear gap before the line's body text — mirror the image detector's size/left-gap
+  sanity checks: `MIN/MAX_MARKER_SIZE_PT`, `MIN/MAX_LEFT_GAP_PT`), emit a `BulletMarker`
+  (`{ lineIndex, line, rect: markerRun.rect, centerX, centerY }`) built from that **run's rect**.
+- **Recognized bullet characters** (all redraw as `"•"`):
+  - **PUA symbol/Wingdings bullets:** `U+F0B7` (Symbol •, this PDF), `U+F0A7`, `U+F0A8`, `U+F0D8`, `U+F06C`, `U+F075`,
+    `U+F0FC`, `U+F0FD`.
+  - **Real Unicode bullets** (when they appear as their own leading run): `U+2022` `•`, `U+25CF` `●`, `U+25AA` `▪`,
+    `U+25E6` `◦`, `U+2023` `‣`, `U+2043` `⁃`, `U+00B7` `·`, `U+2219` `∙`.
+  - Keep this as a single shared constant set. The **positional guard** (leftmost, small, gap before text, and
+    `≥ MIN_LIST_ITEMS` such lines) is what prevents a mid-sentence `·` from false-triggering.
+- **Prove it first:** a test that runs extraction on `Corporate-Governance.pdf` page 7 and asserts `detectTextBulletMarkers`
+  finds the 11 `U+F0B7` markers at the list positions, before wiring anything else.
+
+**Part B — route markers into the existing pipeline (reuse, don't rebuild).**
+- Refactor `detectBulletListFromRegions` so the list-building half is shared: e.g. `buildBulletList(block, markers)`.
+  Then image path = `buildBulletList(block, detectBulletMarkers(block, imageRegions))`; **new** text path =
+  `buildBulletList(block, detectTextBulletMarkers(block))`.
+- `detectBulletList(block, page)` (the async entry): try the **image** markers first (unchanged); **if that yields no
+  list, fall back to the text detector.** A block is one or the other, never both — image path wins to stay safe.
+- Everything after (bullet-mode editor, cover, reflow, `bulletGlyphStyle` redraw of `"•"`) is **unchanged and reused.**
+
+**⚠ Part C — the character IS in the text (unlike image bullets); it must be treated as the marker, not body text.**
+For image bullets the marker isn't in the text at all. Here the `U+F0B7` run **is** one of the line's runs, so:
+- **Exclude the bullet run from the item / editor text** (`itemText`, and the block→editor seed), so the redrawn `"•"`
+  **replaces** it instead of sitting next to a leftover ☐. `textX` must be the **body** run's x (e.g. `x≈90`), not the
+  marker run's x (`x≈81`).
+- The **cover must paint over the original `U+F0B7`** — include the marker run's rect in `coverRect` (as the image path
+  already does via `unionRects([listRect, ...markerRect])`), so the pristine character is hidden and only the redrawn
+  `"•"` shows.
+- The editor→commit marker-strip (`bulletList.ts:227`, currently `^\s*•\s?`) must also strip a leading recognized
+  bullet char, so re-editing never re-injects the symbol character.
+
+**⚠⚠ DO NOT regress Task 10H (image bullets) — the user's explicit requirement.**
+- The image detector and its output stay **byte-for-byte** as on `main`; the text detector is **purely additive** and
+  only runs when the image path finds nothing.
+- `bulletList.test.ts` (Firgun 6 markers / Travelmite 5 items, RAHUL résumé) must stay **green, unchanged.**
+
+**Tests (`bulletList.test.ts`):**
+- **⭐ `detectTextBulletMarkers` finds the `U+F0B7` bullets on `Corporate-Governance.pdf` p.7** (Part A proof).
+- End-to-end: that block detects as a `BulletList`, item text is **marker-free** (no `U+F0B7`, no ☐), and a committed
+  item redraws a standard-font `"•"` (`fontRef: undefined`).
+- The existing **image-bullet** tests still pass unchanged (no Task-10H regression).
+
+**Verify (live — user):** open `Corporate-Governance.pdf`, edit that list → bullets show as **real "•"** (no ☐) in the
+editor **and** after Done/export; edit a line a little → the bullet **stays glued/aligned** with its text (Task-10H
+behavior). Then open a **GOA-style image-bullet** PDF → still works exactly as before. `npm run test` / `typecheck` /
+`lint` green. Only then commit.
+
+> **Deferred (not this task):** fancy dingbat shapes (▪ square, ➢ arrow, ✓ check) all normalize to `"•"` — the standard
+> export fonts can't draw those glyphs, and a round bullet is the safe, always-renderable choice. A *faithful* render
+> of every embedded/symbol glyph would need real **font embedding** on export — a separate, much larger milestone.
+> Numbered lists (`1.` `2.`) are also out of scope here (they already render fine as text).
+
+> **⚠⚠ REVISION 1 — Part A/B WORK for multi-item lists (user confirmed: grouped bullets now show "•"). But a bullet
+> edited *outside* a detected list still shows ☐. This revision is the complete fix for that.**
+>
+> **Symptom (live, user):** in a list the app edits *as one group*, bullets show "•" ✅. But a bullet edited on its own
+> (screenshot: "☐ Need for CG") still shows ☐.
+>
+> **Cause (confirmed from the file):** `Corporate-Governance.pdf` p.7's lower section is **one uniform 18-item `U+F0B7`
+> list**, but the app edits it in **pieces**, and detection needs **`MIN_LIST_ITEMS` (2)** markers (`bulletList.ts`
+> ~line 396). Any piece with fewer than 2 bullets isn't a "list" → it's edited as **plain text** → the raw `U+F0B7`
+> renders as ☐. List-detection alone can never cover this — a single bullet can always be edited on its own.
+>
+> **Fix — normalize the `U+F0B7` character at the earliest point, independent of list detection → `textContent.ts`
+> (`extractTextRuns`).** When a run's text **is** the `U+F0B7` bullet character, **replace it with `"•"` (`U+2022`) and
+> drop `fontRef`** so it draws in a standard font that actually contains "•":
+> ```ts
+> // in extractTextRuns, when building the run:
+> //   if item.str.trim() === ''  →  text = '•'; style.fontRef = undefined;
+> //   (leave the fontName family classification alone)
+> ```
+> Now the `U+F0B7` bullet renders as a real "•" **everywhere — editor and export — whether or not it's in a detected
+> list.** That is the whole fix for the ☐.
+>
+> - **Update the detector's set to key off the normalized char:** `TEXT_BULLET_CHARACTERS` must contain `"•"`
+>   (`U+2022`), because after normalization the run's text is `"•"`, not `U+F0B7`. (Keeping `U+F0B7` in the set too is
+>   harmless.) The existing multi-item list path then keeps working — it now detects the normalized `"•"` and still
+>   layers on its gluing/alignment/reflow.
+> - **Do NOT lower `MIN_LIST_ITEMS`.** A lone bullet should simply render correctly as plain text — not be forced
+>   through the list machinery.
+> - **⚠ Guard — no regressions:** image bullets (Task 10H) are untouched (they aren't text). The multi-item text list
+>   still works (via the normalized `"•"`). Re-run `bulletList.test.ts` (Firgun / Travelmite / RAHUL) — must stay green.
+> - **Tests:** `extractTextRuns` on a run whose text is `U+F0B7` → `text === '•'` **and** `style.fontRef === undefined`;
+>   plus a **single-bullet** block whose committed edit shows a standard-font `"•"` (no ☐). Existing list + image tests
+>   still pass.
+>
+> **Verify (live — user):** edit a **single** bullet on its own (like "Need for CG") → it shows "•", not ☐ — in the
+> editor **and** after Done/export. The grouped-list case and GOA image bullets still work.
+
+> **⚠⚠ REVISION 2 — the ☐ is gone (Rev 1 ✅). Now group the whole list into ONE editable box so its font/size is
+> consistent. Depends on Rev 1 (bullets are already normalized to `"•"`). Keep this on the `symbol-bullets` branch —
+> do NOT merge until the user verifies.**
+>
+> **Symptom (live, user):** the bullets render fine, but the list is edited in **separate boxes**. Editing items
+> **piecemeal** leaves the touched items in a **fallback font** while untouched neighbors stay in the PDF's original
+> font → the font/size **visibly doesn't match**.
+>
+> **Cause (confirmed from the file — the list is perfectly uniform):** on `Corporate-Governance.pdf` p.7 every bullet
+> line is identical — bullet `x≈81`, text `x≈90`, **size 9.9, same fonts, gap 15pt** for all 18. Nothing in the PDF
+> splits them. The split is a **grouping gate** in `canJoinBlock` ([`textContent.ts:258`](src/lib/pdf/textContent.ts:258)):
+> to merge two lines it demands they be "paragraph-like" — **`text.length ≥ 24` OR `runs.length ≥ 3`**. The short
+> bullet items ("Need for CG" = 11, "Benefit of CG" = 13, "Principles of CG" = 16 — all `< 24`, 2 runs each) **fail the
+> gate → each becomes its own block.** *(This gate is core grouping from tasks 9–10E — NOT Task 10H; Task 10H only
+> consumes the blocks it produces.)*
+>
+> **Fix — add ONE tight exception to `canJoinBlock`: consecutive bullet lines may group even when short.**
+> ```ts
+> // both the last line of the group AND the incoming line begin with a normalized bullet marker:
+> const bulletLike =
+>   previous.runs[0]?.text.trim() === '•' && line.runs[0]?.text.trim() === '•';
+> const paragraphLike = /* existing ≥24 / ≥3-runs test */ || bulletLike;
+> ```
+> - **Every other gate in `canJoinBlock` stays in force** (vertical-gap window, font-size match, same font family /
+>   bold / italic, x-alignment, gap-consistency). So only a **uniform, adjacent run of "•" lines** merges — which is
+>   exactly a real list. A stray "•" next to unrelated text won't merge (the other gates reject it).
+> - Relies on **Rev 1**: by grouping time the bullet run's text is already the normalized `"•"`, so `runs[0].text` is
+>   `"•"`. (Bullet run is `runs[0]` because it sits left of the text at `x≈81`.)
+> - **Result:** all 18 lines group into **one block → one bullet list → one editor box** with **one shared style**, so
+>   editing redraws every item consistently. The font/size mismatch is gone.
+>
+> **⚠⚠ This is SHARED core code (`canJoinBlock`) used by ALL grouping — guard hard:**
+> - The exception fires **only** when **both** lines' first run is exactly `"•"`. Paragraphs/labels/tables (no leading
+>   `"•"`) and **image-bullet lines (Task 10H — the bullet is a *drawing*, not a text `"•"`)** are **never** affected.
+> - Re-run **`textContent.test.ts`** (paragraph/field grouping) **and** **`bulletList.test.ts`** (Firgun / Travelmite /
+>   RAHUL) — **all must stay green, unchanged.** If any grouping test moves, stop.
+>
+> **Tests (`textContent.test.ts`):**
+> - **⭐** 18 uniform short `"•"` lines (like p.7) → group into **ONE** block (today they fragment).
+> - **Guard:** a short `"•"` line adjacent to a short **non-bullet** line does **NOT** merge (the exception needs both
+>   sides to be `"•"`), and two short non-bullet fields still stay standalone (existing behavior preserved).
+>
+> **Verify (live — user):** open `Corporate-Governance.pdf` → click the bullet list → the **whole list opens as one
+> box**; edit a couple of items → all items keep the **same font & size**. Then check a normal **paragraph** and a
+> **GOA image-bullet** PDF → both unchanged. `npm run test` / `typecheck` / `lint` green. Only then commit — **stays on
+> the branch until the user says merge.**
+
+**Land it (on your go):** merge `symbol-bullets` → `main`. Commit: `Symbol-character bullets (U+F0B7): normalize to a
+real "•", group short bullet lines into one list, edit via the bullet-list feature (Task 45)`.
+
+> **Note (separate — revisit later, NOT part of Rev 1 or Rev 2):** the **wider symbol-bullet family** (square ▪, arrow
+> ➢, check ✓ = `U+F0A7`, `U+F0D8`, `U+F0FC`, …) that other Word PDFs use — we'd normalize those to "•" too, but only
+> once the `U+F0B7` fix (Rev 1) and the grouping fix (Rev 2) are confirmed on this document.

@@ -177,6 +177,18 @@ describe('extractTextRuns', () => {
     expect(bodyRun?.style.bold).toBe(false);
   });
 
+  it('normalizes Word U+F0B7 bullets to a standard-font bullet during extraction', async () => {
+    const bytes = new Uint8Array(await readFile('public/samples/Corporate-Governance.pdf'));
+    const document = await getDocument({ data: bytes, verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(7), 6);
+    const bulletRuns = runs.filter((run) => run.text === '•');
+
+    expect(bulletRuns).toHaveLength(18);
+    expect(bulletRuns.every((run) => run.style.fontRef === undefined)).toBe(true);
+    expect(runs.some((run) => run.text.includes('\uF0B7'))).toBe(false);
+  });
+
   it('round-trips an edited heading through the résumé own bold font resource', async () => {
     const originalBytes = new Uint8Array(
       await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'),
@@ -347,6 +359,36 @@ describe('natural text blocks', () => {
       'This is the first descriptive line\nThis is the second descriptive line\nThis is the final descriptive line',
     );
     expect(blocks.slice(1).map((block) => block.text)).toEqual(['Mr. Pratik', '2 Adults']);
+  });
+
+  it('groups eighteen uniform short normalized-bullet lines into one block', () => {
+    const bulletRuns = Array.from({ length: 18 }, (_, index) => {
+      const y = 500 - index * 15;
+      return [
+        run('•', 80, y, 4.5),
+        run(`Item ${index + 1}`, 90, y, 38),
+      ];
+    }).flat();
+    const blocks = groupRunsIntoBlocks(bulletRuns);
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.lines).toHaveLength(18);
+    expect(blocks[0]?.text.split('\n')).toEqual(
+      Array.from({ length: 18 }, (_, index) => `• Item ${index + 1}`),
+    );
+  });
+
+  it('does not merge a short bullet line with an adjacent short non-bullet line', () => {
+    const blocks = groupRunsIntoBlocks([
+      run('•', 80, 500, 4.5),
+      run('Bullet item', 90, 500, 48),
+      run('Short field', 80, 485, 45),
+    ]);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      '• Bullet item',
+      'Short field',
+    ]);
   });
 
   it('keeps short numbers separate across columns and from nearby descriptive rows', () => {
