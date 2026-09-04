@@ -6010,7 +6010,11 @@ real "•", group short bullet lines into one list, edit via the bullet-list fea
 
 ## Reader — Tap a location to look it up
 
-### Task 46 — Tap a location → Search Google / Open in Google Maps (AI location detection)  🔲 TODO → new branch `tap-location`
+### Task 46 — Tap a location → Search Google / Open in Google Maps (AI location detection)  ✅ MERGED (`9d218e4`) → branch `tap-location`
+> ✅ **Done & merged to `main`.** AI detects geographic locations via a new raw `provider.complete()` call (Rev 1),
+> underlines them in teal (Rev 3 — the chip from Rev 2 was dropped for covering neighbouring text), tap →
+> Search Google / Open in Google Maps. Locations only (people/orgs/ordinary words filtered); dates unchanged; no
+> export/editor change. User verified live; typecheck / 445 tests / lint green.
 > **Focused, locations-only first version of the parked Task 21A.** Detect **only geographic locations** (NOT people,
 > NOT organizations, NOT events), underline them, and let the user tap → **Search Google** or **Open in Google Maps**.
 > Reuses machinery that already exists (the date-span underline + tap menu from Task 11A, and the AI provider layer from
