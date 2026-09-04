@@ -1,4 +1,5 @@
 import type {
+  ChatMessage,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -12,10 +13,11 @@ import type {
 
 export type ProviderMethod = keyof Pick<
   LanguageProvider,
-  'translate' | 'explain' | 'speak' | 'transcribe' | 'discuss'
+  'complete' | 'translate' | 'explain' | 'speak' | 'transcribe' | 'discuss'
 >;
 
 export interface ProviderInputMap {
+  readonly complete: readonly ChatMessage[];
   readonly translate: TranslateInput;
   readonly explain: ExplainInput;
   readonly speak: SpeakInput;
@@ -24,6 +26,7 @@ export interface ProviderInputMap {
 }
 
 export interface ProviderResultMap {
+  readonly complete: TextResult;
   readonly translate: TextResult;
   readonly explain: TextResult;
   readonly speak: SpeakResult;

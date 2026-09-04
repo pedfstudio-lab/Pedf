@@ -1,6 +1,12 @@
 /** BCP-47 language code such as hi-IN, ta-IN, or en-IN; providers may also accept auto. */
 export type LanguageCode = string;
 
+/** One raw OpenAI-compatible chat message supplied without the companion prompt wrapper. */
+export interface ChatMessage {
+  readonly role: 'system' | 'user' | 'assistant';
+  readonly content: string;
+}
+
 export interface TranslateInput {
   readonly text: string;
   readonly to: LanguageCode;
@@ -79,6 +85,7 @@ export interface DiscussResult {
 /** All AI I/O passes through this seam; concrete providers arrive in later tasks. */
 export interface LanguageProvider {
   readonly name: string;
+  complete(messages: readonly ChatMessage[]): Promise<TextResult>;
   translate(input: TranslateInput): Promise<TextResult>;
   explain(input: ExplainInput): Promise<TextResult>;
   speak(input: SpeakInput): Promise<SpeakResult>;

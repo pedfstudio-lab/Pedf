@@ -6005,3 +6005,141 @@ real "•", group short bullet lines into one list, edit via the bullet-list fea
 > **Note (separate — revisit later, NOT part of Rev 1 or Rev 2):** the **wider symbol-bullet family** (square ▪, arrow
 > ➢, check ✓ = `U+F0A7`, `U+F0D8`, `U+F0FC`, …) that other Word PDFs use — we'd normalize those to "•" too, but only
 > once the `U+F0B7` fix (Rev 1) and the grouping fix (Rev 2) are confirmed on this document.
+
+---
+
+## Reader — Tap a location to look it up
+
+### Task 46 — Tap a location → Search Google / Open in Google Maps (AI location detection)  🔲 TODO → new branch `tap-location`
+> **Focused, locations-only first version of the parked Task 21A.** Detect **only geographic locations** (NOT people,
+> NOT organizations, NOT events), underline them, and let the user tap → **Search Google** or **Open in Google Maps**.
+> Reuses machinery that already exists (the date-span underline + tap menu from Task 11A, and the AI provider layer from
+> the voice bot). It is an **optional reader add-on — it does NOT touch the editing / export seam**, so it can't
+> regress any editing work.
+
+**Goal:** the app finds every **location** in the PDF (cities, states, countries, regions, landmarks, natural
+features, addresses) and **underlines just those**; tapping one opens a small menu → **Search Google** / **Open in
+Google Maps** in a new tab. People's names, company/org names, and ordinary words are **left alone**.
+
+**Depends on (all already shipped):** Task 8 (run positions), Task 11A (`SmartSpanLayer` underline + tap-menu pattern,
+`DateActionPopover`), the provider layer (`src/lib/providers/`, already wired for the voice bot). No new provider / no
+new key — reuses the **Sarvam key from Settings**.
+
+**Part A — detect locations (AI) → `src/lib/smart/locationDetect.ts` (new).**
+- Send the page's extracted text (from Task 8 runs) to the **existing provider layer** (`src/lib/providers/`, the same
+  chat call the voice bot uses) with a tight **locations-only** instruction, e.g.:
+  > "Return ONLY geographic locations that appear in this text — cities, states, countries, regions, landmarks, natural
+  > features, addresses. Do NOT include people's names, organizations, companies, products, or events. Reply as a JSON
+  > array of the exact location strings as they appear."
+- Parse the JSON → for each returned string, **find it in the page's runs** and map to its **rect** (reuse how
+  `dateDetect` maps matches to run positions). **Skip** any returned string that isn't found verbatim, or that isn't a
+  confident location.
+- **Detect once per document, cached** (bound cost + latency) — do not re-call the AI on every scroll/zoom.
+- Produce `{ text, kind: 'location', pageIndex, rect }[]`.
+
+**Part B — underline the locations → reuse `src/components/SmartSpanLayer.tsx`.**
+- Feed the location spans into the **same** underline layer the dates already use (Task 11A). Same subtle underline,
+  same hit-testing. No new rendering system.
+
+**Part C — the tap menu → mirror `DateActionPopover.tsx` as a location menu + link builders in `src/lib/smart/`.**
+- Tap an underlined location → a small popover with **two** actions (no AI in the actions — just open a URL):
+  - **Search Google** → `https://www.google.com/search?q=<encodeURIComponent(location)>` (new tab)
+  - **Open in Google Maps** → `https://www.google.com/maps/search/?api=1&query=<encodeURIComponent(location)>` (new tab)
+- **Google Maps only** — this one URL opens the Google Maps app on Android/iPhone and Google Maps on desktop. No Apple
+  Maps, no device branching. Put the two URL builders in `src/lib/smart/` with unit tests (like `calendarLink.ts`).
+
+**⚠ Scope / guardrails:**
+- **Locations only.** The prompt + a light post-filter must exclude people, orgs, products, events. Ordinary words must
+  NOT be underlined. (Verify with a real page: "Goa"/"Mumbai" underline; "Cadbury"/"Institute"/person names do not.)
+- **Do NOT touch the export seam or the editor.** This layer sits alongside them (like the dates feature). Editing +
+  bullets + everything shipped stays byte-for-byte.
+- **Privacy:** the page text is sent to the AI to find locations — exactly like the **voice feature** already does.
+  Editing stays 100% on-device; only this detection step sends text out. Make that consistent with the existing voice
+  privacy behaviour (only runs when the AI/key is configured; degrade gracefully to "no underlines" if not).
+
+**Tests:** `locationDetect` maps returned strings to the right run rects and drops not-found strings; the two link
+builders produce the exact Google Search / Google Maps URLs (encoded); non-locations are filtered. `SmartSpanLayer`
+still renders dates unchanged. typecheck / lint / existing tests green.
+
+**Verify (live — user):** open a PDF with places → locations are **underlined**, names/orgs/ordinary words are **not**;
+tap a location → menu shows **Search Google · Open in Google Maps**; each opens the right URL in a new tab; dates still
+work; editing/bullets unaffected.
+
+> **⚠⚠ REVISION 1 — nothing underlines even with the key set. Root cause found; fix the detection call.**
+>
+> **Symptom (live, user):** the Sarvam key IS configured (voice works), but a Goa itinerary full of places
+> (Goa, Turtle Beach, Morjim, North Goa, Chapora) shows **zero underlines**.
+>
+> **Cause (confirmed from the code):** `locationDetect.detectDocumentLocations` calls **`provider.discuss(...)`** — the
+> **voice-bot's conversational method**. `discuss` routes through `buildDiscussMessages` (`providers/discussPrompt.ts`),
+> whose system prompt says *"You are a warm, easygoing companion… answer concisely in English… cite the relevant
+> [Page N] marker(s)."* So the model replies in **prose** (e.g. "Sure! The places are Goa, Turtle Beach… [Page 1]"),
+> **not** the JSON array the detector expects → `parseStringArray` returns `[]` → **no locations, no underlines.** The
+> AI *is* answering; it's answering in the wrong format because we used the wrong method.
+>
+> **Fix — give the detector a RAW structured call, no conversational wrapper.**
+> - **Add a minimal raw method to the provider layer** — e.g. `complete(messages: ChatMessage[]): Promise<string>` (or
+>   `chat`) on `LanguageProvider` (`providers/types.ts`) + its Sarvam implementation. It sends the given system+user
+>   messages to the **same Sarvam chat endpoint `discuss` already uses** and returns the **raw** model text —
+>   **factor out** that HTTP/chat plumbing from the existing `discuss` implementation so both share it (no new key, no
+>   new endpoint). Do **not** add the companion/cite-pages system prompt.
+> - In **`locationDetect.ts`**, stop calling `provider.discuss`. Instead build the messages directly:
+>   - **system** = the locations-only instruction: *"You are a precise information extractor. Return ONLY a JSON array
+>     of the exact geographic-location strings that appear verbatim in the text — cities, states, countries, regions,
+>     landmarks, natural features, addresses. No people, orgs, products, events, dates, prose, markdown, or citations.
+>     Output JSON only, e.g. ["Goa","Morjim"]. Return [] if none."*
+>   - **user** = the document text (plain; no `[Page N]` markers needed).
+>   - Call the new raw method, then `parseStringArray` the result (it already handles a stray code-fence).
+> - **Keep everything else unchanged** — the run-mapping, the geographic/blocked-word filters, the per-document cache,
+>   the `SmartSpanLayer` underline, and the tap menu (Search Google / Open in Google Maps).
+>
+> **Verify (live — user):** key set → open the Goa itinerary → **Goa / Turtle Beach / Morjim / North Goa / Chapora get
+> underlined**; tap one → **Search Google · Open in Google Maps** open the right URL; the console no longer needs the
+> `location detection unavailable` path. Names/orgs/ordinary words stay un-underlined; dates still work.
+
+> **⚠ REVISION 2 — restyle the location marker as a "chip with pin" (user chose this; the current dotted-orange
+> underline + yellow highlight looks bad).** Purely the **visual affordance** for a detected location — the tap
+> behaviour (Search Google / Open in Google Maps menu) is unchanged.
+>
+> **Target look (user-approved mockup):** each detected location renders as a small **rounded pill/chip** — a soft
+> tinted background, a **map-pin icon**, then the place name — all in the app's **teal accent** (soft teal tint
+> background `#E1F5EE`, with `#0F6E56` for the text + pin; a single value we can retune later). **Remove the dotted
+> underline and the yellow highlight entirely** — no orange, no yellow, no red.
+>
+> **Where:** `src/components/SmartSpanLayer.tsx` — the location-span rendering only. **Do NOT change the date spans**
+> (they keep their existing style) — add a distinct chip style for `kind: 'location'`.
+> - **Pin icon:** a small **inline SVG map-pin** (~13–14px, same colour as the text) — do NOT use an emoji (renders
+>   inconsistently across devices).
+> - **Rendering approach:** the place text sits on the PDF canvas (black). To match the mockup (coloured text inside a
+>   tinted pill), the cleanest is to **cover the original location text** (reuse the editor's cover/`sampleBackground`
+>   approach) and draw the pill + pin + place name in the accent colour on top. If that proves fiddly for a first pass,
+>   the acceptable fallback is a **semi-transparent tinted pill behind the original black text + the pin** (still reads
+>   as a chip). Either way: rounded pill + pin + calm colour, no yellow/orange.
+> - Keep the hit-target = the whole chip; tap still opens the Search Google / Open in Maps menu.
+>
+> **Verify (live — user):** locations now show as a **teal chip with a pin** (no yellow/orange); dates look
+> exactly as before; tap a chip → the same Search Google / Open in Maps menu.
+
+> **⚠ REVISION 3 — the chip covers neighbouring text; replace it with a clean underline (SUPERSEDES the chip from
+> Rev 2).** User tested the teal chip live and it's too heavy: the rounded pill's background + horizontal padding
+> **overlap the adjacent words** (e.g. the "Keri Foot Bridge" chip bleeds over the following text). User picked the
+> **"underline like a link"** style instead.
+>
+> **New target look:** each detected location is just its **plain place text with a clean SOLID underline in teal**
+> (`#0F6E56`), a small `text-underline-offset` (~2–3px) so it isn't cramped. **No pill/background, no padding, no
+> highlight, no pin** — exactly like a hyperlink, but teal. An underline adds **zero horizontal width**, so it can
+> never cover neighbouring words.
+>
+> **Where:** `src/components/SmartSpanLayer.tsx`, location-span rendering.
+> - **Remove the chip entirely** — the pill background, the padding, the cover-and-redraw of the original text, and the
+>   pin. Since there's now no background, **do NOT cover/redraw the place text** — leave the original canvas text as-is
+>   and just draw the **underline** beneath it (same idea as the date underline, but solid + teal). This is simpler and
+>   removes the overlap.
+> - Keep the whole underlined word as the tap target → Search Google / Open in Maps menu (unchanged).
+> - **Dates unchanged.**
+>
+> **Verify (live — user):** locations show as a **clean teal underline** (like a link) — **no chip, nothing covering
+> the words on either side**; tap → the same Search Google / Open in Maps menu; dates look exactly as before.
+
+**Land it (on your go):** merge `tap-location` → `main`. Commit: `Tap a location → Search Google / Open in Google Maps
+(AI location detection) (Task 46)`.

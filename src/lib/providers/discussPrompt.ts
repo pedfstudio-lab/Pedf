@@ -1,13 +1,8 @@
 import { SUPPORTED_LANGUAGES } from '@/state/prefsStore';
 import type { SupportedLanguageCode } from '@/state/prefsStore';
-import type { DiscussHistoryMessage } from './types';
+import type { ChatMessage, DiscussHistoryMessage } from './types';
 
 export const NOT_IN_DOCUMENT_MARKER = '[[NOT_IN_DOCUMENT]]';
-
-export interface ChatMessage {
-  readonly role: 'system' | 'user' | 'assistant';
-  readonly content: string;
-}
 
 export interface DiscussPromptInput {
   readonly question: string;

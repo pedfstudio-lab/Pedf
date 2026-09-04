@@ -49,6 +49,7 @@ import type { ImageRegion } from '@/lib/pdf/images';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import type { RuleLine } from '@/lib/pdf/ruleLines';
 import { detectDates } from '@/lib/smart/dateDetect';
+import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { SmartSpanLayer } from './SmartSpanLayer';
@@ -67,6 +68,7 @@ interface OverlayLayerProps {
   readonly textAddMode: boolean;
   readonly imageMode: boolean;
   readonly peek: boolean;
+  readonly locations: readonly DetectedLocation[];
 }
 
 interface ExistingBlock {
@@ -315,6 +317,7 @@ export function OverlayLayer({
   textAddMode,
   imageMode,
   peek,
+  locations,
 }: OverlayLayerProps) {
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
@@ -768,7 +771,12 @@ export function OverlayLayer({
         imageMode={imageMode}
       />
 
-      <SmartSpanLayer dates={detectedDates} viewport={viewport} dpr={dpr} />
+      <SmartSpanLayer
+        dates={detectedDates}
+        locations={locations}
+        viewport={viewport}
+        dpr={dpr}
+      />
 
       {textAddMode && !freeTextSession && (
         <div

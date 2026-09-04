@@ -8,6 +8,7 @@ import {
 import type { PageRenderIdentity } from '@/lib/pdf/pageRenderState';
 import { renderPage } from '@/lib/pdf/renderPage';
 import { useDocumentStore } from '@/state/documentStore';
+import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { OverlayLayer } from './OverlayLayer';
 
 interface PageCanvasProps {
@@ -20,6 +21,7 @@ interface PageCanvasProps {
   textAddMode: boolean;
   imageMode: boolean;
   peek: boolean;
+  locations: readonly DetectedLocation[];
 }
 
 interface RenderInfo {
@@ -30,7 +32,16 @@ interface RenderInfo {
 }
 
 /** One locked PDF.js canvas background for a single page. */
-export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, imageMode, peek }: PageCanvasProps) {
+export function PageCanvas({
+  source,
+  pageIndex,
+  zoom,
+  editMode,
+  textAddMode,
+  imageMode,
+  peek,
+  locations,
+}: PageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [renderInfo, setRenderInfo] = useState<RenderInfo | null>(null);
@@ -142,6 +153,7 @@ export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, ima
           textAddMode={textAddMode}
           imageMode={imageMode}
           peek={peek}
+          locations={locations}
         />
       )}
     </div>

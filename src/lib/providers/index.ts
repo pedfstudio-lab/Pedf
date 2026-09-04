@@ -10,6 +10,7 @@ import type {
 } from './providerTypes';
 import { SarvamProvider } from './sarvam';
 import type {
+  ChatMessage,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -70,6 +71,8 @@ export function createProviderChain(
 ): LanguageProvider {
   return {
     name: 'Provider chain',
+    complete: (messages: readonly ChatMessage[]): Promise<TextResult> =>
+      callProviderChain(providers, 'complete', messages),
     translate: (input: TranslateInput): Promise<TextResult> =>
       callProviderChain(providers, 'translate', input),
     explain: (input: ExplainInput): Promise<TextResult> =>

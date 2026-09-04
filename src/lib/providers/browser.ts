@@ -1,6 +1,7 @@
 import { NotSupportedError } from './errors';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import type {
+  ChatMessage,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -19,6 +20,11 @@ export class BrowserProvider implements ProviderWithCapabilities {
 
   supports(method: ProviderMethod): boolean {
     return BROWSER_METHODS.has(method);
+  }
+
+  async complete(messages: readonly ChatMessage[]): Promise<TextResult> {
+    void messages;
+    throw new NotSupportedError(this.name, 'complete');
   }
 
   async translate(input: TranslateInput): Promise<TextResult> {

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PageGeometry } from '@/lib/pdf/types';
 import { planToGeometry } from '@/state/pagePlan';
+import { getDocumentLocations } from '@/lib/smart/locationDetect';
+import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { PageCanvas } from './PageCanvas';
@@ -19,6 +21,7 @@ interface PdfViewerProps {
 
 export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, imageMode, peek }: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
+  const [locations, setLocations] = useState<DetectedLocation[]>([]);
   const { pagePlan } = useEdits();
   const { clearPageCanvases } = useDocumentStore();
   const livePages = useMemo(
@@ -42,6 +45,31 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
       cancelled = true;
     };
   }, [doc]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLocations([]);
+    void getDocumentLocations(doc)
+      .then((detected) => {
+        if (!cancelled) setLocations(detected);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) console.warn('location detection unavailable', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc]);
+
+  const locationsBySourcePage = useMemo(() => {
+    const grouped = new Map<number, DetectedLocation[]>();
+    for (const location of locations) {
+      const pageLocations = grouped.get(location.pageIndex) ?? [];
+      pageLocations.push(location);
+      grouped.set(location.pageIndex, pageLocations);
+    }
+    return grouped;
+  }, [locations]);
 
   useEffect(() => {
     clearPageCanvases();
@@ -72,6 +100,12 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
               textAddMode={textAddMode}
               imageMode={imageMode}
               peek={peek}
+              locations={entry.kind === 'source'
+                ? (locationsBySourcePage.get(entry.sourceIndex) ?? []).map((location) => ({
+                    ...location,
+                    pageIndex: position,
+                  }))
+                : []}
             />
           </div>
         );

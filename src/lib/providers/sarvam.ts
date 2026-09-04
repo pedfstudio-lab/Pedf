@@ -5,6 +5,7 @@ import { NotImplementedError } from './errors';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import type {
   AudioChunkHandler,
+  ChatMessage,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -18,6 +19,7 @@ import type {
 } from './types';
 
 const SARVAM_METHODS = new Set<ProviderMethod>([
+  'complete',
   'translate',
   'explain',
   'speak',
@@ -219,6 +221,64 @@ export class SarvamProvider implements ProviderWithCapabilities {
 
   supports(method: ProviderMethod): boolean {
     return SARVAM_METHODS.has(method);
+  }
+
+  private async requestChatCompletion(
+    messages: readonly ChatMessage[],
+    maxTokens: number,
+    onTextDelta?: (delta: string) => void,
+  ): Promise<string> {
+    const key = this.config.getSarvamKey().trim();
+    if (this.config.mode === 'direct' && key === '') {
+      throw new Error('Add your Sarvam API key in Settings before asking a question.');
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
+
+    const stream = typeof onTextDelta === 'function';
+    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/v1/chat/completions'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages,
+        temperature: 0.2,
+        max_tokens: maxTokens,
+        ...(stream ? { stream: true } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await readErrorMessage(response);
+      throw new Error(`Sarvam request failed (${response.status}): ${detail}`);
+    }
+
+    let rawAnswer: unknown;
+    if (stream && onTextDelta) {
+      const contentType = response.headers.get('content-type') ?? '';
+      if (contentType.includes('application/json')) {
+        const payload = await response.json() as SarvamChatResponse;
+        rawAnswer = payload.choices?.[0]?.message?.content;
+        if (typeof rawAnswer === 'string' && rawAnswer !== '') onTextDelta(rawAnswer);
+      } else {
+        rawAnswer = await readChatCompletionStream(response, onTextDelta);
+      }
+    } else {
+      const payload = await response.json() as SarvamChatResponse;
+      rawAnswer = payload.choices?.[0]?.message?.content;
+    }
+    if (typeof rawAnswer !== 'string' || rawAnswer.trim() === '') {
+      throw new Error('Sarvam returned an empty chat response.');
+    }
+    return rawAnswer.trim();
+  }
+
+  async complete(messages: readonly ChatMessage[]): Promise<TextResult> {
+    return {
+      text: await this.requestChatCompletion(messages, CHAT_MAX_TOKENS),
+      provider: this.name,
+    };
   }
 
   async translate(input: TranslateInput): Promise<TextResult> {
@@ -660,52 +720,11 @@ export class SarvamProvider implements ProviderWithCapabilities {
   }
 
   async discuss(input: DiscussInput): Promise<DiscussResult> {
-    // Security boundary: this is the only source of a direct-mode key.
-    const key = this.config.getSarvamKey().trim();
-    if (this.config.mode === 'direct' && key === '') {
-      throw new Error('Add your Sarvam API key in Settings before asking a question.');
-    }
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (key !== '') headers['api-subscription-key'] = key;
-
-    const stream = typeof input.onTextDelta === 'function';
-    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/v1/chat/completions'), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages: buildDiscussMessages(input),
-        temperature: 0.2,
-        max_tokens: input.spoken ? SPOKEN_CHAT_MAX_TOKENS : CHAT_MAX_TOKENS,
-        ...(stream ? { stream: true } : {}),
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await readErrorMessage(response);
-      throw new Error(`Sarvam request failed (${response.status}): ${detail}`);
-    }
-
-    let rawAnswer: unknown;
-    if (stream && input.onTextDelta) {
-      const contentType = response.headers.get('content-type') ?? '';
-      if (contentType.includes('application/json')) {
-        const payload = await response.json() as SarvamChatResponse;
-        rawAnswer = payload.choices?.[0]?.message?.content;
-        if (typeof rawAnswer === 'string' && rawAnswer !== '') input.onTextDelta(rawAnswer);
-      } else {
-        rawAnswer = await readChatCompletionStream(response, input.onTextDelta);
-      }
-    } else {
-      const payload = await response.json() as SarvamChatResponse;
-      rawAnswer = payload.choices?.[0]?.message?.content;
-    }
-    if (typeof rawAnswer !== 'string' || rawAnswer.trim() === '') {
-      throw new Error('Sarvam returned an empty chat response.');
-    }
-
-    const answer = rawAnswer.trim();
+    const answer = await this.requestChatCompletion(
+      buildDiscussMessages(input),
+      input.spoken ? SPOKEN_CHAT_MAX_TOKENS : CHAT_MAX_TOKENS,
+      input.onTextDelta,
+    );
     if (answer.startsWith(NOT_IN_DOCUMENT_MARKER)) {
       const withoutMarker = answer.slice(NOT_IN_DOCUMENT_MARKER.length).trim();
       if (withoutMarker === '') throw new Error('Sarvam returned an empty not-in-document response.');

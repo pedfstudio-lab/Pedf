@@ -5,6 +5,7 @@ import { clearProviderLog, getProviderLog } from './log';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import { createProviderChain, defaultProviders } from './index';
 import type {
+  ChatMessage,
   DiscussInput,
   DiscussResult,
   ExplainInput,
@@ -16,6 +17,7 @@ import type {
 } from './types';
 
 interface FakeHandlers {
+  readonly complete?: (messages: readonly ChatMessage[]) => Promise<TextResult>;
   readonly translate?: (input: TranslateInput) => Promise<TextResult>;
   readonly explain?: (input: ExplainInput) => Promise<TextResult>;
   readonly speak?: (input: SpeakInput) => Promise<SpeakResult>;
@@ -32,6 +34,10 @@ class FakeProvider implements ProviderWithCapabilities {
 
   supports(method: ProviderMethod): boolean {
     return this.supported.includes(method);
+  }
+
+  complete(messages: readonly ChatMessage[]): Promise<TextResult> {
+    return this.handlers.complete?.(messages) ?? Promise.reject(new Error('unexpected complete'));
   }
 
   translate(input: TranslateInput): Promise<TextResult> {
@@ -81,6 +87,21 @@ describe('createProviderChain', () => {
       { provider: 'first', method: 'speak', ok: false },
       { provider: 'second', method: 'speak', ok: true },
     ]);
+  });
+
+  it('passes raw completion messages through the provider chain unchanged', async () => {
+    const messages: readonly ChatMessage[] = [
+      { role: 'system', content: 'JSON only' },
+      { role: 'user', content: 'Goa' },
+    ];
+    const complete = vi.fn(async () => ({ text: '["Goa"]', provider: 'sarvam' }));
+    const provider = new FakeProvider('sarvam', ['complete'], { complete });
+
+    await expect(createProviderChain([provider]).complete(messages)).resolves.toEqual({
+      text: '["Goa"]',
+      provider: 'sarvam',
+    });
+    expect(complete).toHaveBeenCalledWith(messages);
   });
 
   it('throws a clear aggregate error after all supporting providers fail', async () => {
@@ -178,6 +199,7 @@ describe('createProviderChain', () => {
 describe('BrowserProvider capabilities', () => {
   it('does not advertise provider-seam capabilities', () => {
     const browser = new BrowserProvider();
+    expect(browser.supports('complete')).toBe(false);
     expect(browser.supports('speak')).toBe(false);
     expect(browser.supports('transcribe')).toBe(false);
     expect(browser.supports('translate')).toBe(false);

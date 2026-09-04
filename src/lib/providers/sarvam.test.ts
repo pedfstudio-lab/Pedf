@@ -79,6 +79,42 @@ class FakeWebSocket {
   }
 }
 
+describe('SarvamProvider.complete', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the supplied messages unchanged and returns the raw model text', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: '["Goa","Morjim"]' } }],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const messages = [
+      { role: 'system' as const, content: 'Return JSON only.' },
+      { role: 'user' as const, content: 'Goa and Morjim' },
+    ];
+
+    await expect(new SarvamProvider(directConfig()).complete(messages)).resolves.toEqual({
+      text: '["Goa","Morjim"]',
+      provider: 'Sarvam',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.sarvam.ai/v1/chat/completions');
+    const request = JSON.parse(String(init?.body)) as {
+      messages: unknown;
+      max_tokens: number;
+      stream?: boolean;
+    };
+    expect(request.messages).toEqual(messages);
+    expect(request.max_tokens).toBe(600);
+    expect(request).not.toHaveProperty('stream');
+    expect(String(init?.body)).not.toContain('warm, easygoing companion');
+    expect(String(init?.body)).not.toContain('[Page N]');
+  });
+});
+
 describe('SarvamProvider.discuss', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
