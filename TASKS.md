@@ -6152,7 +6152,11 @@ work; editing/bullets unaffected.
 
 ## Images — Replace fills the box
 
-### Task 47 — Replacing an image FILLS the box (cover), instead of fitting with side gaps  🔲 TODO → new branch `image-fill`
+### Task 47 — Replacing an image FILLS the box (cover), instead of fitting with side gaps  ✅ MERGED (`5a56b3e`) → branch `image-fill`
+> ✅ **Done & merged to `main`.** Replace now covers the whole box (`coverImageRect` + centre-crop, no gaps, no
+> stretch); Rev 1 adds a **Replace** button to placed images so they can be re-replaced in place (swap bytes, same box,
+> no extra cover) — replaced + added images alike. Add / Crop / Delete / detected-region Replace unchanged. User
+> verified live; typecheck / 448 tests / lint green.
 > **Bug (reported):** when the user **replaces** an image, the new photo is **"fit" inside** the original image box —
 > the whole photo is shown, centred — so when the photo's shape (aspect ratio) differs from the box, there are
 > **empty margins on the sides** (screenshot: a box photo replaced but leaving grey/blank strips at the edges). The
