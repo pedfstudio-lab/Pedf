@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitImageRect, imageMimeType, isJpg, isPng } from './imageFile';
+import { coverImageRect, fitImageRect, imageMimeType, isJpg, isPng } from './imageFile';
 
 describe('image file helpers', () => {
   it('sniffs PNG and JPEG magic without trusting file extensions', () => {
@@ -31,5 +31,19 @@ describe('image file helpers', () => {
       w: 30,
       h: 60,
     });
+  });
+
+  it('covers a wide box with a tall source by cropping the top and bottom', () => {
+    const sourceRect = coverImageRect({ x: 10, y: 20, w: 120, h: 60 }, 100, 200);
+
+    expect(sourceRect).toEqual({ x: 10, y: -70, w: 120, h: 240 });
+    expect(sourceRect.w / sourceRect.h).toBe(100 / 200);
+  });
+
+  it('covers a tall box with a wide source by cropping the left and right', () => {
+    const sourceRect = coverImageRect({ x: 10, y: 20, w: 60, h: 120 }, 200, 100);
+
+    expect(sourceRect).toEqual({ x: -80, y: 20, w: 240, h: 120 });
+    expect(sourceRect.w / sourceRect.h).toBe(200 / 100);
   });
 });

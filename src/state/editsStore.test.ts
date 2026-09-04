@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Edit } from '@/lib/export/types';
+import type { Edit, ImageEdit } from '@/lib/export/types';
 import type { PagePlan } from './pagePlan';
 import {
   EMPTY_HISTORY,
@@ -67,6 +67,37 @@ describe('historyReducer', () => {
 
     expect(branched.present.edits.map(({ id }) => id)).toEqual(['first', 'replacement']);
     expect(branched.future).toEqual([]);
+  });
+
+  it('replaces a placed image without removing its existing cover or changing geometry', () => {
+    const cover = coverEdit('image-cover');
+    const original: ImageEdit = {
+      id: 'old-image',
+      kind: 'image',
+      pageIndex: 0,
+      rect: { x: 15, y: 25, w: 120, h: 60 },
+      z: 2,
+      bytes: new Uint8Array([1]),
+    };
+    const replacement: ImageEdit = {
+      ...original,
+      id: 'new-image',
+      bytes: new Uint8Array([2]),
+    };
+    const withImage = historyReducer(freshHistory(), {
+      type: 'add',
+      edits: [cover, original],
+    });
+
+    const replaced = historyReducer(withImage, {
+      type: 'replace',
+      removeIds: [original.id],
+      edits: [replacement],
+    });
+
+    expect(replaced.present.edits).toEqual([cover, replacement]);
+    expect(replacement.rect).toEqual(original.rect);
+    expect(replacement.z).toBe(original.z);
   });
 
   it('undoes and redoes a duplicate together with cloned and shifted edits', () => {

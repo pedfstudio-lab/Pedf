@@ -6147,3 +6147,74 @@ work; editing/bullets unaffected.
 
 **Land it (on your go):** merge `tap-location` → `main`. Commit: `Tap a location → Search Google / Open in Google Maps
 (AI location detection) (Task 46)`.
+
+---
+
+## Images — Replace fills the box
+
+### Task 47 — Replacing an image FILLS the box (cover), instead of fitting with side gaps  🔲 TODO → new branch `image-fill`
+> **Bug (reported):** when the user **replaces** an image, the new photo is **"fit" inside** the original image box —
+> the whole photo is shown, centred — so when the photo's shape (aspect ratio) differs from the box, there are
+> **empty margins on the sides** (screenshot: a box photo replaced but leaving grey/blank strips at the edges). The
+> user wants the replacement to **cover the whole box** — no gaps.
+
+**Root cause:** `src/components/ImageOverlay.tsx` (~line 264) uses `fitImageRect(target.rect, size.w, size.h)` from
+`src/lib/images/imageFile.ts` — documented as *"largest centred rectangle with the source aspect ratio that fits
+inside target."* That's a **contain / letterbox** fit → gaps whenever the aspects differ.
+
+**The change — "fill / cover" instead of "fit":** the replaced image should fill the **entire** `target.rect`, scaling
+**uniformly** so it covers the box, with the overflow **cropped** (centre-crop). **No stretching / distortion**, **no
+gaps.**
+- **Where:** the **replace** path in `ImageOverlay.tsx` (~line 264, `handleReplace`), plus whatever draw/geometry it
+  feeds (`handlers/image.ts`, `imageFile.ts`).
+- **Cleanest approach:** keep the image edit's rect = the **full `target.rect`** (the whole box), and **centre-crop the
+  source image to the box's aspect ratio** before placing it (reuse the existing crop machinery in
+  `src/lib/images/imageCrop.ts` — it already crops an image to a rect for the crop feature). Result: the image fills
+  the box edge-to-edge, uniformly scaled, centre-cropped, undistorted.
+  - (Alternative if simpler: draw the image scaled-to-cover and clip to the box. Either is fine as long as: fills the
+    box, uniform scale, centre-crop, no distortion.)
+- Add a small `coverImageRect` (or equivalent) helper next to `fitImageRect`, with a unit test, if the geometry is
+  computed separately.
+
+**⚠ Guardrails:**
+- **Only the REPLACE behaviour changes.** Do **not** change **Add image** (free placement/resize), **Crop** (Task 16B),
+  or **Delete** (Task 16A) — leave those exactly as they are. `fitImageRect` may still be used elsewhere; only the
+  replace path switches to cover.
+- **No distortion** — the image must scale uniformly (never stretch to fit); the excess is cropped, not squashed.
+- Image edits ride the same cover + `z` + `replaceEdits` seam as today — don't touch the export seam otherwise.
+
+**Tests:** the new cover geometry (a tall source into a wide box, and vice-versa) fills the box with no gaps and
+uniform scale (crop, not stretch); existing image add / crop / delete tests stay green. typecheck / lint green.
+
+**Verify (live — user):** replace an image with a differently-shaped photo → it **covers the whole box, no side
+gaps**, image not stretched (edges cropped a little, as expected); Add / Crop / Delete still work as before.
+
+> **⚠ REVISION 1 — add a "Replace" button to placed images so they can be re-replaced.**
+>
+> **Symptom (live, user):** after replacing an image, you **can't replace it again** — there's no way to click it to
+> swap the photo.
+>
+> **Cause (pre-existing gap — NOT from Task 47):** the **Replace** action only lives on the app's auto-detected image
+> regions (`visibleRegions`, `ImageOverlay.tsx:536+`). Replacing paints a **cover** over that region, so it drops out of
+> `visibleRegions` and its Replace button vanishes. The **placed image edit** (`pageImages`,
+> `ImageOverlay.tsx:481–526`) only exposes **Delete (×)** and **Crop** — no Replace. So a placed image can be deleted or
+> cropped (it IS a live editable edit) but never swapped. Task 47 changed the fill geometry, not these controls.
+>
+> **Fix — add a "Replace" button to the placed-image controls, next to Delete + Crop.**
+> - **Where:** `ImageOverlay.tsx`, the `pageImages.map(...)` control block (~`:492–522`).
+> - **On click:** open the file picker targeting **this existing image edit** — add a `PendingTarget` kind (e.g.
+>   `'reimage'`) carrying the edit's `id` + `rect`.
+> - **On file chosen:** **cover-crop the new bytes to the edit's own `rect`** with the **same Task 47 logic**
+>   (`coverImageRect` + `cropImageBytes`), then **`replaceEdits`** the old image edit → a new image edit with the new
+>   cropped bytes, **same `rect`, same `z`**. **Do NOT add another cover** — the original is already covered underneath.
+> - Result: re-replace fills the same box (cover), exactly like a first replace. Works for **replaced** and **added**
+>   images alike (both live in `pageImages`).
+>
+> **⚠ Guardrails:** Delete, Crop, Add, and the detected-region Replace all stay exactly as they are; the existing cover
+> under a replaced image is untouched; no export-seam change; existing image tests stay green.
+>
+> **Verify (live — user):** replace an image → the placed image now shows **Delete · Crop · Replace**; click Replace →
+> pick another photo → it swaps in and **fills the box**; repeat → still works. Add / Crop / Delete unchanged.
+
+**Land it (on your go):** merge `image-fill` → `main`. Commit: `Replacing an image fills the box (cover) instead of
+fitting with side gaps (Task 47)`.

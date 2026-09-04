@@ -4,7 +4,7 @@ import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import { pdfRectToScreenRect, screenRectToPdfRect } from '@/lib/export/coordinates';
 import type { CoverEdit, ImageEdit, PdfRect } from '@/lib/export/types';
 import { capturePdfRegion, cropImageBytes } from '@/lib/images/imageCrop';
-import { fitImageRect, imageMimeType } from '@/lib/images/imageFile';
+import { coverImageRect, fitImageRect, imageMimeType } from '@/lib/images/imageFile';
 import {
   isRasterTextRegion,
   sampleImageRichness,
@@ -24,10 +24,9 @@ interface ImageOverlayProps {
   readonly imageMode: boolean;
 }
 
-interface PendingTarget {
-  readonly kind: 'add' | 'replace';
-  readonly rect: PdfRect;
-}
+type PendingTarget =
+  | { readonly kind: 'add' | 'replace'; readonly rect: PdfRect }
+  | { readonly kind: 'reimage'; readonly editId: string; readonly rect: PdfRect };
 
 interface ImageDraft {
   readonly bytes: Uint8Array;
@@ -137,7 +136,7 @@ function targetRect(target: CropTarget): PdfRect {
 }
 
 export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: ImageOverlayProps) {
-  const { edits, addEdits, removeEdit, updateEdit } = useEdits();
+  const { edits, addEdits, removeEdit, replaceEdits, updateEdit } = useEdits();
   const { getPageCanvas } = useDocumentStore();
   const [regions, setRegions] = useState<ImageRegion[]>([]);
   const [drawRect, setDrawRect] = useState<ScreenSelection>();
@@ -261,9 +260,24 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
         throw new Error('Unsupported image format. Choose a PNG or JPEG file.');
       }
       const size = await readImageDimensions(bytes);
-      const rect = fitImageRect(target.rect, size.width, size.height);
       if (target.kind === 'add') {
+        const rect = fitImageRect(target.rect, size.width, size.height);
         setDraft({ bytes, rect });
+        return;
+      }
+      const coverRect = coverImageRect(target.rect, size.width, size.height);
+      const croppedBytes = await cropImageBytes(bytes, coverRect, target.rect);
+      if (target.kind === 'reimage') {
+        const existing = edits.find(
+          (edit): edit is ImageEdit => edit.kind === 'image' && edit.id === target.editId,
+        );
+        if (!existing) throw new Error('The image being replaced is no longer available.');
+        replaceEdits([existing.id], [{
+          ...existing,
+          id: id('image-replacement'),
+          rect: target.rect,
+          bytes: croppedBytes,
+        }]);
         return;
       }
       const z = nextZ();
@@ -272,9 +286,9 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
         id: id('image-replacement'),
         kind: 'image',
         pageIndex,
-        rect,
+        rect: target.rect,
         z: z + 1,
-        bytes,
+        bytes: croppedBytes,
       };
       addEdits([cover, image]);
     } catch (caught) {
@@ -505,18 +519,32 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
                 >
                   ×
                 </button>
-                <button
-                  type="button"
-                  aria-label={`Crop added image ${index + 1} on page ${pageIndex + 1}`}
-                  title="Crop image"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    startCrop({ kind: 'added', edit });
-                  }}
-                  className="absolute bottom-1 left-1 z-20 rounded bg-cyan-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-cyan-700"
-                >
-                  Crop
-                </button>
+                <div className="absolute bottom-1 left-1 z-20 flex gap-1">
+                  <button
+                    type="button"
+                    aria-label={`Crop added image ${index + 1} on page ${pageIndex + 1}`}
+                    title="Crop image"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startCrop({ kind: 'added', edit });
+                    }}
+                    className="rounded bg-cyan-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-cyan-700"
+                  >
+                    Crop
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Replace added image ${index + 1} on page ${pageIndex + 1}`}
+                    title="Replace image"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      chooseFile({ kind: 'reimage', editId: edit.id, rect: edit.rect });
+                    }}
+                    className="rounded bg-cyan-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-cyan-700"
+                  >
+                    Replace
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -586,7 +614,7 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
 
       {imageMode && !draft && !cropTarget && (
         <div className="absolute left-3 top-3 z-50 rounded-md bg-neutral-900/90 px-3 py-2 text-xs font-medium text-white shadow">
-          Drag to add, tap amber to replace, or use Crop / ×.
+          Drag to add, tap amber to replace, or use Crop / Replace / ×.
         </div>
       )}
 

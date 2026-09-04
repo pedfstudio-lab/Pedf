@@ -46,3 +46,29 @@ export function fitImageRect(
     h: height,
   };
 }
+
+/** Smallest centered rectangle with the source aspect ratio that fully covers `target`. */
+export function coverImageRect(
+  target: PdfRect,
+  pixelWidth: number,
+  pixelHeight: number,
+): PdfRect {
+  if (
+    !Number.isFinite(pixelWidth) || pixelWidth <= 0 ||
+    !Number.isFinite(pixelHeight) || pixelHeight <= 0 ||
+    !Number.isFinite(target.w) || target.w <= 0 ||
+    !Number.isFinite(target.h) || target.h <= 0
+  ) {
+    throw new RangeError('Image and target dimensions must be positive finite numbers.');
+  }
+  const imageRatio = pixelWidth / pixelHeight;
+  const targetRatio = target.w / target.h;
+  const width = imageRatio >= targetRatio ? target.h * imageRatio : target.w;
+  const height = imageRatio >= targetRatio ? target.h : target.w / imageRatio;
+  return {
+    x: target.x + (target.w - width) / 2,
+    y: target.y + (target.h - height) / 2,
+    w: width,
+    h: height,
+  };
+}
