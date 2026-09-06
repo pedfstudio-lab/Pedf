@@ -10,7 +10,8 @@ import {
   sampleImageRichness,
   shouldKeepImageRegion,
 } from '@/lib/images/imageRichness';
-import { sampleOutsideImage } from '@/lib/images/outsideBackground';
+import { sampleDeleteImageCover, sampleOutsideImage } from '@/lib/images/outsideBackground';
+import { isRegionCovered } from '@/lib/images/regionCovered';
 import { detectImageCandidates } from '@/lib/pdf/images';
 import type { ImageRegion } from '@/lib/pdf/images';
 import { useDocumentStore } from '@/state/documentStore';
@@ -55,16 +56,6 @@ function id(prefix: string): string {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
-}
-
-function sameRect(left: PdfRect, right: PdfRect): boolean {
-  const epsilon = 0.01;
-  return (
-    Math.abs(left.x - right.x) <= epsilon &&
-    Math.abs(left.y - right.y) <= epsilon &&
-    Math.abs(left.w - right.w) <= epsilon &&
-    Math.abs(left.h - right.h) <= epsilon
-  );
 }
 
 function imageBlob(bytes: Uint8Array): Blob {
@@ -213,7 +204,7 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
   );
   const visibleRegions = useMemo(
     () => regions.filter(
-      (region) => !coveredOriginals.some((cover) => sameRect(cover.rect, region.rect)),
+      (region) => !coveredOriginals.some((cover) => isRegionCovered(cover.rect, region.rect)),
     ),
     [coveredOriginals, regions],
   );
@@ -221,19 +212,27 @@ export function ImageOverlay({ page, pageIndex, viewport, dpr, imageMode }: Imag
   const nextZ = () => edits.reduce((maximum, edit) => Math.max(maximum, edit.z), 0) + 1;
   const makeExistingCover = (rect: PdfRect, prefix: string, z: number): CoverEdit => {
     const registration = getPageCanvas(pageIndex);
-    const color = registration
+    const deleteSample = registration && prefix === 'image-delete-cover'
+      ? sampleDeleteImageCover(registration.canvas, registration.viewport, rect, {
+          probeWidthPx: Math.max(2, Math.round(2 * registration.dpr)),
+          pageRingInnerPx: Math.max(24, Math.round(24 * registration.dpr)),
+          pageRingOuterPx: Math.max(40, Math.round(40 * registration.dpr)),
+          maxExpansionPx: Math.max(40, Math.round(40 * registration.dpr)),
+        })
+      : undefined;
+    const color = deleteSample?.color ?? (registration
       ? sampleOutsideImage(
           registration.canvas,
           registration.viewport,
           rect,
           Math.max(3, Math.round(4 * registration.dpr)),
         )
-      : { r: 1, g: 1, b: 1 };
+      : { r: 1, g: 1, b: 1 });
     return {
       id: id(prefix),
       kind: 'cover',
       pageIndex,
-      rect,
+      rect: deleteSample?.rect ?? rect,
       z,
       color,
       sampleBackground: false,

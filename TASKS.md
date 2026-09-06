@@ -6222,3 +6222,92 @@ gaps**, image not stretched (edges cropped a little, as expected); Add / Crop / 
 
 **Land it (on your go):** merge `image-fill` → `main`. Commit: `Replacing an image fills the box (cover) instead of
 fitting with side gaps (Task 47)`.
+
+---
+
+## Images — Delete blends into the page
+
+### Task 48 — Deleting an image leaves a white box: the patch must match the REAL page colour and swallow the card's margin  🔲 TODO → new branch `image-delete-bg`
+> **Bug (reported, verified on the real file):** in `GOA 2026-edited.pdf`, page 9 ("Here's what our trippers are
+> saying") is **white review-card images on a light-grey page**. Deleting a card leaves a **white rectangle** on the
+> grey page. Page 8 (photos straight on the grey page) deletes cleanly. Same PDF, two outcomes.
+
+**Root cause:** the delete cover colour comes from `sampleOutsideImage` (`src/lib/images/outsideBackground.ts`), which
+samples only a **thin ~5px band immediately outside** the detected rect. For a white card, the detector's rect sits
+slightly *inside* the card's white margin, so that band lands on the **card's own white** — not the grey page → the
+cover is painted **white** → a white box. Photos have no margin, so the band correctly hits grey → clean. The colour
+is *sampled*, never a hard-coded white (the `{1,1,1}` fallback only fires on a canvas read error).
+
+**The fix — two parts, both in the DELETE-cover path (`makeExistingCover(...,'image-delete-cover',...)` in
+`ImageOverlay.tsx` ~`:586`, and `outsideBackground.ts`):**
+
+**Part A — sample the REAL page colour (not the card's edge).**
+- Sample a **wider ring further out** (e.g. ~24–40px beyond the rect, or the dominant colour of the surrounding area),
+  not just the 5px band that catches the card's white margin. That lands on the true page colour: grey → grey,
+  orange → orange, green → green. Use the dominant/median colour so a stray shadow pixel doesn't skew it.
+
+**Part B — grow the cover to swallow the card's flat margin (so no white rim is left).**
+- Probe the band **immediately** outside the rect. If it's a **uniform flat colour that differs from the page colour**
+  found in Part A (e.g. the card's white vs the page's grey), that's a card margin → **expand the rect outward** over
+  it, step by step, until the band matches the page colour (cap the expansion, e.g. ≤ 40px, so it never swallows the
+  whole page). Cover rect = the expanded rect; cover colour = the page colour from Part A.
+- If the immediate band **already matches** the page colour (a photo straight on the page), **don't expand** — keep
+  today's behaviour, which is already clean.
+- If the surroundings are **not** uniform (a photo/gradient behind the image), the probe won't find a flat band — fall
+  back to today's behaviour gracefully (no expansion, dominant-colour cover). No crash, no worse than now. *(A flat
+  patch can't recreate a photo behind an image — that's content-aware fill, out of scope.)*
+
+**Result:** delete a white review card → the patch is **grey** and covers the **whole card** → it vanishes into the
+page. Delete a photo on an orange/green/yellow/grey page → that colour, clean. Never a white box unless the page is
+white.
+
+**⚠ Guardrails:**
+- Scope is the **delete** cover. The improved sampling may also feed the replace/crop covers **only if** their existing
+  tests stay green and behaviour is unchanged or better — otherwise leave them as-is.
+- **Never expand into a non-flat area** (the uniformity check + the px cap protect this). Never regress the
+  photo-on-flat-page case (page 8).
+- Existing image add / replace / crop / delete tests stay green. No export-seam change beyond the cover rect/colour.
+
+**Tests (`outsideBackground.test.ts` / image tests):**
+- **⭐** a white-margin card on a grey canvas → cover rect **expands over the white margin** and the colour is
+  **grey** (not white). *(The real case.)*
+- a photo directly on a grey canvas → rect **unchanged**, colour grey. *(No regression.)*
+- flat orange / green / yellow backgrounds → cover = that colour.
+- a non-uniform background → falls back to current behaviour without expanding or throwing.
+- the expansion cap is respected.
+
+**Verify (live — user, on `GOA 2026-edited.pdf`):** page 9 → delete a review card → it **disappears into the grey
+page, no white box**; page 8 → delete a photo → still clean; Replace / Crop unchanged.
+
+**Land it (on your go):** merge `image-delete-bg` → `main`. Commit: `Deleting an image blends into the real page colour
+and swallows the card's margin — no more white boxes (Task 48)`.
+
+> **⚠⚠ REVISION 1 — Part A + Part B are DONE and correct (`sampleDeleteImageCover`, tests green, typecheck/lint
+> clean). One gap found in code review, in `ImageOverlay.tsx`, NOT in the sampler. Keep it on `image-delete-bg`.**
+>
+> **The gap:** `visibleRegions` (`ImageOverlay.tsx` ~`:214`) hides a detected region only when a cover rect is
+> **exactly equal** to the region rect (`sameRect`, ε = 0.01 pt). Task 48 now **expands** the delete cover over the
+> card's margin, so for exactly the case Task 48 fixes (page 9 white card on grey) the expanded cover ≠ region rect →
+> the region is still treated as *not covered* → in image mode the **amber outline + Replace / Delete / Crop buttons
+> stay on top of the already-deleted card**, and a second Delete stacks another cover. Page 8 photos (no expansion)
+> are unaffected. This is user-visible, so it must land with Task 48, not after.
+>
+> **The fix (small, scoped):**
+> 1. Add a pure helper in `src/lib/images/` (e.g. `regionCovered.ts`): `isRegionCovered(cover: PdfRect, region: PdfRect)`
+>    → true when the cover **fully contains** the region with the same ε tolerance (`cover.x ≤ region.x + ε`,
+>    `cover.y ≤ region.y + ε`, `cover.x + cover.w ≥ region.x + region.w − ε`, `cover.y + cover.h ≥ region.y + region.h − ε`).
+>    An exactly-equal rect is a special case of "contains", so the existing behaviour is preserved.
+> 2. Use it in `visibleRegions`: `!coveredOriginals.some((cover) => isRegionCovered(cover.rect, region.rect))`.
+>    Leave `coveredOriginals` (the id-prefix filter) and everything else in `ImageOverlay.tsx` untouched.
+>
+> **Guardrails:** do not loosen this to "overlaps" — a big cover that merely *touches* a neighbouring region must not
+> hide that neighbour. Replace / crop covers are rect-equal to their region today, so they keep matching via "contains".
+>
+> **Tests (`regionCovered.test.ts`):** equal rect → covered; cover expanded by 8 pt on every side → covered; cover
+> shifted so the region pokes out by 1 pt on any side → **not** covered; neighbouring region that only touches the
+> cover's edge → **not** covered.
+>
+> **Verify (live — user, on `GOA 2026-edited.pdf`, image mode):** page 9 → delete a review card → it vanishes into the
+> grey page **and its amber box / buttons disappear** (no second Delete possible); page 8 → delete a photo → unchanged.
+>
+> **Land it:** same merge and commit message as Task 48 above (Rev 1 rides along in that one commit).
