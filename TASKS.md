@@ -6334,7 +6334,17 @@ and swallows the card's margin — no more white boxes (Task 48)`.
 
 ## Text editing — Font size dropdown
 
-### Task 49 — Font size: a dropdown with presets + a typed custom size replaces A− / A+  🔲 TODO → new branch `font-size-dropdown`
+### Task 49 — Font size: a dropdown with presets + a typed custom size replaces A− / A+  ✅ MERGED to `main` (`70d39c0`)
+> ✅ **Done & merged to `main`** (`70d39c0`, branch `font-size-dropdown` deleted). Dropdown (presets 8–72 + typed
+> custom size, clamped 4–400, Enter/blur applies, Escape reverts) + **REVISION 1** (stale location/date underlines
+> hidden under covers via `filterCoveredSpans`; committed text edits drawn in segments by `markInlineSmartSegments` /
+> `InlineMarkedText` so place names and dates get an inline CSS underline that follows size / bold / wrap / move;
+> one popover at a time). Dev deps added: `@testing-library/react`, `jsdom`. 488 tests / typecheck / lint green.
+>
+> **Notes:** the inline mark is a `<button>` styled `display:inline; padding:0; border:0; align-baseline` with the
+> segment's own font CSS. If an edited paragraph ever shifts by a pixel next to an underlined word, switch the mark to
+> a plain `<span role="button">` — same CSS underline, no UA button metrics. A name split across two wrapped lines is
+> not underlined until the wrap changes (known, accepted). Underlines remain display-only (not exported), as before.
 **Why (user request):** A− / A+ step 1 pt at a time. Users want to **pick a size from a list** or **type their own**.
 Decision: the dropdown **replaces** A− / A+ (no stepper buttons remain).
 
