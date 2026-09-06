@@ -6227,7 +6227,25 @@ fitting with side gaps (Task 47)`.
 
 ## Images — Delete blends into the page
 
-### Task 48 — Deleting an image leaves a white box: the patch must match the REAL page colour and swallow the card's margin  🔲 TODO → new branch `image-delete-bg`
+### Task 48 — Deleting an image leaves a white box: the patch must match the REAL page colour and swallow the card's margin  ✅ MERGED to `main` (`b2227d1`)
+> ✅ **Done & merged to `main`** (`b2227d1`, branch `image-delete-bg` deleted). Part A (page colour from a wider
+> 24–40px ring) + Part B (cover grows over a flat, differently-coloured margin, capped) + REVISION 1 (a deleted
+> image's frame/buttons hide when a cover fully *contains* its rect — `isRegionCovered`). User verified live on GOA
+> page 9 (card vanishes into grey) and page 8 (photos clean). 462 tests / typecheck / lint green.
+>
+> **⚠ Known limits — shipped knowingly on the user's call, NOT fixed here:**
+> - **Overlapping / tightly packed cards** (Ziro Festival page 12: cards overlap, page grey 241 vs card white 255 is
+>   inside the 20-level tolerance) → the wider ring samples the *neighbouring white cards* and the cover comes out
+>   **white** — on that layout this is *worse* than the old 5px band. No colour guess can handle overlapping cards
+>   (deleting the top card must reveal the one beneath). Fix = the **clean-background engine** (render the page
+>   *without that picture* and cut the patch from it) — see the parked note under "Text on photos".
+> - A **~1px hairline** of the deleted image's own edge can remain (the cover sits exactly on the image rect, both
+>   edges are anti-aliased). Same engine fixes it; a 1px bleed would also do.
+> - A **drop shadow drawn as a separate picture** stays after the delete.
+> - **Whether a card is offered for delete at all is timing-dependent** (Task 15B's paint-based "picture of text"
+>   rule runs only if the page finished painting before detection resolved — heavy pages skip it). Measured: by the
+>   rule's own numbers Ziro's cards should be hidden and two GOA cards kept; live it's the reverse. Separate task:
+>   drop the paint-based half, keep the pure "real PDF text on top" rule.
 > **Bug (reported, verified on the real file):** in `GOA 2026-edited.pdf`, page 9 ("Here's what our trippers are
 > saying") is **white review-card images on a light-grey page**. Deleting a card leaves a **white rectangle** on the
 > grey page. Page 8 (photos straight on the grey page) deletes cleanly. Same PDF, two outcomes.
