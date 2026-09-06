@@ -22,6 +22,7 @@ import {
 } from '@/lib/edit/moveSnap';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
+import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
   sans: 'Arial',
@@ -410,20 +411,20 @@ export function TextEditOverlay({
     return range;
   };
 
-  const changeFontSize = (delta: number) => {
+  const applyFontSize = (fontSizePt: number) => {
     const editable = editableRef.current;
     const range = editableRange();
     if (!editable || !range || range.collapsed) {
-      setStyle((value) => ({ ...value, fontSizePt: Math.max(4, value.fontSizePt + delta) }));
-      setSelectionStyle((value) => ({
-        ...value,
-        fontSizePt: Math.max(4, value.fontSizePt + delta),
-      }));
+      setStyle((value) => ({ ...value, fontSizePt }));
+      setSelectionStyle((value) => ({ ...value, fontSizePt }));
+      editable?.focus({ preventScroll: true });
+      resizeToContent();
+      window.requestAnimationFrame(() => {
+        refreshSelectionStyle();
+        resizeToContent();
+      });
       return;
     }
-    const computed = window.getComputedStyle(elementAtRangeStart(range, editable));
-    const currentSize = Number.parseFloat(computed.fontSize) / zoom || style.fontSizePt;
-    const fontSizePt = Math.max(4, Math.round((currentSize + delta) * 100) / 100);
     const selected = wrapSelectionWithStyle(
       range,
       { fontSize: `${fontSizePt * zoom}px` },
@@ -431,6 +432,7 @@ export function TextEditOverlay({
       ['fontSize'],
     );
     selectionRangeRef.current = selected.cloneRange();
+    editable.focus({ preventScroll: true });
     refreshSelectionStyle();
     resizeToContent();
   };
@@ -482,8 +484,7 @@ export function TextEditOverlay({
         {bulletMode && (
           <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
         )}
-        <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeFontSize(-1)} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Decrease text size">A−</button>
-        <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => changeFontSize(1)} className="rounded px-2 py-1 text-sm hover:bg-neutral-100" aria-label="Increase text size">A+</button>
+        <FontSizeCombobox value={selectionStyle.fontSizePt} onApply={applyFontSize} />
         <button type="button" aria-pressed={selectionStyle.bold} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
         <button type="button" aria-pressed={selectionStyle.italic} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
         <select

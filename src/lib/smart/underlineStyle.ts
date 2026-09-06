@@ -1,0 +1,4 @@
+export const LOCATION_UNDERLINE_COLOR = '#0F6E56';
+export const LOCATION_UNDERLINE_OFFSET = 2;
+export const DATE_UNDERLINE_COLOR = '#D97706';
+export const DATE_UNDERLINE_OFFSET = 2;

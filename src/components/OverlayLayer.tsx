@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import {
@@ -48,11 +48,17 @@ import { detectImages } from '@/lib/pdf/images';
 import type { ImageRegion } from '@/lib/pdf/images';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import type { RuleLine } from '@/lib/pdf/ruleLines';
+import { filterCoveredSpans } from '@/lib/smart/coveredSpans';
 import { detectDates } from '@/lib/smart/dateDetect';
+import type { DetectedDate } from '@/lib/smart/dateDetect';
+import { markInlineSmartSegments } from '@/lib/smart/inlineMarks';
 import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { SmartSpanLayer } from './SmartSpanLayer';
+import { DateActionPopover } from './DateActionPopover';
+import { InlineMarkedText } from './InlineMarkedText';
+import { LocationActionPopover } from './LocationActionPopover';
 import { TapPopover } from './TapPopover';
 import { TextEditOverlay } from './TextEditOverlay';
 import { ImageOverlay } from './ImageOverlay';
@@ -69,6 +75,7 @@ interface OverlayLayerProps {
   readonly imageMode: boolean;
   readonly peek: boolean;
   readonly locations: readonly DetectedLocation[];
+  readonly locationNames: readonly string[];
 }
 
 interface ExistingBlock {
@@ -93,6 +100,16 @@ interface EditableRuleLine {
   readonly source: RuleLine;
   readonly current: RuleLine;
   readonly removeIds: readonly string[];
+}
+
+interface InlineLocationSelection {
+  readonly detected: DetectedLocation;
+  readonly screenRect: ScreenRect;
+}
+
+interface InlineDateSelection {
+  readonly detected: DetectedDate;
+  readonly screenRect: ScreenRect;
 }
 
 const WHITE_BACKGROUND: Rgb = { r: 1, g: 1, b: 1 };
@@ -318,7 +335,9 @@ export function OverlayLayer({
   imageMode,
   peek,
   locations,
+  locationNames,
 }: OverlayLayerProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [imageRegions, setImageRegions] = useState<ImageRegion[]>([]);
@@ -331,6 +350,10 @@ export function OverlayLayer({
   const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
   const [moveGuideState, setMoveGuideState] = useState<MoveGuideState | null>(null);
   const [activeRuleLine, setActiveRuleLine] = useState<EditableRuleLine | null>(null);
+  const [selectedInlineLocation, setSelectedInlineLocation] =
+    useState<InlineLocationSelection | null>(null);
+  const [selectedInlineDate, setSelectedInlineDate] = useState<InlineDateSelection | null>(null);
+  const [smartSelectionKey, setSmartSelectionKey] = useState(0);
   const { edits, addEdits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
 
@@ -386,6 +409,23 @@ export function OverlayLayer({
     ),
     [edits, pageIndex],
   );
+  useEffect(() => {
+    setSelectedInlineDate(null);
+    setSelectedInlineLocation(null);
+    setSmartSelectionKey((value) => value + 1);
+  }, [activeBlock, pageCoverEdits]);
+  const markedTextEdits = useMemo(() => pageTextEdits.map((edit) => {
+    const dates = detectDates([{
+      pageIndex: edit.pageIndex,
+      text: edit.text,
+      rect: edit.rect,
+      style: edit.style,
+    }]);
+    return {
+      edit,
+      segments: markInlineSmartSegments(edit.text, edit.spans, locationNames, dates),
+    };
+  }), [locationNames, pageTextEdits]);
   const pageLineEdits = useMemo(
     () => edits.filter(
       (edit): edit is LineEdit => edit.kind === 'line' && edit.pageIndex === pageIndex,
@@ -534,6 +574,66 @@ export function OverlayLayer({
       };
     });
   }, [activeBlock, activeBulletList, measureInkExtent]);
+  const activeCoverRects = useMemo(
+    () => activeCoverGeometry.map(({ sourceRect }) => sourceRect),
+    [activeCoverGeometry],
+  );
+  const smartSpanCoverRects = useMemo(() => [
+    ...pageCoverEdits.map((edit) => edit.rect),
+    ...activeCoverRects,
+  ], [activeCoverRects, pageCoverEdits]);
+  const visibleLocations = useMemo(
+    () => filterCoveredSpans(locations, smartSpanCoverRects),
+    [locations, smartSpanCoverRects],
+  );
+  const visibleDates = useMemo(
+    () => filterCoveredSpans(detectedDates, smartSpanCoverRects),
+    [detectedDates, smartSpanCoverRects],
+  );
+
+  const screenRectForInlineTarget = useCallback((target: HTMLButtonElement): ScreenRect | undefined => {
+    const overlay = overlayRef.current;
+    if (!overlay) return undefined;
+    const targetRect = target.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    return {
+      left: targetRect.left - overlayRect.left,
+      top: targetRect.top - overlayRect.top,
+      width: targetRect.width,
+      height: targetRect.height,
+    };
+  }, []);
+
+  const selectInlineLocation = useCallback((text: string, target: HTMLButtonElement) => {
+    const screenRect = screenRectForInlineTarget(target);
+    if (!screenRect) return;
+    setSelectedInlineDate(null);
+    setSelectedInlineLocation({
+      screenRect,
+      detected: {
+        text,
+        kind: 'location',
+        pageIndex,
+        rect: screenRectToPdfRect(screenRect, viewport, dpr),
+      },
+    });
+    setSmartSelectionKey((value) => value + 1);
+  }, [dpr, pageIndex, screenRectForInlineTarget, viewport]);
+
+  const selectInlineDate = useCallback((date: DetectedDate, target: HTMLButtonElement) => {
+    const screenRect = screenRectForInlineTarget(target);
+    if (!screenRect) return;
+    setSelectedInlineLocation(null);
+    setSelectedInlineDate({
+      screenRect,
+      detected: {
+        ...date,
+        pageIndex,
+        rect: screenRectToPdfRect(screenRect, viewport, dpr),
+      },
+    });
+    setSmartSelectionKey((value) => value + 1);
+  }, [dpr, pageIndex, screenRectForInlineTarget, viewport]);
 
   const activeInkScreenTop = useMemo(() => {
     if (activeCoverGeometry.length === 0) return undefined;
@@ -694,7 +794,11 @@ export function OverlayLayer({
   if (peek) return null;
 
   return (
-    <div className="absolute inset-0" aria-label={`Text overlays for page ${pageIndex + 1}`}>
+    <div
+      ref={overlayRef}
+      className="absolute inset-0"
+      aria-label={`Text overlays for page ${pageIndex + 1}`}
+    >
       {pageCoverEdits.map((edit) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
         const background = edit.color ?? sampleBackground(edit.rect);
@@ -714,8 +818,9 @@ export function OverlayLayer({
         );
       })}
 
-      {pageTextEdits.map((edit) => {
+      {markedTextEdits.map(({ edit, segments }) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
+        const marksHidden = filterCoveredSpans([{ rect: edit.rect }], activeCoverRects).length === 0;
         return (
           <div
             key={edit.id}
@@ -729,19 +834,14 @@ export function OverlayLayer({
               textAlign: edit.align ?? 'left',
             }}
           >
-            {edit.spans
-              ? edit.spans.map((span, index) => {
-                  const spanStyle = effectiveTextSpanStyle(edit.style, span);
-                  return (
-                    <span
-                      key={`${index}:${span.text}`}
-                      style={textStyleToCss(spanStyle, zoom)}
-                    >
-                      {span.text}
-                    </span>
-                  );
-                })
-              : edit.text}
+            <InlineMarkedText
+              segments={segments}
+              style={edit.style}
+              zoom={zoom}
+              marksHidden={marksHidden}
+              onLocationClick={selectInlineLocation}
+              onDateClick={selectInlineDate}
+            />
           </div>
         );
       })}
@@ -772,11 +872,34 @@ export function OverlayLayer({
       />
 
       <SmartSpanLayer
-        dates={detectedDates}
-        locations={locations}
+        dates={visibleDates}
+        locations={visibleLocations}
         viewport={viewport}
         dpr={dpr}
+        closeSelectionKey={smartSelectionKey}
+        onOpenPopover={() => {
+          setSelectedInlineDate(null);
+          setSelectedInlineLocation(null);
+        }}
       />
+
+      {selectedInlineDate && (
+        <DateActionPopover
+          detected={selectedInlineDate.detected}
+          screenRect={selectedInlineDate.screenRect}
+          pageWidth={viewport.width / dpr}
+          onClose={() => setSelectedInlineDate(null)}
+        />
+      )}
+
+      {selectedInlineLocation && (
+        <LocationActionPopover
+          detected={selectedInlineLocation.detected}
+          screenRect={selectedInlineLocation.screenRect}
+          pageWidth={viewport.width / dpr}
+          onClose={() => setSelectedInlineLocation(null)}
+        />
+      )}
 
       {textAddMode && !freeTextSession && (
         <div

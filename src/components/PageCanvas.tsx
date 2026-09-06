@@ -22,6 +22,7 @@ interface PageCanvasProps {
   imageMode: boolean;
   peek: boolean;
   locations: readonly DetectedLocation[];
+  locationNames: readonly string[];
 }
 
 interface RenderInfo {
@@ -41,6 +42,7 @@ export function PageCanvas({
   imageMode,
   peek,
   locations,
+  locationNames,
 }: PageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -154,6 +156,7 @@ export function PageCanvas({
           imageMode={imageMode}
           peek={peek}
           locations={locations}
+          locationNames={locationNames}
         />
       )}
     </div>

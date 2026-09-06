@@ -70,6 +70,10 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
     }
     return grouped;
   }, [locations]);
+  const locationNames = useMemo(
+    () => [...new Set(locations.map((location) => location.text))],
+    [locations],
+  );
 
   useEffect(() => {
     clearPageCanvases();
@@ -106,6 +110,7 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
                     pageIndex: position,
                   }))
                 : []}
+              locationNames={locationNames}
             />
           </div>
         );

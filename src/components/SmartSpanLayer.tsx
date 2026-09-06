@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PageViewport } from 'pdfjs-dist';
 import { pdfRectToScreenRect } from '@/lib/export/coordinates';
 import type { DetectedDate } from '@/lib/smart/dateDetect';
 import type { DetectedLocation } from '@/lib/smart/locationDetect';
+import {
+  LOCATION_UNDERLINE_COLOR,
+  LOCATION_UNDERLINE_OFFSET,
+} from '@/lib/smart/underlineStyle';
 import { DateActionPopover } from './DateActionPopover';
 import { LocationActionPopover } from './LocationActionPopover';
 
@@ -11,18 +15,31 @@ interface SmartSpanLayerProps {
   readonly locations: readonly DetectedLocation[];
   readonly viewport: PageViewport;
   readonly dpr: number;
+  readonly closeSelectionKey?: number;
+  onOpenPopover?(): void;
 }
 
-const LOCATION_UNDERLINE_COLOR = '#0F6E56';
-const LOCATION_UNDERLINE_OFFSET = 2;
-
-export function SmartSpanLayer({ dates, locations, viewport, dpr }: SmartSpanLayerProps) {
+export function SmartSpanLayer({
+  dates,
+  locations,
+  viewport,
+  dpr,
+  closeSelectionKey,
+  onOpenPopover,
+}: SmartSpanLayerProps) {
   const [selectedDate, setSelectedDate] = useState<DetectedDate | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<DetectedLocation | null>(null);
-  const selectedDateRect = selectedDate
+  const [selectionKey, setSelectionKey] = useState(closeSelectionKey);
+  useEffect(() => {
+    setSelectedDate(null);
+    setSelectedLocation(null);
+    setSelectionKey(closeSelectionKey);
+  }, [closeSelectionKey]);
+  const selectionVisible = selectionKey === closeSelectionKey;
+  const selectedDateRect = selectionVisible && selectedDate
     ? pdfRectToScreenRect(selectedDate.rect, viewport, dpr)
     : null;
-  const selectedLocationRect = selectedLocation
+  const selectedLocationRect = selectionVisible && selectedLocation
     ? pdfRectToScreenRect(selectedLocation.rect, viewport, dpr)
     : null;
 
@@ -37,6 +54,8 @@ export function SmartSpanLayer({ dates, locations, viewport, dpr }: SmartSpanLay
             aria-label={`Date actions: ${date.raw}`}
             title={`${date.raw} — calendar actions`}
             onClick={() => {
+              onOpenPopover?.();
+              setSelectionKey(closeSelectionKey);
               setSelectedLocation(null);
               setSelectedDate(date);
             }}
@@ -60,6 +79,8 @@ export function SmartSpanLayer({ dates, locations, viewport, dpr }: SmartSpanLay
             aria-label={`Location actions: ${location.text}`}
             title={`${location.text} — location actions`}
             onClick={() => {
+              onOpenPopover?.();
+              setSelectionKey(closeSelectionKey);
               setSelectedDate(null);
               setSelectedLocation(location);
             }}

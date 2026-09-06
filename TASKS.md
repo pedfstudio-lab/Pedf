@@ -6329,3 +6329,133 @@ and swallows the card's margin — no more white boxes (Task 48)`.
 > grey page **and its amber box / buttons disappear** (no second Delete possible); page 8 → delete a photo → unchanged.
 >
 > **Land it:** same merge and commit message as Task 48 above (Rev 1 rides along in that one commit).
+
+---
+
+## Text editing — Font size dropdown
+
+### Task 49 — Font size: a dropdown with presets + a typed custom size replaces A− / A+  🔲 TODO → new branch `font-size-dropdown`
+**Why (user request):** A− / A+ step 1 pt at a time. Users want to **pick a size from a list** or **type their own**.
+Decision: the dropdown **replaces** A− / A+ (no stepper buttons remain).
+
+**UX — exact:**
+- In the text toolbar (`src/components/TextEditOverlay.tsx` ~`:485–486`) **remove** the `A−` / `A+` buttons and the
+  `changeFontSize(delta)` they call. Put a **size combobox** to the **left** of the existing font-family `<select>`:
+  a small text field (`inputMode="decimal"`, `aria-label="Font size"`, ≈3.5em wide) showing the current size, plus a
+  caret button that opens a list of presets: **8 9 10 11 12 14 16 18 20 24 28 32 36 48 72**.
+- **Pick a preset** → applies immediately, list closes, focus returns to the text.
+- **Type a size** → **Enter** or **blur** applies; **Escape** reverts to the shown size and closes. Accept `12`,
+  `12.5`, `12pt` (trim, optional `pt`). Any finite number is **clamped to 4–400** (4 = today's floor). Round to 2
+  decimals like today (`Math.round(x*100)/100`). Anything else (`abc`, empty, `-3`) → **no change**, the field snaps
+  back to the current size. No error banner.
+- **Displayed value** = `selectionStyle.fontSizePt` — already tracked by `refreshSelectionStyle` (`:359`) from the
+  element at the caret / selection start, i.e. the same source A−/A+ used. Format with trailing zeros trimmed
+  (`11`, `13.5`, `41.54`).
+- **What it changes — unchanged rule:** selection present → wrap **only the selection**
+  (`wrapSelectionWithStyle(range, { fontSize: \`${pt * zoom}px\` }, { fontSizePt: String(pt) }, ['fontSize'])`,
+  exactly as `changeFontSize` does today); no selection → **whole box** (`setStyle` + `setSelectionStyle`). Then
+  `refreshSelectionStyle()` + `resizeToContent()`.
+- **Keep the saved selection while typing:** the field takes focus, which is fine — `refreshSelectionStyle` returns
+  early when the selection is outside the editable, so `selectionRangeRef` survives. On apply, call
+  `editableRange()` first (it restores the saved range), exactly like `changeFontFamily` does. The caret button uses
+  `onPointerDown={(e) => e.preventDefault()}` like the other toolbar buttons so opening the list never steals the
+  selection.
+- **Mobile:** do **not** use `<datalist>` (unsupported / poor on iOS Safari). The list is a small positioned
+  `<ul role="listbox">` under the field, styled like the rest of the toolbar (white, `border-neutral-300`, shadow);
+  closes on outside pointerdown, Escape, or a pick. Field is `role="combobox"` with `aria-expanded`.
+- **Bullet mode unchanged:** the `bulletOverflow` guard still disables Done with the same warning if the list gets
+  too tall.
+
+**Where:**
+- **New** `src/lib/edit/fontSize.ts` (pure): `FONT_SIZE_PRESETS`, `MIN_FONT_SIZE_PT = 4`, `MAX_FONT_SIZE_PT = 400`,
+  `parseFontSizeInput(raw: string): number | undefined` (trim, optional `pt`, finite → clamp + round), and
+  `formatFontSize(pt: number): string`.
+- **New** `src/components/FontSizeCombobox.tsx`: presentational; props `{ value: number; onApply(pt: number): void }`;
+  owns its open/draft state only.
+- `TextEditOverlay.tsx`: replace `changeFontSize(delta)` with `applyFontSize(pt)` (same body, absolute value);
+  mount the combobox; delete A− / A+.
+
+**⚠ Guardrails:** no change to export (`handlers/text.ts`), the edit model (`TextEdit`, spans, `fontSizePt`),
+wrapping, bullet layout, or the layout-on-edit behaviour (parked). Family `<select>`, B / I, Cancel / Done untouched.
+No keyboard shortcuts. Nothing else in the toolbar moves.
+
+**Tests:**
+- `fontSize.test.ts`: `"12"`→12, `"12.5"`→12.5, `" 14pt "`→14, `"2"`→4, `"999"`→400, `"abc"` / `""` / `"-3"` →
+  undefined (negative is rejected, not clamped); `formatFontSize(11)`→`"11"`, `(13.5)`→`"13.5"`, `(12.345)`→`"12.35"`.
+- `FontSizeCombobox.test.tsx` (React Testing Library, like `HandsFreeVoiceOverlay.test.tsx`): caret opens the list
+  with all presets; clicking `24` → `onApply(24)` and the list closes; typing `13.5` + Enter → `onApply(13.5)`;
+  typing `abc` + Enter → **no** call and the field shows the current value again; Escape reverts and closes.
+- Nothing in `src` references the old `Increase/Decrease text size` labels (checked), so no other test changes.
+
+**Verify (live — user, GOA page 2):** open the "GOA FOR US" heading → the field shows its size (~41.5) → pick **48**
+→ whole heading is 48 and the box grows as today. Select just **GOA** → type **60**, Enter → only that word is 60.
+Type **abc**, Enter → nothing changes, field snaps back. Open a bullet list → pick **72** → Done disabled with the
+height warning as today. Cancel / Done / B / I / family unchanged. Export → sizes come out as chosen.
+
+**Land it (on your go):** merge `font-size-dropdown` → `main`. Commit: `Font size: dropdown with presets + custom
+entry replaces A− / A+ (Task 49)`.
+
+> **⚠⚠ REVISION 1 — the dropdown is implemented (user is changing sizes with it). This revision fixes a bug it
+> EXPOSED but did not cause: the location / date underlines (Task 46, dates) do NOT follow edited text. Keep it on
+> `font-size-dropdown`.**
+>
+> **The bug (see user screenshots):** `SmartSpanLayer` positions every underline button at the **original PDF run
+> rect** (`location.rect` / `date.rect` → `pdfRectToScreenRect`). After Edit → Done the original paragraph is covered
+> and redrawn as `TextEdit`s, but the underline layer knows nothing about edits, so the underline stays at the old
+> spot: text shrinks → the line floats **below** the paragraph; text grows → it drifts off the word and sticks out
+> past it. Tapping the stale button acts on the old position. Same for dates (dotted amber).
+>
+> **The fix — user chose "underline INSIDE the edited text, glued to the word".** Step 1 is the prerequisite
+> (otherwise the stale line and the new one both show).
+>
+> 1. **Hide the stale originals.** In `OverlayLayer`, filter `locations` and `detectedDates` before they reach
+>    `SmartSpanLayer`: drop any span whose rect lies under a cover edit on this page (`pageCoverEdits`) or under
+>    the block currently being edited (`activeCoverGeometry` rects). Pure helper `filterCoveredSpans(spans,
+>    coverRects)` in `src/lib/smart/coveredSpans.ts` — "covered" = ≥ 50% of the span's area overlaps a cover (Task 44
+>    trims cover tops, so don't demand full containment). Unit-tested.
+> 2. **Mark place names inside committed text edits.** In `OverlayLayer` `pageTextEdits.map(...)` (~`:717–747`)
+>    render each edit's line through a pure helper `markLocationsInLine(text, spans | undefined, names)` →
+>    `InlineSegment[]` `{ text, span?: TextSpan, location?: string }` (`src/lib/smart/inlineMarks.ts`). `names` =
+>    the **document-wide** set of `DetectedLocation.text` values — `PdfViewer.tsx` (~`:52`) already holds the full
+>    `getDocumentLocations` result and passes a per-page slice; pass the full name set down as well. Match
+>    **longest-first, whole-word, case-sensitive**, and **across span boundaries** (a bold "Goa" inside "North Goa's"
+>    still matches as one name). No new AI calls.
+>    Render a `location` segment as `<button type="button" data-location-underline="true"
+>    className="pointer-events-auto border-0 bg-transparent p-0 …">` carrying the SAME 1px teal underline
+>    (`LOCATION_UNDERLINE_COLOR` / `LOCATION_UNDERLINE_OFFSET` — move them from `SmartSpanLayer.tsx` to
+>    `src/lib/smart/underlineStyle.ts` and import in both places) and the segment's own font style
+>    (`textStyleToCss(effectiveTextSpanStyle(edit.style, span))`, colour inherited). ⚠ The text-edit div is
+>    `pointer-events-none`; the button must be `pointer-events-auto`.
+> 3. **Tap → the same popover.** On click, measure the button (`getBoundingClientRect()` relative to the overlay
+>    root) → `screenRect`, build a synthetic `DetectedLocation` `{ text, kind: 'location', pageIndex, rect:
+>    screenRectToPdfRect(screen, viewport, dpr) }`, and render `LocationActionPopover` from `OverlayLayer` state
+>    (`selectedInlineLocation`); close on `onClose` / Escape / outside tap. One popover at a time — lift
+>    `SmartSpanLayer`'s selection up or close it when an inline one opens.
+> 4. **Dates too (same mechanism).** Run `detectDates` over a synthetic run per edited line (`text` + the edit's
+>    rect) and mark the matched ranges as `date` segments with the dotted-amber style → `DateActionPopover`. If
+>    `detectDates` turns out to need real run geometry that isn't available here, ship locations only and say so in
+>    the notes.
+>
+> **Behaviour:** bold / italic / size / family / re-wrap / move — the underline follows, because it is part of the
+> word. While a block is being EDITED no underline shows for it (step 1 hides the originals; the editor doesn't
+> mark). After Done they reappear on the new text. Untouched paragraphs keep today's underlines exactly.
+>
+> **⚠ Guardrails:** display only — no change to export (`handlers/text.ts`), the edit model, wrapping, or
+> `SmartSpanLayer`'s behaviour for unedited text. Task 49's dropdown untouched. Whole-word only ("Goal" must not
+> underline "Goa"). Never crash on `spans` with mixed sizes or on free text (`origin === 'free'` may be marked too).
+>
+> **Tests:** `inlineMarks.test.ts` — plain line → the two names marked; a name crossing a bold boundary → one
+> continuous underline (one segment with sub-styles, or adjacent segments sharing the name — either, as long as the
+> underline is unbroken); whole-word only; longest-first ("North Goa" beats "Goa"); no names → one plain segment.
+> `coveredSpans.test.ts` — span under a cover → dropped; outside → kept; under a top-trimmed cover → still dropped.
+> A small component test — the inline button renders with `data-location-underline` and a click opens the popover
+> with the right text. Existing `SmartSpanLayer.test.tsx` unchanged.
+>
+> **Verify (live — user, GOA "After checking into our stay…" paragraph):** Edit → pick 16 in the dropdown → bold
+> "Turtle Beach" → Done → "Morjim" and "North Goa's" are underlined under the **new** words, nothing floating below;
+> tap "Morjim" → Search Google / Google Maps; Edit again → 10 → Done → underlines shrink and move with the words;
+> move the box → they move with it; an edited paragraph containing a date → dotted underline follows too (if dates
+> shipped). Unedited paragraphs unchanged.
+>
+> **Land it:** same merge as Task 49. Commit: `Font size dropdown (Task 49) + Rev 1: location/date underlines follow
+> edited text`.
