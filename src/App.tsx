@@ -19,6 +19,7 @@ import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
 import { PrefsStoreProvider } from './state/prefsStore';
+import { takePendingFile } from './lib/site/pendingFile';
 
 // Optional dev convenience: auto-load a sample dropped at public/samples/.
 const DEFAULT_SAMPLE_FILE = 'GOA 2026.pdf';
@@ -139,6 +140,8 @@ function EditorApp() {
   const [chatOpen, setChatOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
+  const pendingFileChecked = useRef(false);
+  const openedPendingFile = useRef(false);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -182,11 +185,21 @@ function EditorApp() {
     }
   }, [resetDocument, setDocument]);
 
+  useEffect(() => {
+    if (pendingFileChecked.current) return;
+    pendingFileChecked.current = true;
+    const pending = takePendingFile();
+    if (!pending) return;
+    openedPendingFile.current = true;
+    void open(pending, pending.name);
+  }, [open]);
+
   // Try the bundled sample on first load. Silently ignore if it isn't present
   // (Vite's dev server answers unknown paths with index.html, so verify %PDF-).
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (openedPendingFile.current) return;
       try {
         const res = await fetch(DEFAULT_SAMPLE);
         if (!res.ok) return;

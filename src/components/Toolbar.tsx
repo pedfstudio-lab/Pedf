@@ -47,7 +47,7 @@ export function Toolbar({
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
-      <span className="text-lg font-semibold tracking-tight text-neutral-900">DesiPDF</span>
+      <span className="text-lg font-semibold tracking-tight text-neutral-900">PEDF Studio</span>
       {fileName && (
         <span className="max-w-[45%] truncate text-sm text-neutral-500" title={fileName}>
           {fileName}

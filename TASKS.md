@@ -6469,3 +6469,427 @@ entry replaces A− / A+ (Task 49)`.
 >
 > **Land it:** same merge as Task 49. Commit: `Font size dropdown (Task 49) + Rev 1: location/date underlines follow
 > edited text`.
+
+---
+
+## Website — Landing page
+
+### Task 50 — Landing page: "Read it. Ask it. Edit it."  🔲 TODO → new branch `landing-page`
+**Why:** the site currently opens straight into the editor. The user approved a landing-page design (mockup v2,
+2026-09-07): hero with headline + drop zone + a PDF/chat illustration, four feature tiles, a privacy band, a trust
+strip, footer. This task builds that page as the front door and moves the editor to `/app`.
+
+**Routing (`src/routes.tsx` — extend the existing manual path switch; no router library):**
+- `/` → `Landing`. `/app` → the editor (`App`) — **lazy-load it** (`lazy(() => import('./App'))`) so the landing
+  page never pulls in pdf.js. `/verify` stays dev-only as today. `/privacy`, `/terms`, `/support` → three small
+  static pages sharing the landing's nav + footer. Unknown paths → landing.
+- Pure helper `resolveRoute(pathname, hash): 'landing' | 'app' | 'privacy' | 'terms' | 'support' | 'verify'` in
+  `src/lib/site/routes.ts`, unit-tested. Cloudflare already serves the SPA fallback (`wrangler.jsonc`
+  `not_found_handling`), so deep links to `/app` work in production; in dev Vite does the same.
+- Links use `import.meta.env.BASE_URL` so a sub-path deploy still works.
+
+**Page structure — follow the approved mockup exactly, in this order:**
+1. **Nav:** logo mark + "PEDF Studio" (left); links **Features · How it Works · Privacy · FAQ** (same-page anchors
+   `#features #how #privacy #faq`); blue pill **Try it free** → `/app` (right).
+2. **Hero:** left column — headline on three lines **Read it.** / **Ask it.** (blue) / **Edit it.**; subhead
+   "Type or talk to understand any PDF, then edit the text and images. Runs on your computer."; a dashed **drop
+   zone** "Drag & drop your PDF here / or click to upload" that is REAL: dropping or choosing a `.pdf` hands the
+   `File` to the editor and navigates to `/app` (in-memory handoff — `src/lib/site/pendingFile.ts` with
+   `setPendingFile(file)` / `takePendingFile()`; `App` checks it once on mount and calls its existing `open()`;
+   `sessionStorage` can't hold a `File`, so keep it in memory — a page reload simply lands on the empty editor).
+   Right column — the illustration: a large white "PDF" sheet with a blue page-curl and, overlapping it, a chat card
+   ("What does clause 4 mean?" → "Clause 4 refers to the termination of the agreement by either party, with a
+   30-day written notice.", an "Ask anything…" field, two mic buttons).
+3. **Features (`#features`):** four tiles — **Upload PDF · Edit Text · Add / Edit Image · Ask the Bot** — icon on
+   a blue rounded square inside a white rounded cube, label below.
+4. **How it works (`#how`):** three short numbered steps under the tiles (not in the mockup, but the nav links to
+   it): 1 Open your PDF. 2 Tap any text or image to edit, or ask the bot by typing or talking. 3 Download the
+   edited PDF.
+5. **Privacy band (`#privacy`, light-blue background):** laptop + lock illustration (left); heading
+   **Runs on your computer.** / **Stays on your computer.** (second line blue); body: "Everything is processed in
+   your browser. Your PDF never leaves your device." **Plus one honest line (required):** "Voice and chat send only
+   your question, your audio, and the document's text to Sarvam AI to get an answer. Nothing is stored."
+6. **Trust strip:** shield icon "Your files never leave your device" · language icon
+   "**English, Hindi & 8 more Indian languages**" (10 total — `SUPPORTED_LANGUAGES` in `prefsStore.tsx`; the
+   mockup's "10 Indian languages" is wrong).
+7. **FAQ (`#faq`):** six short Q&As: Is it free? (yes) · Do I need an account? (no) · Does it work offline?
+   (editing yes once the page is open; voice/chat need internet) · Which languages? (the ten) · Where is my file
+   stored? (nowhere — it stays in your browser; you download the edited copy) · What does voice need? (a Sarvam
+   key in Settings until our proxy goes live).
+8. **Footer:** logo + "PEDF Studio" (left); **Privacy · Terms · Support** (links to the three pages); **© 2026 PEDF
+   Studio** (the mockup says 2025 — use 2026).
+
+**Static pages (short, plain):** `/privacy` — the facts above in prose (local processing, what Sarvam receives,
+no storage, no accounts, no analytics unless we add them — say "none"). `/terms` — a short draft (as-is service,
+no warranty, you own your documents) clearly marked **DRAFT — review before launch**. `/support` — one line +
+`mailto:` using a single constant `SUPPORT_EMAIL` in `src/lib/site/config.ts` set to
+`'support@example.com'` — **placeholder; the user will supply the real address**.
+
+**Artwork — two paths, decide by what the user supplies (ask once; default to path B):**
+- **A (preferred look):** the user exports the mockup's 3D pieces as transparent images → `public/landing/`
+  (`hero-doc.webp`, `laptop-lock.webp`, `cube-upload.webp`, `cube-text.webp`, `cube-image.webp`,
+  `cube-bot.webp`; ≤ 200 KB each, plus `@2x` if available). Use `<img>` with width/height set (no layout shift)
+  and alt text.
+- **B (no assets):** build the same layout with CSS/SVG: the PDF sheet as a rounded white card with a CSS blue
+  corner-curl, the chat card as real markup, tiles as rounded squares with inline SVG line icons (upload arrow, T,
+  image, chat bubble), the laptop+lock as a simple inline SVG. Same colours and spacing as the mockup.
+
+**Design tokens:** primary blue `#1E6BFF` (pill, accents, gradient corner), headings near-black `#0B1220`, body
+grey `#5B6472`, band background `#EEF4FF`, page white; system sans (Tailwind default — **no web-font download**,
+so the page is offline-friendly); rounded-2xl cards, soft shadows. Mobile: single column, hero text above the
+illustration, tiles 2×2, band stacks, nav collapses to logo + Try it free.
+
+**Behaviour & quality:**
+- The landing bundle must NOT import pdf.js / pdf-lib (verify with `npm run build` chunk names — `App` is its own
+  chunk).
+- `index.html`: `<title>PEDF Studio — Read it. Ask it. Edit it.</title>`, meta description, `og:title` /
+  `og:description`, `lang="en"`. The editor's in-app title/branding is untouched.
+- Accessibility: semantic `<header> <main> <section> <footer>`, one `<h1>`, visible focus rings, alt text, the drop
+  zone is a `<button>` + hidden `<input type=file accept=application/pdf>` and also accepts drag-and-drop.
+- No new UI libraries. No analytics. No external requests on the landing page at all.
+
+**⚠ Guardrails:** the editor itself is NOT modified beyond (a) the one-time `takePendingFile()` check on mount and
+(b) nothing else — do **not** touch the dev sample auto-load line in `App.tsx` (it has an uncommitted local change
+the user owns). No change to export, edits, voice. Keep `/verify` working in dev.
+
+**Tests:** `routes.test.ts` (`/`→landing, `/app`→app, `/app/`→app, `/privacy`→privacy, `/nope`→landing,
+`#verify` in dev); `pendingFile.test.ts` (set → take returns it once, second take is undefined); `Landing.test.tsx`
+(RTL): renders the `<h1>` "Read it. Ask it. Edit it.", the Try-it-free link points to `/app`, the trust strip says
+"English, Hindi & 8 more Indian languages", the footer says 2026; the drop zone's file input accepts only PDFs.
+
+**Verify (live — user):** `/` shows the page matching the mockup on desktop and phone; **Try it free** → editor;
+drop a PDF on the landing → editor opens with that file; `/app` typed directly → editor; nav links scroll;
+Privacy/Terms/Support pages open; nothing in the editor changed.
+
+**Land it (on your go):** merge `landing-page` → `main`. Commit: `Landing page: Read it. Ask it. Edit it.
+(Task 50)`.
+
+> **⚠⚠ REVISION 1 — the page is built and reviewed (routing, lazy editor, copy, assets, tests all good). One bug
+> found and REPRODUCED in the browser, plus one production risk. Keep it on `landing-page`.**
+>
+> **Bug: a PDF dropped on the landing page never reaches the editor.** `Landing.tsx` `openFile()` stores the file
+> with `setPendingFile(file)` and then calls `window.location.assign('/app')` — a **full page load**. That throws
+> away all in-memory state, including the pending file, so the editor mounts with nothing (in dev it then
+> auto-loads the sample — confirmed: dropped `dropped-test.pdf`, editor opened `Ziro Festival Firgun.pdf`). Same for
+> click-to-upload. `Try it free` is unaffected (carries nothing).
+>
+> **Fix A — navigate in-page, no reload:**
+> 1. `src/lib/site/navigate.ts`: `navigate(path)` = `history.pushState({}, '', siteHref(path))` + notify
+>    listeners (a tiny store: `subscribe(listener)`, `getPath()`), and also re-notify on `window` `popstate` so
+>    Back / Forward work.
+> 2. `src/routes.tsx` `Root`: read the current route through `useSyncExternalStore(subscribe, getPath)` (or
+>    `useState` + effect) instead of reading `location` once at render, so a `navigate()` call re-renders the
+>    right view. `resolveRoute` stays pure and unchanged.
+> 3. `Landing.tsx`: replace `window.location.assign(siteHref('/app'))` with `navigate('/app')`. Leave the
+>    `<a href>` links (nav, Try it free, footer) as plain links — full loads are fine when nothing is carried.
+> 4. `App.tsx` keeps its one-time `takePendingFile()` on mount — no change.
+>
+> **Fix B — absolute base path (one line):** `vite.config.ts` `base: './'` → `base: '/'`. The site is deployed at
+> the root of its own domain (`wrangler.jsonc` static assets + SPA fallback), and relative asset URLs break on any
+> deep link with a trailing slash (`/app/` → the browser resolves `./assets/index-*.js` to `/app/assets/…` → the SPA
+> fallback returns `index.html` as the script → blank page). With `base: '/'`, `siteHref()` yields absolute paths
+> and `routePathname()` in `routes.tsx` can drop its base-stripping branch. Update the config comment.
+>
+> **Tests:** `navigate.test.ts` — `navigate('/privacy')` updates `location.pathname` and notifies; `popstate`
+> notifies. `routes.test.tsx` (RTL) — render `Root`, call `navigate('/privacy')` → the Privacy page renders without
+> a reload; Back (`history.back()` + `popstate`) → landing again. `Landing.test.tsx` — choosing a PDF via the hidden
+> input calls `setPendingFile` with that file **and** `navigate('/app')` (mock `navigate`), never
+> `location.assign`. Build check: `npm run build` → `dist/index.html` references `/assets/…` (absolute).
+>
+> **Verify (user):** drop a PDF on the landing page → the editor opens **with that file** (toolbar shows its name,
+> not the sample); Back returns to the landing page; Try it free → empty editor; `npm run build && npm run preview`
+> → open `/app/` (trailing slash) → the editor loads. Everything else from the Task 50 verify list unchanged.
+>
+> **Land it:** same merge and commit as Task 50 (Rev 1 rides along). The uncommitted `DEFAULT_SAMPLE_FILE` line in
+> `App.tsx` is the user's local change and stays OUT of the commit.
+
+---
+
+## Tools — local PDF tools (Sejda / iLovePDF style), Phase 1
+
+**The idea:** every tool below runs **entirely on the user's computer**. The PDF is never uploaded. That is the
+product's difference from iLovePDF / Smallpdf / Sejda-online, and it must stay true for every tool in this section.
+**No `fetch` of user data anywhere in `src/lib/tools/` or `src/components/tools/`** — CI-style guard: a unit test
+greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and fails if found.
+
+**Order (one branch + one task each, land each before starting the next):**
+51 Tools framework → **51A Upload first, then choose** → 52 Merge → 53 Split → 54 JPG to PDF → 55 PDF to JPG →
+56 Rotate → 57 Organize → 58 Page numbers → 59 Watermark → 60 Repair → 61 Sign → 62 Compress. Each branches from
+`main` **after Task 50 (+ its Rev 1, in-page navigation) has landed** — the flow below depends on a dropped file
+surviving the move from the landing page to a tool.
+
+**The user flow (decided 2026-09-08):** the landing page's drop zone is the front door for EVERYTHING. The user
+drops a PDF (or images) first, and only then chooses what to do with it — Edit, Compress, Sign, Merge, Split,
+Organize, Rotate, Page numbers, Watermark, PDF to JPG, Repair (JPG to PDF when they dropped images). The chosen
+tool opens with the file already loaded. People who know the tool they want can still go straight to `/tools`.
+
+**Shared conventions (apply to every task 52–62):**
+- A tool = one `ToolDefinition` registered in `src/lib/tools/registry.ts` + one pure `run()` in
+  `src/lib/tools/<slug>.ts` + (only if it needs custom UI) one options component in `src/components/tools/<Slug>Options.tsx`.
+- Inputs are `File`s; outputs are `{ name: string; bytes: Uint8Array; mime: string }[]`. One output → direct
+  download; several → a zip (Task 51 provides both).
+- Every `run()` reports progress via `onProgress(done, total, label)` and honours an `AbortSignal`.
+- Output names: `<original-name>-<slug>.pdf` (e.g. `GOA 2026-merged.pdf`); Task 51's `outputName()` owns this.
+- Errors are friendly strings, never stack traces: encrypted file → "This PDF has a password. Unlock it first.";
+  corrupt → "This file could not be read. Try Repair PDF."; not a PDF → "Choose a PDF file."
+- After a run, the result card offers **Download**, **Open in editor** (hands the output to `/app` via
+  `setPendingFile`, Task 50) and **Start over**.
+- Tests: a pure unit test per `run()` on the bundled samples (`public/samples/*.pdf`) that reopens the output with
+  pdf.js and checks page count / text / sizes; plus the tool's option-parsing tests. Typecheck / lint / tests green.
+
+### Task 51 — Tools framework: routes, shared tool page, downloads, registry  🔲 TODO → branch `tools-framework`
+**Goal:** the plumbing every tool reuses, plus the `/tools` index page, so Tasks 52–62 are each small.
+
+**Steps:**
+1. **Routes.** Extend `src/lib/site/routes.ts`: `/tools` → `{ kind: 'tools' }`, `/tools/<slug>` →
+   `{ kind: 'tool', slug }` (unknown slug → the index). `src/routes.tsx` lazy-loads a new `ToolsApp` chunk
+   (`src/components/tools/ToolsApp.tsx`) so the landing page still doesn't load pdf.js. Update `routes.test.ts`.
+2. **Registry.** `src/lib/tools/types.ts`: `ToolDefinition { slug; title; description; accepts: 'pdf' | 'image' |
+   'pdf-or-image'; multiple: boolean; run(inputs: File[], options, ctx: { onProgress, signal }): Promise<ToolOutput[]>;
+   Options?: React component; defaultOptions }`. `registry.ts`: `registerTool`, `getTool(slug)`, `listTools()`
+   (ordered as the roadmap above). Unit tests.
+3. **Shared page.** `src/components/tools/ToolPage.tsx`: title + one-line description (also sets
+   `document.title` = `<Title> — PEDF Studio` and the meta description, for search engines), a drop zone (drag &
+   drop + click; accepts per `accepts` / `multiple`), a file list (name, size, page count via pdf.js, first-page
+   thumbnail via `renderPage`-style offscreen render, remove, **drag to reorder** when `multiple`), the tool's
+   Options component, a primary button, a progress bar with label + Cancel (AbortController), a result card
+   (per output: name, size, Download; plus **Download all (.zip)** when >1, **Open in editor**, **Start over**), and
+   an error banner. Styles reuse `landing.css` tokens (`SiteHeader`/`SiteFooter` from `SiteChrome`).
+4. **Downloads.** `src/lib/tools/download.ts`: `downloadBytes(name, bytes, mime)` (blob URL + `<a download>`,
+   revoke after click) and `zipOutputs(outputs): Uint8Array` using **`fflate`** (add dependency, MIT, ~8 KB;
+   `zipSync` with `level: 0` for PDFs — they're already compressed). Unit test the zip (unzip with `fflate` and
+   compare bytes).
+5. **PDF I/O helper.** `src/lib/tools/pdfIo.ts`: `loadPdfLib(file): Promise<PDFDocument>` (pdf-lib, maps
+   pdf-lib's encrypted / parse errors to the friendly strings above), `loadPdfJs(file)` (via
+   `src/lib/pdf/loadDocument.ts`), `savePdf(doc): Uint8Array` (`useObjectStreams: true`), `outputName(file, slug,
+   ext)`, `formatBytes(n)`. Unit tests.
+6. **Index page.** `/tools` = a grid of cards (title, description, icon) from `listTools()`. Landing page: the four
+   feature tiles get links; the nav gains **Tools**; `SiteHeader` shows it on the static pages too.
+7. **Privacy guard test** (see the section intro) in `src/lib/tools/noNetwork.test.ts`.
+8. **File hand-off between pages.** Generalise Task 50's `pendingFile` to a **list**: `src/lib/site/pendingFiles.ts`
+   with `setPendingFiles(files: File[])` / `takePendingFiles(): File[]` (the old single-file API stays as a thin
+   wrapper). `Open in editor` → `setPendingFiles([new File([bytes], name, { type: 'application/pdf' })])` then
+   **in-page** navigation to `/app` (`history.pushState` + router re-render — Task 50 Rev 1; if that hasn't landed,
+   build it here: the router holds the route in state and listens to `popstate`; a `navigate(path)` helper in
+   `src/lib/site/navigate.ts`). Every tool page calls `takePendingFiles()` once on mount and pre-fills its file
+   list; the editor keeps doing the same for a single file.
+
+**Guardrails:** nothing in the editor changes. No network calls. The tools chunk must not be imported by the
+landing page. Mobile layout works (single column, big buttons, file list scrolls).
+**Tests:** routes, registry, download/zip, pdfIo error mapping, ToolPage renders a registered dummy tool and runs
+it (RTL). **Verify (user):** `/tools` shows the grid; a dummy "Copy PDF" tool (remove before landing, or keep as
+`/tools/copy` hidden) accepts a file, shows progress, downloads. **Land:** `tools-framework` → `main`. Commit:
+`Tools framework: routes, shared tool page, downloads, registry (Task 51)`.
+
+### Task 51A — Upload first, then choose what to do  🔲 TODO → branch `start-flow`   *(Easy · 2 days)*
+**Goal:** the landing page's drop zone becomes the single front door. Drop a file → a **chooser** appears with the
+file already loaded → pick Edit or any tool → that page opens with the file in place. No re-uploading, ever.
+
+**Steps:**
+1. **Landing drop zone accepts more.** `Landing.tsx`: accept **PDFs and images (JPG/PNG/WebP), multiple**. On drop
+   or pick: validate (at least one PDF or image; mixed types → "Drop PDFs or images, not both"), `setPendingFiles(files)`,
+   then `navigate('/start')` in-page (no reload — this is exactly why Task 50 Rev 1 is required).
+2. **The chooser page** `/start` → `src/components/tools/StartChooser.tsx` (route added in `routes.ts` + test).
+   Header: "What would you like to do with **<file name>**?" (or "these 3 files"), the file(s) listed with size and
+   page count, a **Change file** link (back to the landing drop zone). Then a grid of large cards, **in this order**:
+   - For PDFs: **Edit PDF** (→ `/app`) · **Compress** · **Sign** · **Merge** (card says "add more PDFs" when only
+     one was dropped) · **Split** · **Organize** · **Rotate** · **Page numbers** · **Watermark** · **PDF to JPG** ·
+     **Repair**. Cards for tools that aren't built yet are shown **greyed with "Coming soon"** so the layout is
+     stable across Tasks 52–62 — the registry knows which slugs exist (`listTools()`); a static
+     `PLANNED_TOOLS` list in `src/lib/tools/planned.ts` supplies the rest.
+   - For images: **JPG to PDF** first, then **Edit** (opens the editor with a blank page and the images placed? —
+     no: v1 just JPG to PDF; other image tools are out of scope).
+   - Each card: icon, title, one line ("Make the file smaller", "Add your signature", …).
+3. **Picking a card:** `navigate('/tools/<slug>')` (or `/app` for Edit). The pending files are still in the
+   in-memory list, so the destination's `takePendingFiles()` pre-fills it. Merge with one file → the tool page opens
+   with that file in the list and the drop zone open for more.
+4. **If the user lands on `/start` with nothing pending** (page reload, direct link) → redirect to `/` with the drop
+   zone focused. Never show an empty chooser.
+5. **Landing copy:** the hero subline becomes "Drop a PDF, then edit it, compress it, sign it, or ask it anything.
+   Runs on your computer." The four feature tiles link to the matching tools; **Try it free** still opens the empty
+   editor for people who want to start there. The `/tools` grid stays for people who choose the tool first.
+6. **Mobile:** the chooser is a two-column grid of tall cards; the file name truncates; the primary card (Edit) is
+   full width at the top.
+7. **Tests:** `routes` (`/start`); `pendingFiles` list semantics (set → take once → empty); chooser (RTL): with a
+   PDF lists Edit first and all eleven cards, greys the unbuilt ones, with images lists JPG to PDF, with nothing
+   pending redirects; Landing: dropping two PDFs calls `setPendingFiles` with both and navigates to `/start`.
+8. **Verify (user):** drop a PDF on the landing page → chooser shows its name → Compress opens with the file
+   already there (no second upload) → back → Edit opens the editor with it → drop three JPGs → JPG to PDF opens with
+   all three. Reload on `/start` → back to the landing page.
+**Guardrails:** files never leave memory (no storage, no upload); the editor is untouched beyond reading pending
+files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** `start-flow` → `main`. Commit:
+`Upload first, then choose: landing drop zone → chooser → tool with the file loaded (Task 51A)`.
+
+### Task 52 — Merge PDF  🔲 TODO → branch `tool-merge`   *(Easy · 1–2 days)*
+1. Register `merge` (`accepts: 'pdf'`, `multiple: true`, min 2 files; the ToolPage reorder list IS the merge order).
+2. `run()`: `const out = await PDFDocument.create()`; for each input `loadPdfLib` → `out.copyPages(src,
+   src.getPageIndices())` → `addPage` each. Progress per file. Output `<first-name>-merged.pdf` (or `merged.pdf` if
+   >3 inputs).
+3. Preserve each page's size and rotation (copyPages does). **Forms:** if any input has an AcroForm, warn "Form
+   fields from more than one file may clash" and continue (pdf-lib copies fields by name; duplicates are renamed by
+   pdf-lib automatically — verify in the test).
+4. Options: none in v1 (a "add blank page between files" toggle is a nice-to-have, skip unless trivial).
+5. **Tests:** merge `sample-basic.pdf` + `GOA 2026.pdf` → page count = sum, page 1 text = sample's page 1 text, last
+   page text = GOA's last page text; order flips when the list is reordered; one encrypted input → friendly error,
+   no output. **Verify (user):** merge two of your PDFs, reorder, download, open in the editor — pages in order.
+**Land:** `Merge PDF tool (Task 52)`.
+
+### Task 53 — Split PDF  🔲 TODO → branch `tool-split`   *(Easy · 1–2 days)*
+1. Register `split` (single PDF). Options component with three modes: **Custom ranges** (text field, e.g.
+   `1-3, 5, 8-10` → one PDF per range), **Every page** (one PDF per page), **Every N pages** (N field), and a
+   checkbox **Merge selected ranges into one PDF** (custom mode only).
+2. Pure `parsePageRanges(text, pageCount): number[][]` in `src/lib/tools/pageRanges.ts` — trims, accepts spaces,
+   `-` or `–`, rejects out-of-range / reversed / empty with a specific message. Unit-tested (10 cases).
+3. `run()`: for each range → new doc → `copyPages(src, indices)` → output `<name>-pages-1-3.pdf`; several outputs →
+   the ToolPage zips them. Page thumbnails in the options panel (click to build a range) — nice-to-have.
+4. **Tests:** every-page on a 16-page sample → 16 outputs of 1 page; `1-3,5` → 2 outputs with page counts 3 and 1
+   and the right texts; bad ranges → errors. **Verify (user):** split GOA into `1-8` and `9-16`, download the zip.
+**Land:** `Split PDF tool (Task 53)`.
+
+### Task 54 — JPG to PDF  🔲 TODO → branch `tool-jpg-to-pdf`   *(Easy · 1–2 days)*
+1. Register `jpg-to-pdf` (`accepts: 'image'`, multiple; JPG / PNG / WebP; HEIC → "Convert HEIC to JPG on your
+   phone first"). Order = the reorder list.
+2. Options: **Page size** (Fit to image · A4 · Letter), **Orientation** (Auto · Portrait · Landscape), **Margin**
+   (None · Small · Big), **Images per page** (1 in v1).
+3. `run()`: WebP → PNG via canvas (`imageFile.ts` has the MIME sniffing; reuse it); `embedJpg` / `embedPng`;
+   `fitImageRect` (exists in `src/lib/images/imageFile.ts`) inside the page-minus-margins; one page per image;
+   EXIF orientation: draw through a canvas with `createImageBitmap(file, { imageOrientation: 'from-image' })` so
+   phone photos come out upright. Output `<first-name>.pdf` or `images.pdf`.
+4. **Tests:** 3 PNGs (generated in-test) → 3 pages, A4 size, image centred; auto orientation picks landscape for a
+   wide image. **Verify (user):** 5 phone photos → one PDF, upright, in order.
+**Land:** `JPG to PDF tool (Task 54)`.
+
+### Task 55 — PDF to JPG  🔲 TODO → branch `tool-pdf-to-jpg`   *(Easy · 1–2 days)*
+1. Register `pdf-to-jpg` (single PDF). Options: **Format** (JPG · PNG), **Quality** (Normal 150 dpi · High 300 dpi
+   · Small 72 dpi), **Pages** (All · ranges via `parsePageRanges`).
+2. `run()`: pdf.js render each page at `scale = dpi / 72` to an offscreen canvas (same code path as `renderPage`)
+   → `canvas.toBlob('image/jpeg', 0.9)` / PNG → output `<name>-page-01.jpg`. Yield to the UI between pages
+   (`await new Promise(requestAnimationFrame)`) and honour the abort signal. Cap: warn above 100 pages at 300 dpi.
+3. **Tests:** sample → N images, each with the expected pixel size for the dpi; ranges respected. **Verify
+   (user):** GOA page 2 at High → the beach photo is sharp; all pages → zip.
+**Land:** `PDF to JPG tool (Task 55)`.
+
+### Task 56 — Rotate PDF  🔲 TODO → branch `tool-rotate`   *(Easy · 1 day)*
+1. Register `rotate` (single PDF). Options: **Angle** (90° right · 180° · 90° left), **Pages** (All · ranges).
+   Thumbnail strip with per-page rotate buttons is a nice-to-have.
+2. `run()`: `page.setRotation(degrees((page.getRotation().angle + delta + 360) % 360))` for the chosen pages.
+3. **Tests:** 90° → every page's rotation +90 (reopen with pdf.js: `page.rotate`); ranges. **Verify (user):**
+   rotate a scanned PDF that's sideways.
+**Land:** `Rotate PDF tool (Task 56)`.
+
+### Task 57 — Organize PDF  🔲 TODO → branch `tool-organize`   *(Easy · 2–3 days)*
+1. Register `organize` (single PDF, but **Add pages from another PDF** button accepts more).
+2. Options component = a thumbnail grid of all pages (offscreen renders, cached), each with: drag handle
+   (reorder), rotate, delete, duplicate; toolbar: **Insert blank page** (after selected; size = neighbour's),
+   **Add pages from PDF…**, **Reset**. The grid state is a pure `OrganizePlan` (`src/lib/tools/organizePlan.ts`:
+   entries `{ sourceFile, sourcePage } | { blank: { w, h } }`, with `move / rotate / remove / duplicate /
+   insertBlank` functions — reuse the ideas in `src/state/pagePlan.ts` but keep this one tool-local). Unit-tested.
+3. `run()`: build a new doc by `copyPages` in plan order (+ blank pages via `addPage([w, h])`), apply rotations.
+4. **Tests:** plan ops; run on the sample with a reversed order → texts reversed; blank inserted at index 2 has no
+   text. **Verify (user):** reorder GOA pages by drag, delete one, add a page from Corporate Governance, download.
+**Land:** `Organize PDF tool (Task 57)`.
+
+### Task 58 — Page numbers  🔲 TODO → branch `tool-page-numbers`   *(Easy · 1–2 days)*
+1. Register `page-numbers` (single PDF). Options: **Position** (6: top/bottom × left/centre/right), **Format**
+   (`1` · `Page 1` · `1 / N` · `Page 1 of N`), **Start at** (default 1), **Pages** (All · ranges), **Font size**
+   (10 / 12 / 14), **Colour** (black / grey / blue), **Margin** (small / normal). Live preview on the first
+   selected page (render + an absolutely positioned label).
+2. `run()`: standard font (`StandardFonts.Helvetica`, no font-file embedding needed); pure
+   `pageNumberPosition(pageW, pageH, rotation, position, margin, textWidth, fontSize): { x, y, rotate }` in
+   `src/lib/tools/pageNumbers.ts` that handles rotated pages (0/90/180/270) so the number appears where the reader
+   sees it, not in unrotated space — unit-tested for all four rotations × six positions.
+3. **Tests:** reopen → each page's text contains the number; rotated sample page places it visually at the bottom.
+   **Verify (user):** bottom-centre `Page 1 of 16` on GOA; a rotated page still shows it at the bottom.
+**Land:** `Page numbers tool (Task 58)`.
+
+### Task 59 — Watermark  🔲 TODO → branch `tool-watermark`   *(Easy · 2 days)*
+1. Register `watermark` (single PDF). Options: **Type** (Text · Image), text (default `CONFIDENTIAL`), font
+   (Helvetica / Times / Courier standard), size, colour, **Opacity** (10–100%), **Angle** (0 · 45 · −45),
+   **Layout** (Centre · Tiled 3×3 · Custom corner), **Pages** (All · ranges). Image: PNG/JPG, scale %. Live preview
+   on page 1.
+2. `run()`: `page.drawText` / `page.drawImage` with `{ opacity, rotate: degrees(angle) }`; centre maths per page
+   size and rotation (share the helper from Task 58). v1 draws **over** the content (pdf-lib can't draw under;
+   opacity makes it read as a watermark) — say so in the UI copy ("semi-transparent stamp").
+3. **Tests:** reopen → text found on every selected page; opacity operator present (pdf-lib `ExtGState`); tiled
+   → 9 occurrences. **Verify (user):** `DRAFT` at 45°, 30% on all GOA pages; image logo bottom-right.
+**Land:** `Watermark tool (Task 59)`.
+
+### Task 60 — Repair PDF  🔲 TODO → branch `tool-repair`   *(Easy · 1–2 days)*
+1. Register `repair` (single PDF). No options; a **What we did** report in the result card.
+2. `run()` in three escalating steps, stopping at the first success: (a) `PDFDocument.load(bytes, {
+   ignoreEncryption: true, updateMetadata: false })` → `save()` (rewrites xref / streams — fixes most "damaged"
+   files); (b) if pdf-lib throws: open with pdf.js (very tolerant), then rebuild page by page — for each page try
+   `copyPages` from a pdf-lib load of the same bytes with `throwOnInvalidObject: false`; (c) if that fails too:
+   render every page with pdf.js and build an image-only PDF (150 dpi JPEG) and report **"Text became images"** in
+   red. If pdf.js can't open it either → "This file is too damaged to repair."
+3. **Tests:** a sample with a truncated xref (make one in-test by chopping the trailer) → step (a) or (b) repairs it
+   and the text is intact; a random-bytes file → the final error. **Verify (user):** a PDF that Acrobat refuses.
+**Land:** `Repair PDF tool (Task 60)`.
+
+### Task 61 — Sign PDF  🔲 TODO → branch `tool-sign`   *(Medium · 3–4 days)*
+**Goal:** a signature the user draws, types, or uploads, placed on one page (or every page) — and the same
+signature panel available inside the editor as **Sign** in the toolbar.
+1. **Signature maker** `src/components/tools/SignatureMaker.tsx` (shared): three tabs.
+   **Draw:** a canvas with pointer events (mouse / touch / pen), smoothed strokes (quadratic curves through
+   midpoints), pen colour (black · blue), thickness (2 / 3 / 4 px), Undo stroke, Clear; export = trimmed transparent
+   PNG at 3× device pixels. **Type:** a name field + three script fonts bundled as `woff2` in `public/fonts/`
+   (open-licence, e.g. Caveat, Dancing Script, Great Vibes — check each licence file into the folder) loaded via
+   `FontFace`, rendered to a canvas → transparent PNG (no font embedding in the PDF needed). **Upload:** PNG/JPG →
+   optional **Remove white background** (pixels within tolerance of white → transparent; pure function
+   `whiteToTransparent(imageData, tolerance)` unit-tested) → PNG.
+   **Remember on this device** toggle: stores the PNG data-URL + a label in `localStorage` (`pedf.signatures`, max
+   5); a picker shows saved ones with delete.
+2. **Placement** on the tool page: a page picker (thumbnails) + a rendered page with a draggable, resizable box
+   (keep aspect ratio; corner handles; min 40 px) — reuse the coordinate helpers in `src/lib/export/coordinates.ts`.
+   Options: **Also add the date** (small text under the signature, format `08 Sep 2026`), **Apply to** (This page ·
+   All pages · ranges — initials on every page).
+3. `run()`: `embedPng` once, `drawImage` at the PDF-space rect on each chosen page (+ `drawText` for the date,
+   Helvetica 9 pt). Output `<name>-signed.pdf`.
+4. **Editor integration:** a **Sign** button in `Toolbar.tsx` opens `SignatureMaker` in a modal; on Done the
+   signature becomes a normal placed image (`ImageEdit` via `addEdits`, default size 160 pt wide, centred on the
+   visible page) so it can be moved / resized / deleted with the existing image tools and exports through the
+   existing image handler. No new edit kind.
+5. **Tests:** `whiteToTransparent`; trimming of the drawn canvas; run → reopen and confirm an image XObject on the
+   chosen page(s) and the date text; editor: the Sign button adds an `ImageEdit`. **Verify (user):** draw a
+   signature on the phone, place it on page 3, date on, download; type "Sidharth" in each font; in the editor,
+   Sign → move it → export.
+**Land:** `Sign PDF tool + Sign in the editor (Task 61)`.
+
+### Task 62 — Compress PDF  🔲 TODO → branch `tool-compress`   *(Medium · 4–6 days)*
+**Goal:** smaller files by shrinking the **images** inside the PDF. Text, fonts and vector graphics are never
+touched, so text stays sharp and selectable. Three presets; the user sees before/after sizes for each.
+1. **Analysis** `src/lib/tools/compress/analyze.ts` (pure over a pdf-lib doc + pdf.js doc): walk every page's
+   `Resources → XObject` (recurse into Form XObjects; visited-set by ref) and collect each **Image** XObject:
+   ref, width, height, `Filter` (DCTDecode / FlateDecode / JPXDecode / CCITTFaxDecode / JBIG2Decode), colour space,
+   bits, `SMask`/`Mask` presence, byte length, and how many times it's drawn. Use pdf.js's operator list per page
+   (`OPS.paintImageXObject` + the current transform, as `src/lib/pdf/images.ts` already does) to get each image's
+   **largest drawn size in points** → effective DPI = pixels / (points / 72). Unit-test with the GOA sample
+   (expect the big beach photo at > 300 dpi).
+2. **Presets** (`presets.ts`): **Light** = max 200 dpi, JPEG quality 0.85 · **Medium** = 150 dpi, 0.75 ·
+   **Strong** = 110 dpi, 0.6. Per image, the plan is: skip if bilevel (CCITT / JBIG2) or < 64 px or used as a
+   mask; else target pixel size = min(current, drawn-size × preset dpi); re-encode as **JPEG** when the image has
+   no transparency, else **PNG** (keep the SMask as-is if the PNG route is bigger than the original — then skip).
+3. **Decode & re-encode** (`recode.ts`): get decoded pixels from pdf.js (`page.objs.get(objId)` after
+   `getOperatorList()` — returns RGBA data / ImageBitmap for every filter pdf.js supports, including JPX), draw into
+   an offscreen canvas at the target size (`imageSmoothingQuality: 'high'`), `toBlob('image/jpeg', q)` or PNG.
+   Keep the new bytes only if ≥ 15% smaller than the original stream, otherwise leave that image untouched.
+4. **Replace in place** (`replace.ts`): build a new `PDFRawStream` with dict `{ Type: XObject, Subtype: Image,
+   Width, Height, ColorSpace: DeviceRGB | DeviceGray, BitsPerComponent: 8, Filter: DCTDecode }` (or FlateDecode +
+   PNG predictor-free raw RGB for the PNG route: decode the PNG to raw RGB(A) and Flate it; keep an SMask stream
+   for alpha) and `pdfDoc.context.assign(ref, newStream)` so every place that referenced the old image now gets the
+   new one. **Dedupe:** hash original streams (SHA-256 via `crypto.subtle`); identical images → one ref.
+5. **Save**: `save({ useObjectStreams: true })`. If the result is not at least 5% smaller than the input, return
+   the **original bytes** with the message "Already compact — nothing to shrink." Report: original size → new size
+   per preset (run the chosen preset only; show the other two as estimates from the analysis: sum of predicted
+   image bytes). Progress per image; abortable.
+6. **Quality guard (test):** render page 2 of the GOA sample before/after Medium with `src/harness/pixelDiff.ts`
+   at 72 dpi → mismatch < 3%; text pages byte-identical text via pdf.js `getTextContent`.
+7. **Tests:** analysis on GOA (counts, dpi); presets math; recode of a generated 2000×2000 noise JPEG shrinks; replace
+   keeps page count / text; dedupe merges two identical images; "already compact" path on `sample-basic.pdf`;
+   abort mid-run leaves no output. **Verify (user):** GOA 2026 (3.4 MB) → Medium → expect well under 1.5 MB with
+   photos still fine on screen; Corporate Governance (text-only) → "Already compact".
+8. **Editor hook (small):** Export menu gets **Export compressed (Medium)** that runs the same pipeline on the
+   exported bytes. Optional; skip if it grows the task.
+**Guardrails:** never rasterize a page; never touch fonts, text, vectors, annotations, forms; skip anything the
+analysis doesn't understand rather than guessing; the original file is untouched on disk (we only download a new
+one). **Land:** `Compress PDF tool (Task 62)`.
