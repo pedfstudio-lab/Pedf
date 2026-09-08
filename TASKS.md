@@ -6474,7 +6474,15 @@ entry replaces A− / A+ (Task 49)`.
 
 ## Website — Landing page
 
-### Task 50 — Landing page: "Read it. Ask it. Edit it."  🔲 TODO → new branch `landing-page`
+### Task 50 — Landing page: "Read it. Ask it. Edit it."  ✅ MERGED to `main` (`0f11ce9`)
+> ✅ **Done & merged to `main`** (`0f11ce9`, branch `landing-page` deleted) together with **REVISION 1** (in-page
+> navigation via `lib/site/navigate.ts` + `useSyncExternalStore` in `Root`; `base: '/'`). Landing at `/`, editor
+> lazy-loaded at `/app`, static Privacy / Terms (draft) / Support pages, six WebP assets, honest copy. Verified
+> live: a dropped PDF opens in the editor under its own name, Back returns to the landing page, `/app/` loads.
+> 508 tests / typecheck / lint / build green. Editor toolbar brand renamed to **PEDF Studio** (shipped).
+> **Still placeholders:** `SUPPORT_EMAIL` (`support@example.com`) and the Terms text marked DRAFT. **Note:** the
+> first full test run after Rev 1 showed two transient failures that did not reproduce in three further runs —
+> watch for flakiness in the jsdom router tests.
 **Why:** the site currently opens straight into the editor. The user approved a landing-page design (mockup v2,
 2026-09-07): hero with headline + drop zone + a PDF/chat illustration, four feature tiles, a privacy band, a trust
 strip, footer. This task builds that page as the front door and moves the editor to `/app`.
