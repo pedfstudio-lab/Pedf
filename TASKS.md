@@ -6876,15 +6876,74 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    wide image. **Verify (user):** 5 phone photos → one PDF, upright, in order.
 **Land:** `JPG to PDF tool (Task 54)`.
 
-### Task 55 — PDF to JPG  🔲 TODO → branch `tool-pdf-to-jpg`   *(Easy · 1–2 days)*
-1. Register `pdf-to-jpg` (single PDF). Options: **Format** (JPG · PNG), **Quality** (Normal 150 dpi · High 300 dpi
-   · Small 72 dpi), **Pages** (All · ranges via `parsePageRanges`).
-2. `run()`: pdf.js render each page at `scale = dpi / 72` to an offscreen canvas (same code path as `renderPage`)
-   → `canvas.toBlob('image/jpeg', 0.9)` / PNG → output `<name>-page-01.jpg`. Yield to the UI between pages
-   (`await new Promise(requestAnimationFrame)`) and honour the abort signal. Cap: warn above 100 pages at 300 dpi.
-3. **Tests:** sample → N images, each with the expected pixel size for the dpi; ranges respected. **Verify
-   (user):** GOA page 2 at High → the beach photo is sharp; all pages → zip.
-**Land:** `PDF to JPG tool (Task 55)`.
+### Task 55 — PDF to JPG  ✅ MERGED to `main` (`3b51c48`)   *(Easy · 1–2 days)*
+> ✅ **Done & merged** (`3b51c48`, branch `tool-pdf-to-jpg` deleted). JPG/PNG, three dpi presets with the page-1
+> pixel readout, ranges via the shared parser, white-filled offscreen canvases, rotation respected, 16 MP device
+> guard, zero-padded names, per-page progress + Cancel, big-job warning. **Fix landed with it (found in review,
+> implemented by Claude):** pdf.js display rendering waits on `requestAnimationFrame`, which hidden tabs never fire,
+> so a conversion froze when the user switched tabs — now `intent: 'print'` + a timer between pages; test pins it.
+> **Rule for later tools that render pages (Compress quality check, Sign preview thumbnails, Organize thumbnails):
+> use `intent: 'print'` for any rendering that must finish in the background.** 662 tests / typecheck / lint /
+> build green; verified live with the tab hidden.
+**Use case:** turn PDF pages into pictures — to post a page on WhatsApp / Instagram, drop a page into a slide or a
+Word document, print a single page from a phone, or send a "photo" of a document to someone who can't open PDFs.
+One image per page, all rendered on the user's computer.
+
+**What the user gets:** open `/tools/pdf-to-jpg`, drop one PDF, choose **Format**, **Quality** and **Pages**, press
+**PDF to JPG** → one image per page; a single image downloads directly, several come as a zip (and each one is
+listed with its own Download). No "Open in editor" for images (the button already shows only for PDF outputs).
+
+**Options component** `src/components/tools/PdfToJpgOptions.tsx` (+ pure value/parse in `src/lib/tools/pdfToJpgOptions.ts`):
+- **Format:** `JPG` (default, smaller, photos) · `PNG` (lossless, sharp text, larger).
+- **Quality:** `Normal — 150 dpi` (default) · `High — 300 dpi` · `Small — 72 dpi`. Show the resulting pixel size of
+  page 1 next to the choice once the file is loaded (e.g. "A4 → 1240 × 1754 px"), so the choice is not abstract.
+- **Pages:** `All pages` (default) · `Only these pages` with a text field that reuses **`parsePageRanges`**
+  (Task 53) — same syntax `1-3, 5, 8-10`, same specific `ToolError` messages.
+
+**`run()` in `src/lib/tools/pdfToJpg.ts`, step by step:**
+1. Exactly one input (`SINGLE_PDF_ERROR` as `ToolError`); `loadPdfJs(file)` from `pdfIo.ts` (friendly password /
+   corrupt errors already mapped). Page list = all, or the parsed ranges **flattened and de-duplicated, in
+   ascending page order** (ranges select pages here, they don't group them).
+2. For each selected page, **one at a time** (never all pages in memory): `page.getViewport({ scale: dpi / 72 })`
+   (pdf.js applies the page's own rotation, so a landscape page comes out landscape), create an offscreen
+   `<canvas>` of `ceil(viewport.width) × ceil(viewport.height)`, **fill it white first** (pdf.js renders onto a
+   transparent canvas — without this, JPGs get black backgrounds and PNGs show transparency where the page is
+   blank), then `page.render({ canvasContext, viewport }).promise`. Same code path as `src/lib/pdf/renderPage.ts`
+   / the harness `renderPdfToImageData`, just DPR-free.
+3. **Device guard:** if `width × height` would exceed **16 million pixels** (iOS Safari's canvas limit; also
+   protects low-RAM phones), scale the viewport down to fit and raise **one** `onWarning`: "Some pages were
+   rendered smaller than requested to fit your device's memory." Never fail for size.
+4. Encode: `canvas.toBlob('image/jpeg', 0.9)` or `canvas.toBlob('image/png')` → bytes. Release the canvas
+   (`width = height = 0`) and call `page.cleanup()` before moving on.
+5. Output name `<name>-page-<NN>.<ext>` with the page number **zero-padded to the page count's width** (`page-03`
+   for a 16-page file, `page-003` for 120 pages) so files sort correctly in any folder; `outputName()` rules for
+   the stem. `mime` `image/jpeg` / `image/png`.
+6. Progress per page (`onProgress(done, total, "Rendering page 5 of 16")`), `signal.throwIfAborted()` before
+   each page and after each render, and yield to the UI between pages (`await new Promise(requestAnimationFrame)`
+   in the browser, `setTimeout(0)` fallback) so the progress bar paints and Cancel works.
+7. **Big-job warning** (never a block): more than **100 pages × 300 dpi** → `onWarning` "This is a big job — it may
+   take a while and use a lot of memory. Consider Normal quality or a page range." raised before rendering starts.
+8. Register `pdf-to-jpg` in `ToolsApp.tsx` (`accepts: 'pdf'`, `multiple: false`, icon `▣`, Options above), title
+   **PDF to JPG**, description "Turn every page, or the pages you choose, into JPG or PNG images."
+
+**⚠ Guardrails:** pages only in v1 — "extract the embedded images" is a separate later option, not this task;
+never rasterize into the source PDF; no network (privacy guard test covers the folder); the page's text is not
+part of the output beyond the picture (that's expected for an image); all user-facing messages are `ToolError`.
+
+**Tests:** `pdfToJpg.test.ts` (jsdom + the pdf.js legacy build like `pdfIo.test.ts`): a generated 2-page PDF at
+72 / 150 / 300 dpi → the output count and each image's pixel size = page points × dpi / 72 (rounded up); a
+landscape (rotated) page comes out wider than tall; `1-1` range → one output named `…-page-1.jpg`, `2` on a 2-page
+file → `…-page-2…`, out-of-range → the parser's message; PNG format → `image/png` bytes with the PNG signature;
+the 16-million-pixel guard scales down and warns once; the big-job warning fires only above the threshold;
+cancel between pages leaves no output. `PdfToJpgOptions.test.tsx`: defaults, each option updates, ranges field
+appears only for "Only these pages". Canvas `toBlob` is stubbed in jsdom as in `jpgToPdf.test.ts`.
+
+**Verify (user):** GOA, High, page `2` → one JPG, the beach photo sharp when zoomed; GOA, Normal, All → a zip of
+16 files named `GOA 2026-page-01.jpg` … `page-16.jpg`; PNG + Small → small files; a range like `20` → the same
+"Page numbers must be between 1 and 16." as Split; Cancel mid-way → "Cancelled. Your original files are
+unchanged."
+
+**Land:** merge `tool-pdf-to-jpg` → `main`. Commit: `PDF to JPG tool (Task 55)`.
 
 ### Task 56 — Resize / move images in the editor  🔲 TODO → branch `image-resize-move`   *(Easy–Medium · 2–3 days)*
 **Why (user request, 2026-09-10):** today an image can be moved / resized only while it is being ADDED (draft,
