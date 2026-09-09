@@ -32,6 +32,8 @@
 .tool-file-actions button, .tool-secondary { border: 1px solid #c9d8ed; border-radius: 10px; background: #fff; padding: 10px 14px; color: #253754; min-height: 44px; font-size: .875rem; font-weight: 650; cursor: pointer; }
 .tools-page button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
 .tool-error { padding: 16px; margin: 20px 0; border: 1px solid #efb4b4; border-radius: 12px; background: #fff2f2; color: #a32020; }
+.tool-warning { padding: 16px; margin: 20px 0; border: 1px solid #e9cf8f; border-radius: 12px; background: #fff9e8; color: #79520c; }
+.tool-warning ul { margin: 0; padding-left: 20px; }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

@@ -1,5 +1,6 @@
 import { siteHref } from '@/lib/site/config';
 import { copyTool } from '@/lib/tools/copy';
+import { mergeTool } from '@/lib/tools/merge';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -9,6 +10,7 @@ import './tools.css';
 
 // The registry and all tool implementations live behind this lazy route boundary.
 if (!getTool('copy')) registerTool(copyTool);
+if (!getTool('merge')) registerTool(mergeTool);
 
 function ToolsIndex() {
   const tools = listTools();

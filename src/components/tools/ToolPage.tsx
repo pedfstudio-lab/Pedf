@@ -17,6 +17,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   const [options, setOptions] = useState<ToolOptions>(() => structuredClone(tool.defaultOptions));
   const [outputs, setOutputs] = useState<ToolOutput[]>([]);
   const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle');
   const [progress, setProgress] = useState({ value: 0, label: 'Preparing…' });
   const nextId = useRef(0);
@@ -24,6 +25,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   const activeRun = useRef<AbortController | null>(null);
   const dragged = useRef<number | null>(null);
   const running = status === 'running';
+  const minimumInputs = tool.minInputs ?? 1;
   const Options = tool.Options;
   useToolMetadata(tool.title, tool.description);
 
@@ -35,6 +37,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     setFiles((current) => tool.multiple ? [...current, ...added] : added);
     setError('');
     setOutputs([]);
+    setWarnings([]);
     setStatus('idle');
   }, [tool]);
 
@@ -60,10 +63,11 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   }
 
   async function run() {
-    if (!files.length || activeRun.current) return;
+    if (files.length < minimumInputs || activeRun.current) return;
     const controller = new AbortController();
     activeRun.current = controller;
     setError('');
+    setWarnings([]);
     setOutputs([]);
     setStatus('running');
     setProgress({ value: 0, label: 'Preparing…' });
@@ -74,6 +78,10 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
           if (activeRun.current !== controller || controller.signal.aborted) return;
           const value = total > 0 ? done / total * 100 : 0;
           setProgress({ value: Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0, label });
+        },
+        onWarning(message) {
+          if (activeRun.current !== controller || controller.signal.aborted) return;
+          setWarnings((current) => current.includes(message) ? current : [...current, message]);
         },
       });
       if (activeRun.current !== controller || controller.signal.aborted) return;
@@ -94,6 +102,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     activeRun.current?.abort();
     activeRun.current = null;
     setStatus('cancelled');
+    setWarnings([]);
   }
 
   function startOver() {
@@ -101,6 +110,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     setOutputs([]);
     setOptions(structuredClone(tool.defaultOptions));
     setError('');
+    setWarnings([]);
     setStatus('idle');
   }
 
@@ -113,6 +123,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     <header className="tool-heading"><h1>{tool.title}</h1><p>{tool.description}</p></header>
     <p className="tool-local-note">Processed in your browser. Your files are not uploaded.</p>
     {error && <div className="tool-error" role="alert">{error}</div>}
+    {warnings.length > 0 && <div className="tool-warning" role="status"><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
     {status !== 'done' && <>
       <ToolDropZone tool={tool} onFiles={addFiles} disabled={running} />
       {files.length > 0 && <section className="tool-section" aria-label="Selected files">
@@ -153,7 +164,8 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
         <progress value={progress.value} max={100} aria-label="Tool progress" />
         <button className="tool-secondary" type="button" onClick={cancel}>Cancel</button>
       </section> : <div className="tool-run">
-        <button className="site-button" type="button" disabled={!files.length} onClick={() => void run()}>{tool.title}</button>
+        <button className="site-button" type="button" disabled={files.length < minimumInputs} onClick={() => void run()}>{tool.title}</button>
+        {minimumInputs > 1 && files.length < minimumInputs && <p className="tool-hint">Choose at least {minimumInputs} files to continue.</p>}
         {status === 'cancelled' && <p role="status">Cancelled. Your original files are unchanged.</p>}
       </div>}
     </>}

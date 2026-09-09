@@ -35,6 +35,33 @@ beforeEach(() => {
 afterEach(() => { cleanup(); takePendingFiles(); });
 
 describe('ToolPage', () => {
+  it('enforces a two-file minimum after picking and removing files', () => {
+    show({ ...dummy, minInputs: 2 });
+    pick(file('one.pdf'));
+    const button = screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    pick(file('two.pdf'));
+    expect(button.disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove one.pdf' }));
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('keeps warnings visible with results, deduplicates them, and clears them on start over', async () => {
+    run.mockImplementationOnce(async (_files, _options, ctx) => {
+      ctx.onWarning?.('Form fields from more than one file may clash');
+      ctx.onWarning?.('Form fields from more than one file may clash');
+      return [result];
+    });
+    show(); pick(file('form.pdf'));
+    fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+    await screen.findByRole('region', { name: 'Results' });
+    expect(screen.getAllByText('Form fields from more than one file may clash')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    expect(screen.queryByText('Form fields from more than one file may clash')).toBeNull();
+  });
+
   it('renders a registered tool and sets/restores page metadata', () => {
     document.title = 'Original title';
     const meta = document.createElement('meta');

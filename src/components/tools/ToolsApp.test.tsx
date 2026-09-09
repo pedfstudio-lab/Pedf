@@ -13,6 +13,7 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Example PDF tool/ }).getAttribute('href')).toBe('/tools/example');
     expect(screen.getByRole('link', { name: /Edit PDF/ }).getAttribute('href')).toBe('/app');
     expect(screen.queryByText('Copy PDF')).toBeNull();
+    expect(screen.getByRole('link', { name: /Merge PDF/ }).getAttribute('href')).toBe('/tools/merge');
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -24,5 +25,12 @@ describe('ToolsApp index and lookup', () => {
     render(<ToolsApp slug="copy" />);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Copy PDF');
     expect(screen.getByRole('button', { name: /Drop PDF files here/ })).toBeTruthy();
+  });
+
+  it('opens Merge PDF with a two-file minimum', () => {
+    render(<ToolsApp slug="merge" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Merge PDF');
+    expect(screen.getByText('Choose at least 2 files to continue.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Merge PDF' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
