@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
+import { ToolError } from './errors';
 import { loadPdfLib, outputName, PDF_ERRORS, savePdf } from './pdfIo';
 import { preserveMergeForms } from './mergeForms';
 import type { ToolContext, ToolDefinition, ToolOptions, ToolOutput } from './types';
@@ -9,7 +10,7 @@ export const MERGE_MIN_FILES_ERROR = 'Choose at least 2 PDF files to merge.';
 export async function run(inputs: File[], _options: ToolOptions, ctx: ToolContext): Promise<ToolOutput[]> {
   const { signal, onProgress, onWarning } = ctx;
   signal.throwIfAborted();
-  if (inputs.length < 2) throw new Error(MERGE_MIN_FILES_ERROR);
+  if (inputs.length < 2) throw new ToolError(MERGE_MIN_FILES_ERROR);
   const output = await PDFDocument.create();
   let warned = false;
   for (const [index, file] of inputs.entries()) {
@@ -27,7 +28,7 @@ export async function run(inputs: File[], _options: ToolOptions, ctx: ToolContex
     } catch (error) {
       signal.throwIfAborted();
       // Malformed objects can fail during page copying as well as initial parsing.
-      if (error instanceof Error) throw new Error(PDF_ERRORS.corrupt);
+      if (error instanceof Error) throw new ToolError(PDF_ERRORS.corrupt);
       throw error;
     }
     onProgress(index + 1, inputs.length, index === inputs.length - 1 ? 'Preparing merged PDF…' : `Added ${file.name}`);

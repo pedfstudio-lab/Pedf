@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EncryptedPDFError, PDFDocument } from 'pdf-lib';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { ToolError } from './errors';
 import { formatBytes, friendlyError, loadPdfJs, loadPdfLib, outputName, PDF_ERRORS, savePdf } from './pdfIo';
 
 // Keep pdf.js's real parser but use the Node-compatible worker in these tests.
@@ -61,6 +62,11 @@ describe('PDF I/O', () => {
   it('never exposes arbitrary internal error details', () => {
     expect(friendlyError(new Error('private stack details'))).toBe('Something went wrong. Please try again.');
     expect(friendlyError(Object.assign(new Error('password'), { name: 'PasswordException' }))).toBe(PDF_ERRORS.encrypted);
+  });
+
+  it('shows user-facing ToolError messages word for word', () => {
+    expect(friendlyError(new ToolError('Page numbers must be between 1 and 16.'))).toBe('Page numbers must be between 1 and 16.');
+    expect(new ToolError('x').name).toBe('ToolError');
   });
 
   it('names outputs predictably and strips paths', () => {

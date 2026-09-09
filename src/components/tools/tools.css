@@ -34,6 +34,21 @@
 .tool-error { padding: 16px; margin: 20px 0; border: 1px solid #efb4b4; border-radius: 12px; background: #fff2f2; color: #a32020; }
 .tool-warning { padding: 16px; margin: 20px 0; border: 1px solid #e9cf8f; border-radius: 12px; background: #fff9e8; color: #79520c; }
 .tool-warning ul { margin: 0; padding-left: 20px; }
+.tool-options { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
+.tool-options legend { margin-bottom: 14px; font-size: 1.25rem; font-weight: 750; }
+.tool-option-choice { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--site-line); border-radius: 14px; cursor: pointer; }
+.tool-option-choice:has(input:checked) { border-color: var(--site-blue); background: #f6f9ff; box-shadow: 0 0 0 1px var(--site-blue); }
+.tool-option-choice input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--site-blue); }
+.tool-option-choice span { display: grid; gap: 4px; }
+.tool-option-choice small { color: var(--site-body); font-size: .875rem; line-height: 1.5; }
+.tool-option-details { display: grid; gap: 9px; padding: 4px 16px 12px 46px; }
+.tool-option-details > label:not(.tool-checkbox) { font-size: .875rem; font-weight: 700; }
+.tool-option-details input[type="text"], .tool-option-details input[type="number"] { min-height: 46px; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; padding: 10px 12px; }
+.tool-option-details input:focus { border-color: var(--site-blue); outline: 3px solid rgba(30, 107, 255, .16); }
+.tool-option-details .tool-hint { margin: 0; }
+.tool-checkbox { display: flex; align-items: center; gap: 10px; margin-top: 3px; cursor: pointer; }
+.tool-checkbox input { width: 18px; height: 18px; accent-color: var(--site-blue); }
+.tool-option-number input { width: min(180px, 100%); }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -49,6 +64,7 @@
   .tool-file-actions { flex-basis: 100%; justify-content: flex-end; }
   .tool-results { padding: 16px; }
   .tool-results li { align-items: stretch; flex-direction: column; padding: 14px; }
+  .tool-option-details { padding-left: 16px; }
   .tool-result-actions { flex-direction: column; align-items: stretch; }
   .tool-result-actions button, .tool-run > button { width: 100%; }
 }

@@ -1,5 +1,6 @@
 import { EncryptedPDFError, PDFDocument } from 'pdf-lib';
 import { isPdf } from '@/lib/site/pdfFile';
+import { isUserFacingError, ToolError } from './errors';
 
 export const PDF_ERRORS = {
   encrypted: 'This PDF has a password. Unlock it first.',
@@ -14,6 +15,7 @@ function isEncryptedError(error: unknown): boolean {
 }
 
 export function friendlyError(error: unknown): string {
+  if (isUserFacingError(error)) return error.message;
   if (error instanceof Error) {
     if (Object.values(PDF_ERRORS).some((message) => message === error.message)) return error.message;
     if (isEncryptedError(error)) return PDF_ERRORS.encrypted;
@@ -22,23 +24,23 @@ export function friendlyError(error: unknown): string {
 }
 
 export async function loadPdfLib(file: File): Promise<PDFDocument> {
-  if (!isPdf(file)) throw new Error(PDF_ERRORS.type);
+  if (!isPdf(file)) throw new ToolError(PDF_ERRORS.type);
   try {
     return await PDFDocument.load(await file.arrayBuffer());
   } catch (error) {
-    if (isEncryptedError(error)) throw new Error(PDF_ERRORS.encrypted);
-    throw new Error(PDF_ERRORS.corrupt);
+    if (isEncryptedError(error)) throw new ToolError(PDF_ERRORS.encrypted);
+    throw new ToolError(PDF_ERRORS.corrupt);
   }
 }
 
 export async function loadPdfJs(file: File) {
-  if (!isPdf(file)) throw new Error(PDF_ERRORS.type);
+  if (!isPdf(file)) throw new ToolError(PDF_ERRORS.type);
   try {
     const { loadDocument } = await import('@/lib/pdf/loadDocument');
     return await loadDocument(file);
   } catch (error) {
-    if (error instanceof Error && error.name === 'PasswordException') throw new Error(PDF_ERRORS.encrypted);
-    throw new Error(PDF_ERRORS.corrupt);
+    if (error instanceof Error && error.name === 'PasswordException') throw new ToolError(PDF_ERRORS.encrypted);
+    throw new ToolError(PDF_ERRORS.corrupt);
   }
 }
 

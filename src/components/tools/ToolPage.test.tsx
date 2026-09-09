@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigate } from '@/lib/site/navigate';
 import { setPendingFiles, takePendingFiles } from '@/lib/site/pendingFiles';
 import { downloadBytes, zipOutputs } from '@/lib/tools/download';
+import { ToolError } from '@/lib/tools/errors';
 import { getTool, registerTool } from '@/lib/tools/registry';
 import type { ToolContext, ToolDefinition, ToolOutput } from '@/lib/tools/types';
 import { ToolPage } from './ToolPage';
@@ -181,6 +182,17 @@ describe('ToolPage', () => {
     fireEvent.click(screen.getByRole('button', { name: dummy.title }));
     expect((await screen.findByRole('alert')).textContent).toBe('This PDF has a password. Unlock it first.');
     await waitFor(() => expect((screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it('shows a tool\'s own user-facing message word for word, but hides internal errors', async () => {
+    run.mockRejectedValueOnce(new ToolError('Page numbers must be between 1 and 16.'));
+    show(); pick(file('goa.pdf'));
+    fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Page numbers must be between 1 and 16.');
+
+    run.mockRejectedValueOnce(new Error('TypeError: cannot read property of undefined'));
+    fireEvent.click(await screen.findByRole('button', { name: dummy.title }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Something went wrong. Please try again.'));
   });
 
   it('aborts processing on unmount', () => {
