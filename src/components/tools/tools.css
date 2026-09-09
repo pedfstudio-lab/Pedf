@@ -49,6 +49,11 @@
 .tool-checkbox { display: flex; align-items: center; gap: 10px; margin-top: 3px; cursor: pointer; }
 .tool-checkbox input { width: 18px; height: 18px; accent-color: var(--site-blue); }
 .tool-option-number input { width: min(180px, 100%); }
+.tool-select-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.tool-select-field { display: grid; align-content: start; gap: 8px; font-size: .875rem; font-weight: 700; }
+.tool-select-field select { width: 100%; min-height: 46px; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; padding: 10px 36px 10px 12px; }
+.tool-select-field select:focus { border-color: var(--site-blue); outline: 3px solid rgba(30, 107, 255, .16); }
+.tool-select-field small { color: var(--site-body); font-size: .8rem; font-weight: 400; line-height: 1.45; }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -65,6 +70,7 @@
   .tool-results { padding: 16px; }
   .tool-results li { align-items: stretch; flex-direction: column; padding: 14px; }
   .tool-option-details { padding-left: 16px; }
+  .tool-select-grid { grid-template-columns: 1fr; }
   .tool-result-actions { flex-direction: column; align-items: stretch; }
   .tool-result-actions button, .tool-run > button { width: 100%; }
 }

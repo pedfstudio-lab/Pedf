@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptAttribute, validateFiles } from './files';
+import { acceptAttribute, HEIC_GUIDANCE, validateFiles } from './files';
 
 describe('tool input validation', () => {
   const pdf = new File(['pdf'], 'file.PDF');
@@ -10,8 +10,14 @@ describe('tool input validation', () => {
     expect(validateFiles([pdf], { accepts: 'image', multiple: true })).toBe('Choose JPG, PNG, or WebP images.');
     expect(validateFiles([pdf, image], { accepts: 'pdf-or-image', multiple: true })).toBeUndefined();
     expect(acceptAttribute('image')).not.toContain('application/pdf');
+    expect(acceptAttribute('image')).toContain('.heic');
   });
   it('rejects multiple files for a single-file tool rather than silently discarding them', () => {
     expect(validateFiles([pdf, pdf], { accepts: 'pdf', multiple: false })).toBe('Choose one file at a time.');
+  });
+
+  it('gives HEIC users conversion guidance', () => {
+    const heic = new File(['heic'], 'phone-photo.HEIC', { type: 'image/heic' });
+    expect(validateFiles([heic], { accepts: 'image', multiple: true })).toBe(HEIC_GUIDANCE);
   });
 });

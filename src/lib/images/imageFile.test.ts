@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coverImageRect, fitImageRect, imageMimeType, isJpg, isPng } from './imageFile';
+import { coverImageRect, fitImageRect, imageMimeType, isHeic, isJpg, isPng, isWebp } from './imageFile';
 
 describe('image file helpers', () => {
   it('sniffs PNG and JPEG magic without trusting file extensions', () => {
@@ -13,6 +13,20 @@ describe('image file helpers', () => {
     expect(isJpg(jpg)).toBe(true);
     expect(imageMimeType(jpg)).toBe('image/jpeg');
     expect(imageMimeType(gif)).toBeUndefined();
+  });
+
+  it('sniffs WebP and HEIC container signatures', () => {
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+    const heic = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]);
+    expect(isWebp(webp)).toBe(true);
+    expect(imageMimeType(webp)).toBe('image/webp');
+    expect(isHeic(heic)).toBe(true);
+    expect(imageMimeType(heic)).toBeUndefined();
+    const compatibleHeic = new Uint8Array([
+      0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x69, 0x66, 0x31,
+      0, 0, 0, 0, 0x68, 0x65, 0x69, 0x63, 0x6d, 0x69, 0x66, 0x31,
+    ]);
+    expect(isHeic(compatibleHeic)).toBe(true);
   });
 
   it('centers a landscape image inside a portrait target without stretching', () => {
