@@ -6483,6 +6483,10 @@ entry replaces A− / A+ (Task 49)`.
 > **Still placeholders:** `SUPPORT_EMAIL` (`support@example.com`) and the Terms text marked DRAFT. **Note:** the
 > first full test run after Rev 1 showed two transient failures that did not reproduce in three further runs —
 > watch for flakiness in the jsdom router tests.
+> **REVISION 2 + REVISION 3 merged** (`6e0d943`, branch `landing-samples` deleted): the sample auto-load is gone,
+> the editor opens **empty** with the shared `PdfDropZone` box ("Open a PDF to begin."), no sample picker in dev or
+> prod, `public/samples/Ziro Festival Firgun.pdf` is gitignored. Verified live. 518 tests / typecheck / lint / build
+> green.
 
 > **⚠⚠ REVISION 2 — "Try it free" opens a sample PDF instead of an empty editor. Not a Rev 1 bug: it's the old
 > dev-convenience auto-load in `App.tsx`, which runs on the live site too. Remove it. Branch `landing-samples`
