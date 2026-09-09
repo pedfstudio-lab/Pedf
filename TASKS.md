@@ -6817,7 +6817,13 @@ file already loaded → pick Edit or any tool → that page opens with the file 
 files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** `start-flow` → `main`. Commit:
 `Upload first, then choose: landing drop zone → chooser → tool with the file loaded (Task 51A)`.
 
-### Task 52 — Merge PDF  🔲 TODO → branch `tool-merge`   *(Easy · 1–2 days)*
+### Task 52 — Merge PDF  ✅ MERGED to `main` (`af502d9`)   *(Easy · 1–2 days)*
+> ✅ **Done & merged** (`af502d9`, branch `tool-merge` deleted). Merge in list order, geometry preserved, naming as
+> specified, friendly errors, cancel. **Beyond spec:** pdf-lib's `copyPages` does NOT carry AcroForm fields, so
+> `mergeForms.ts` re-registers them (values kept, clashing names suffixed `_2`, widget `/P` fixed, DR fonts carried
+> per file) — three dedicated tests. Framework gained `minInputs` and `onWarning`. 581 tests / typecheck / lint /
+> build green; verified live. **User note:** moving individual pages (e.g. page 1 of file A to the end) is the
+> **Organize** tool (Task 57), not Merge — consider pulling 57 forward.
 1. Register `merge` (`accepts: 'pdf'`, `multiple: true`, min 2 files; the ToolPage reorder list IS the merge order).
 2. `run()`: `const out = await PDFDocument.create()`; for each input `loadPdfLib` → `out.copyPages(src,
    src.getPageIndices())` → `addPage` each. Progress per file. Output `<first-name>-merged.pdf` (or `merged.pdf` if
