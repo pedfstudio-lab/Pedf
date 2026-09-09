@@ -6837,7 +6837,14 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    no output. **Verify (user):** merge two of your PDFs, reorder, download, open in the editor — pages in order.
 **Land:** `Merge PDF tool (Task 52)`.
 
-### Task 53 — Split PDF  🔲 TODO → branch `tool-split`   *(Easy · 1–2 days)*
+### Task 53 — Split PDF  ✅ MERGED to `main` (`a6e83f7`)   *(Easy · 1–2 days)*
+> ✅ **Done & merged** (`a6e83f7`, branch `tool-split` deleted). Three modes (custom ranges + "merge selected
+> ranges", every page, every N), pure `parsePageRanges` with specific errors, `page-N` / `pages-A-B` naming.
+> **Framework fix landed with it (found in review):** the Task 51 `friendlyError()` guard swallowed every
+> tool-specific message into "Something went wrong" — added `ToolError` (`lib/tools/errors.ts`); user-facing
+> messages are tagged and pass through word for word, internal errors stay generic. Applied to pdfIo, pageRanges,
+> split, merge. Rule for every future tool: **throw `ToolError` for any message meant for the user.** 623 tests /
+> typecheck / lint / build green; verified live (1-8 + 9-16, every page → 16 files + zip, range messages on screen).
 1. Register `split` (single PDF). Options component with three modes: **Custom ranges** (text field, e.g.
    `1-3, 5, 8-10` → one PDF per range), **Every page** (one PDF per page), **Every N pages** (N field), and a
    checkbox **Merge selected ranges into one PDF** (custom mode only).
