@@ -1,11 +1,9 @@
-let pendingFile: File | undefined;
+import { setPendingFiles, takePendingFiles } from './pendingFiles';
 
 export function setPendingFile(file: File): void {
-  pendingFile = file;
+  setPendingFiles([file]);
 }
 
 export function takePendingFile(): File | undefined {
-  const file = pendingFile;
-  pendingFile = undefined;
-  return file;
+  return takePendingFiles()[0];
 }

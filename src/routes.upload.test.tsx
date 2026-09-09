@@ -46,7 +46,8 @@ describe('landing PDF handoff to the editor', () => {
     window.history.replaceState({}, '', '/app');
     render(<StrictMode><Root /></StrictMode>);
 
-    expect(await screen.findByText('Open a PDF to begin.')).toBeTruthy();
+    // The first lazy editor import also compiles during this integration test.
+    expect(await screen.findByText('Open a PDF to begin.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByRole('button', { name: /drag & drop your PDF here/i })).toBeTruthy();
     expect(screen.getByText('or click to upload')).toBeTruthy();
     expect(screen.queryByRole('combobox', { name: 'Load sample' })).toBeNull();

@@ -6,10 +6,10 @@ import { PdfDropZone } from './PdfDropZone';
 import './landing.css';
 
 const features = [
-  { title: 'Upload PDF', image: 'cube-upload.webp', alt: '3D upload arrow' },
-  { title: 'Edit Text', image: 'cube-text.webp', alt: '3D text symbol' },
-  { title: 'Add / Edit Image', image: 'cube-image.webp', alt: '3D image symbol' },
-  { title: 'Ask the Bot', image: 'cube-bot.webp', alt: '3D chat symbol' },
+  { title: 'Upload PDF', image: 'cube-upload.webp', alt: '3D upload arrow', href: '/tools' },
+  { title: 'Edit Text', image: 'cube-text.webp', alt: '3D text symbol', href: '/app' },
+  { title: 'Add / Edit Image', image: 'cube-image.webp', alt: '3D image symbol', href: '/app' },
+  { title: 'Ask the Bot', image: 'cube-bot.webp', alt: '3D chat symbol', href: '/app' },
 ] as const;
 
 const faqs = [
@@ -55,10 +55,10 @@ export function Landing() {
           <h2 id="features-title">A simpler way to work with PDFs.</h2>
           <div className="features__grid">
             {features.map((feature) => (
-              <article className="feature" key={feature.title}>
+              <a className="feature" key={feature.title} href={siteHref(feature.href)}>
                 <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt={feature.alt} />
                 <h3>{feature.title}</h3>
-              </article>
+              </a>
             ))}
           </div>
         </section>

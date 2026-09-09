@@ -89,6 +89,7 @@
 }
 
 .site-nav__links a,
+.site-nav__tools,
 .site-footer nav a {
   color: #3d485b;
   font-size: 0.94rem;
@@ -96,6 +97,9 @@
   text-decoration: none;
   transition: color 160ms ease;
 }
+
+.site-nav__tools { margin-left: auto; }
+.feature { color: inherit; text-decoration: none; }
 
 .site-nav__links a:hover,
 .site-footer nav a:hover {

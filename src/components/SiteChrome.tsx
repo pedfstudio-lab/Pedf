@@ -21,8 +21,10 @@ export function SiteHeader({ compact = false }: { readonly compact?: boolean }) 
     <header className="site-header">
       <nav className="site-shell site-nav" aria-label="Main navigation">
         <Brand />
+        {compact && <a className="site-nav__tools" href={siteHref('/tools')}>Tools</a>}
         {!compact && (
           <div className="site-nav__links">
+            <a href={siteHref('/tools')}>Tools</a>
             <a href={siteHref('#features')}>Features</a>
             <a href={siteHref('#how')}>How it Works</a>
             <a href={siteHref('#privacy')}>Privacy</a>

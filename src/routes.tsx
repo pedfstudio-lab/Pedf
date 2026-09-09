@@ -5,12 +5,19 @@ import { resolveRoute } from './lib/site/routes';
 import { getPath, subscribe } from './lib/site/navigate';
 
 const App = lazy(() => import('./App'));
+const ToolsApp = lazy(() => import('./components/tools/ToolsApp'));
 const VerifyPage = import.meta.env.DEV ? lazy(() => import('./harness/VerifyPage')) : null;
 
 export function Root() {
   const path = useSyncExternalStore(subscribe, getPath);
   const url = new URL(path, window.location.origin);
   const route = resolveRoute(url.pathname, url.hash);
+
+  if (typeof route === 'object') {
+    return <Suspense fallback={<div className="p-6 text-neutral-500">Opening tools…</div>}>
+      <ToolsApp slug={route.kind === 'tool' ? route.slug : undefined} />
+    </Suspense>;
+  }
 
   if (import.meta.env.DEV && VerifyPage && route === 'verify') {
     return (
