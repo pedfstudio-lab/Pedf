@@ -6701,16 +6701,18 @@ product's difference from iLovePDF / Smallpdf / Sejda-online, and it must stay t
 **No `fetch` of user data anywhere in `src/lib/tools/` or `src/components/tools/`** — CI-style guard: a unit test
 greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and fails if found.
 
-**Order (one branch + one task each, land each before starting the next):**
-51 Tools framework → **51A Upload first, then choose** → 52 Merge → 53 Split → 54 JPG to PDF → 55 PDF to JPG →
-56 Rotate → 57 Organize → 58 Page numbers → 59 Watermark → 60 Repair → 61 Sign → 62 Compress. Each branches from
-`main` **after Task 50 (+ its Rev 1, in-page navigation) has landed** — the flow below depends on a dropped file
-surviving the move from the landing page to a tool.
+**Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
+51 Tools framework ✅ → 52 Merge → 53 Split → 54 JPG to PDF → 55 PDF to JPG → 56 Rotate → 57 Organize →
+58 Page numbers → 59 Watermark → 60 Repair → 61 Sign → 62 Compress → **then the front door (Task 51A) last**.
+Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
+is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
+tool adds its card to `/tools` automatically.
 
-**The user flow (decided 2026-09-08):** the landing page's drop zone is the front door for EVERYTHING. The user
-drops a PDF (or images) first, and only then chooses what to do with it — Edit, Compress, Sign, Merge, Split,
-Organize, Rotate, Page numbers, Watermark, PDF to JPG, Repair (JPG to PDF when they dropped images). The chosen
-tool opens with the file already loaded. People who know the tool they want can still go straight to `/tools`.
+**The front door (decided later, with all tools in hand):** two candidate flows, both cheap to add on top of the
+finished tools because they are only links: (a) **tool first** — a row of tool cards under the landing hero; click
+a card → that tool asks for the file → the tool runs (this is what `/tools/<slug>` already does); (b) **file
+first** — drop a PDF in the landing hero box → a chooser of tools with the file already loaded (Task 51A as
+written). Likely both. Decide after Task 62.
 
 **Shared conventions (apply to every task 52–62):**
 - A tool = one `ToolDefinition` registered in `src/lib/tools/registry.ts` + one pure `run()` in
@@ -6726,7 +6728,13 @@ tool opens with the file already loaded. People who know the tool they want can 
 - Tests: a pure unit test per `run()` on the bundled samples (`public/samples/*.pdf`) that reopens the output with
   pdf.js and checks page count / text / sizes; plus the tool's option-parsing tests. Typecheck / lint / tests green.
 
-### Task 51 — Tools framework: routes, shared tool page, downloads, registry  🔲 TODO → branch `tools-framework`
+### Task 51 — Tools framework: routes, shared tool page, downloads, registry  ✅ MERGED to `main` (`a0d5595`)
+> ✅ **Done & merged to `main`** (`a0d5595`, branch `tools-framework` deleted). Routes `/tools` + `/tools/<slug>`
+> (lazy `ToolsApp` chunk ~22 kB), registry, shared `ToolPage` (drop box, file list with thumbnails + reorder,
+> options, progress + Cancel, results with Download / zip / Open in editor / Start over, friendly errors),
+> `lib/tools` helpers, privacy-guard test, `pendingFiles` list, hidden `/tools/copy` smoke tool, `fflate` added.
+> Verified live end to end. 566 tests / typecheck / lint / build green. Visible change: a **Tools** nav link and a
+> Tools page with the Edit card only — the front door is deliberately untouched (see the order note above).
 **Goal:** the plumbing every tool reuses, plus the `/tools` index page, so Tasks 52–62 are each small.
 
 **Steps:**
