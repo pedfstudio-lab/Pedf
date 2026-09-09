@@ -21,7 +21,7 @@ describe('landing PDF handoff to the editor', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     takePendingFile();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.stubGlobal('fetch', fetchSample);
     loadDocument.mockResolvedValue({
       doc: { destroy: vi.fn() },
@@ -40,6 +40,76 @@ describe('landing PDF handoff to the editor', () => {
     cleanup();
     takePendingFile();
     vi.unstubAllGlobals();
+  });
+
+  it('opens an empty editor without fetching anything when no file is pending', async () => {
+    window.history.replaceState({}, '', '/app');
+    render(<StrictMode><Root /></StrictMode>);
+
+    expect(await screen.findByText('Open a PDF to begin.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /drag & drop your PDF here/i })).toBeTruthy();
+    expect(screen.getByText('or click to upload')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Load sample' })).toBeNull();
+    expect(fetchSample).not.toHaveBeenCalled();
+    expect(loadDocument).not.toHaveBeenCalled();
+  });
+
+  it('opens a PDF dropped directly on the empty editor', async () => {
+    window.history.replaceState({}, '', '/app');
+    render(<StrictMode><Root /></StrictMode>);
+    const dropArea = await screen.findByRole('region', { name: 'PDF drop area' });
+    const file = new File(['%PDF-1.7'], 'editor-drop.pdf', { type: 'application/pdf' });
+
+    fireEvent.drop(dropArea, { dataTransfer: { files: [file] } });
+
+    expect(await screen.findByText(file.name)).toBeTruthy();
+    expect(loadDocument).toHaveBeenCalledTimes(1);
+    expect(loadDocument).toHaveBeenCalledWith(file);
+    expect(fetchSample).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-PDF drop and keeps the empty drop area available', async () => {
+    window.history.replaceState({}, '', '/app');
+    render(<StrictMode><Root /></StrictMode>);
+    const dropArea = await screen.findByRole('region', { name: 'PDF drop area' });
+
+    fireEvent.drop(dropArea, {
+      dataTransfer: { files: [new File(['image'], 'photo.png', { type: 'image/png' })] },
+    });
+
+    expect(await screen.findByText('Choose a PDF file.')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'PDF drop area' })).toBeTruthy();
+    expect(loadDocument).not.toHaveBeenCalled();
+    expect(fetchSample).not.toHaveBeenCalled();
+  });
+
+  it('opens the exact PDF chosen in the empty editor upload box without fetching a sample', async () => {
+    window.history.replaceState({}, '', '/app');
+    render(<StrictMode><Root /></StrictMode>);
+    const input = await screen.findByLabelText('Drag & drop your PDF here');
+    const file = new File(['%PDF-1.7'], 'editor-pick.pdf', { type: 'application/pdf' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(await screen.findByText(file.name)).toBeTruthy();
+    expect(loadDocument).toHaveBeenCalledTimes(1);
+    expect(loadDocument).toHaveBeenCalledWith(file);
+    expect(fetchSample).not.toHaveBeenCalled();
+  });
+
+  it('opens a PDF dropped on the editor box only once when the drop bubbles to the outer area', async () => {
+    window.history.replaceState({}, '', '/app');
+    render(<StrictMode><Root /></StrictMode>);
+    const box = await screen.findByRole('button', { name: /drag & drop your PDF here/i });
+    const file = new File(['%PDF-1.7'], 'box-drop.pdf', { type: 'application/pdf' });
+
+    fireEvent.dragEnter(box);
+    fireEvent.drop(box, { dataTransfer: { files: [file] } });
+
+    expect(await screen.findByText(file.name)).toBeTruthy();
+    expect(loadDocument).toHaveBeenCalledTimes(1);
+    expect(loadDocument).toHaveBeenCalledWith(file);
+    expect(fetchSample).not.toHaveBeenCalled();
   });
 
   it.each(['pick', 'drop'] as const)('opens the exact PDF from %s, not the bundled sample', async (method) => {

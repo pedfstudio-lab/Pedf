@@ -6483,6 +6483,83 @@ entry replaces A− / A+ (Task 49)`.
 > **Still placeholders:** `SUPPORT_EMAIL` (`support@example.com`) and the Terms text marked DRAFT. **Note:** the
 > first full test run after Rev 1 showed two transient failures that did not reproduce in three further runs —
 > watch for flakiness in the jsdom router tests.
+
+> **⚠⚠ REVISION 2 — "Try it free" opens a sample PDF instead of an empty editor. Not a Rev 1 bug: it's the old
+> dev-convenience auto-load in `App.tsx`, which runs on the live site too. Remove it. Branch `landing-samples`
+> from `main`.**
+>
+> **What happens today:** `src/App.tsx` `:25–26` defines `DEFAULT_SAMPLE_FILE` / `DEFAULT_SAMPLE`, and the effect
+> at `:197–214` ("Try the bundled sample on first load") fetches that file from `public/samples/` whenever the
+> editor mounts without a pending file. There is **no `import.meta.env.DEV` gate**, so every visitor who clicks
+> **Try it free** or opens `/app` gets a sample opened for them (GOA on the live site; whatever the local line
+> says on a dev machine). With a landing page that is wrong: an empty editor must open **empty**.
+>
+> **The fix:**
+> 1. **Delete the auto-load.** Remove `DEFAULT_SAMPLE_FILE`, `DEFAULT_SAMPLE`, the `openedPendingFile` ref and the
+>    whole "Try the bundled sample" effect. Keep the `takePendingFile()` effect exactly as it is (Rev 1). Update
+>    the empty-state text at `:360–366` — it currently says "Open a PDF to begin — or drop one at
+>    `public/samples/<file>`" — to plain **"Open a PDF to begin, or drop one here."** (and make the empty state a
+>    drop target if it isn't already: dropping a PDF there calls `open()` the same as the Open PDF button).
+> 2. **Dev-only sample picker (so testing stays quick).** In the empty state, only when `import.meta.env.DEV`,
+>    show a small **Load sample ▾** control listing the PDFs bundled in `public/samples/` — hard-code the list in
+>    `src/lib/site/devSamples.ts` (`sample-basic.pdf`, `sample pdf.pdf`, `GOA 2026.pdf`, `Corporate-Governance.pdf`,
+>    `RAHUL RAJPUT RESUME.pdf`; do NOT list `Ziro Festival Firgun.pdf` — it is untracked and stays out of the repo,
+>    though a dev can still drop it manually). Picking one fetches `${BASE_URL}samples/<name>` and calls `open()`.
+>    Tree-shaken out of the production build (`import.meta.env.DEV` is a constant there) — verify with
+>    `npm run build` + grep `dist/assets/App-*.js` for `Load sample` → no match.
+> 3. **Nothing else changes** in the editor, the landing page, or the routes.
+>
+> **Tests:** `routes.upload.test.tsx` already asserts `fetch` is NOT called when a pending file exists — add the
+> mirror case: mount `/app` with **no** pending file → `fetch` is **not** called and the empty state renders
+> "Open a PDF to begin". `devSamples.test.ts`: the list has no Ziro entry and every name is URL-encoded correctly.
+>
+> **Verify (user):** on your machine **Try it free** → empty editor with "Open a PDF to begin" (no Ziro); the
+> **Load sample** control appears (dev only) and opens GOA; drop a PDF on the landing page → still opens that PDF
+> (Rev 1 intact); `npm run build && npm run preview` → `/app` → empty editor, no Load sample control.
+>
+> **Housekeeping this closes:** the long-standing uncommitted `DEFAULT_SAMPLE_FILE = 'Ziro…'` line in `App.tsx`
+> disappears with the deletion, so `App.tsx` can be committed whole. `public/samples/Ziro Festival Firgun.pdf`
+> remains untracked (add it to `.gitignore` in this revision).
+>
+> **Land it:** merge `landing-samples` → `main`. Commit: `Editor opens empty; dev-only sample picker replaces the
+> auto-loaded sample (Task 50 Rev 2)`.
+
+> **⚠⚠ REVISION 3 — Rev 2 is implemented correctly (auto-load gone, build has no picker). User decision: NO sample
+> picker at all, not even in dev, and the empty editor must be a real "Drag & drop your PDF here / or click to
+> upload" box — the same one as the landing page. Same branch `landing-samples`.**
+>
+> **What the user wants:** click **Try it free** → the editor opens **empty** showing one big drop box in the middle,
+> identical in look and wording to the landing page's; **click it** → the file dialog opens; **choose or drop a
+> PDF** → the editor shows that PDF right there. Nothing else on the empty screen.
+>
+> **The fix:**
+> 1. **Delete the dev picker:** remove `src/components/DevSamplePicker.tsx`, `src/lib/site/devSamples.ts`,
+>    `src/lib/site/devSamples.test.ts`, the lazy `DevSamplePicker` in `App.tsx` and the `lazy` / `Suspense` imports
+>    that only it used. Developers open samples by dropping them from `public/samples/` like anyone else.
+> 2. **One shared drop zone.** Extract the landing page's drop zone into `src/components/PdfDropZone.tsx`
+>    (props: `onFile(file: File)`, `onError?(message)`, `label?`, `sublabel?`; default text **"Drag & drop your PDF
+>    here" / "or click to upload"**; the same `.drop-zone` markup, icon and CSS from `landing.css`, the hidden
+>    `<input type="file" accept="application/pdf">`, the same `isPdf()` check, the same dragging highlight).
+>    `Landing.tsx` uses it (behaviour unchanged: `setPendingFile` + `navigate('/app')`).
+> 3. **Editor empty state = that drop zone.** In `App.tsx` the empty branch renders `<PdfDropZone onFile={(file)
+>    => open(file, file.name)} onError={setError} />` centred on a plain background, with one short line above it:
+>    **"Open a PDF to begin."** Drop anywhere on the empty area still works (keep Rev 2's `onDrop` on the region) —
+>    but the visible, clickable target is the box. Remove the `role="region"` wrapper text "or drop one here".
+>    The toolbar's **Open PDF** button stays.
+> 4. **Nothing else changes.** Rev 1's pending-file handoff, the landing page, routes, and the toolbar are untouched.
+>
+> **Tests:** `PdfDropZone.test.tsx` — click opens the hidden input (input receives a click), choosing a PDF calls
+> `onFile`, a `.txt` calls `onError("Choose a PDF file.")` and not `onFile`, drop works. `routes.upload.test.tsx`
+> — keep the "empty `/app` fetches nothing" case, update it to assert the drop zone is rendered ("Drag & drop your
+> PDF here") and that picking a file in it calls `loadDocument` with that file. Remove the devSamples test.
+> Build check: `grep 'Load sample' dist/assets/*.js` → no match (it's gone from source now).
+>
+> **Verify (user):** **Try it free** → empty editor with the drop box, no sample list → click the box → pick a PDF
+> → it opens in place; drag a PDF onto the box → opens; landing page drop → still opens the editor with that file.
+>
+> **Housekeeping:** with Rev 2 the old `DEFAULT_SAMPLE_FILE` line is gone, so `App.tsx` is committed whole this
+> time. **Land it:** merge `landing-samples` → `main`. Commit: `Editor opens empty with the drop box; no sample
+> picker (Task 50 Rev 2 + Rev 3)`.
 **Why:** the site currently opens straight into the editor. The user approved a landing-page design (mockup v2,
 2026-09-07): hero with headline + drop zone + a PDF/chat illustration, four feature tiles, a privacy band, a trust
 strip, footer. This task builds that page as the front door and moves the editor to `/app`.

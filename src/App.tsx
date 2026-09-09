@@ -3,6 +3,7 @@ import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
 import { PdfViewer } from './components/PdfViewer';
+import { PdfDropZone } from './components/PdfDropZone';
 import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
@@ -20,10 +21,7 @@ import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
 import { PrefsStoreProvider } from './state/prefsStore';
 import { takePendingFile } from './lib/site/pendingFile';
-
-// Optional dev convenience: auto-load a sample dropped at public/samples/.
-const DEFAULT_SAMPLE_FILE = 'GOA 2026.pdf';
-const DEFAULT_SAMPLE = `${import.meta.env.BASE_URL}samples/${encodeURIComponent(DEFAULT_SAMPLE_FILE)}`;
+import { isPdf } from './lib/site/pdfFile';
 
 function pageId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -105,6 +103,7 @@ function EditorApp() {
   const { edits, pagePlan, resetDocument } = useEdits();
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
+  const [draggingOverEmpty, setDraggingOverEmpty] = useState(false);
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLElement>(null);
   const pendingAnchor = useRef<ZoomAnchor | null>(null);
@@ -141,7 +140,6 @@ function EditorApp() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
   const pendingFileChecked = useRef(false);
-  const openedPendingFile = useRef(false);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -190,30 +188,7 @@ function EditorApp() {
     pendingFileChecked.current = true;
     const pending = takePendingFile();
     if (!pending) return;
-    openedPendingFile.current = true;
     void open(pending, pending.name);
-  }, [open]);
-
-  // Try the bundled sample on first load. Silently ignore if it isn't present
-  // (Vite's dev server answers unknown paths with index.html, so verify %PDF-).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (openedPendingFile.current) return;
-      try {
-        const res = await fetch(DEFAULT_SAMPLE);
-        if (!res.ok) return;
-        const buf = await res.arrayBuffer();
-        const head = new Uint8Array(buf.slice(0, 5));
-        if (String.fromCharCode(...head) !== '%PDF-') return;
-        if (!cancelled) await open(buf, DEFAULT_SAMPLE_FILE);
-      } catch {
-        /* no sample present — that's fine */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, [open]);
 
   useEffect(() => {
@@ -357,14 +332,39 @@ function EditorApp() {
             peek={peek}
           />
         ) : (
-          !error && (
-            <div className="flex h-full items-center justify-center px-6 text-center text-neutral-500">
-              Open a PDF to begin — or drop one at{' '}
-              <code className="mx-1 rounded bg-neutral-200 px-1 py-0.5 text-neutral-700">
-                public/samples/{DEFAULT_SAMPLE_FILE}
-              </code>
-            </div>
-          )
+          <div
+            role="region"
+            aria-label="PDF drop area"
+            className={`flex h-full flex-col items-center justify-center gap-5 px-6 text-center text-neutral-500 ${draggingOverEmpty ? 'bg-blue-50 outline-2 -outline-offset-4 outline-blue-400' : ''}`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setDraggingOverEmpty(true);
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+            }}
+            onDragLeave={(event) => {
+              if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+              setDraggingOverEmpty(false);
+            }}
+            onDrop={(event) => {
+              setDraggingOverEmpty(false);
+              // The shared box handles its own drops; bubbling must not open twice.
+              if (event.defaultPrevented) return;
+              event.preventDefault();
+              const file = event.dataTransfer.files[0];
+              if (!file) return;
+              if (!isPdf(file)) {
+                setError('Choose a PDF file.');
+                return;
+              }
+              void open(file, file.name);
+            }}
+          >
+            <p>Open a PDF to begin.</p>
+            <PdfDropZone onFile={(file) => void open(file, file.name)} onError={setError} />
+          </div>
         )}
       </main>
       {warnings.length > 0 && (

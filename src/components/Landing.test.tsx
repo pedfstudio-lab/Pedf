@@ -61,7 +61,7 @@ describe('Landing', () => {
       target: { files: [new File(['image'], 'photo.png', { type: 'image/png' })] },
     });
 
-    expect(screen.getByRole('alert').textContent).toBe('Choose a PDF file to continue.');
+    expect(screen.getByRole('alert').textContent).toBe('Choose a PDF file.');
     expect(navigate).not.toHaveBeenCalled();
     expect(pendingFile.takePendingFile()).toBeUndefined();
   });

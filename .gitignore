@@ -13,3 +13,6 @@ dist-ssr
 logs
 *.log
 npm-debug.log*
+
+# Local-only testing document
+/public/samples/Ziro Festival Firgun.pdf

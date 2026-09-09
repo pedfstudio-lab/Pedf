@@ -1,8 +1,8 @@
-import { useRef, useState, type DragEvent } from 'react';
 import { setPendingFile } from '@/lib/site/pendingFile';
 import { navigate } from '@/lib/site/navigate';
 import { siteHref } from '@/lib/site/config';
 import { SiteFooter, SiteHeader } from './SiteChrome';
+import { PdfDropZone } from './PdfDropZone';
 import './landing.css';
 
 const features = [
@@ -21,30 +21,10 @@ const faqs = [
   ['What does voice need?', 'A Sarvam API key in Settings until our managed proxy goes live.'],
 ] as const;
 
-function isPdf(file: File): boolean {
-  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-}
-
 export function Landing() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const [fileError, setFileError] = useState('');
-
-  const openFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!isPdf(file)) {
-      setFileError('Choose a PDF file to continue.');
-      return;
-    }
-    setFileError('');
+  const openFile = (file: File) => {
     setPendingFile(file);
     navigate('/app');
-  };
-
-  const onDrop = (event: DragEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    setDragging(false);
-    openFile(event.dataTransfer.files[0]);
   };
 
   return (
@@ -56,32 +36,7 @@ export function Landing() {
             <p className="site-eyebrow">Your PDF, finally editable</p>
             <h1 id="hero-title"><span>Read it. </span><span className="hero__blue">Ask it. </span><span>Edit it.</span></h1>
             <p className="hero__lede">Type or talk to understand any PDF, then edit the text and images. Runs on your computer.</p>
-            <button
-              type="button"
-              className={`drop-zone${dragging ? ' drop-zone--active' : ''}`}
-              onClick={() => inputRef.current?.click()}
-              onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-              aria-describedby="pdf-upload-help pdf-upload-error"
-            >
-              <span className="drop-zone__icon" aria-hidden="true">
-                <svg viewBox="0 0 48 56" fill="none"><path d="M9 3h21l9 9v41H9z" fill="white"/><path d="M30 3v10h9" stroke="#8EC8FF" strokeWidth="3"/><path d="M24 39V22m-7 7 7-7 7 7" stroke="#126BFF" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </span>
-              <span><strong>Drag &amp; drop your PDF here</strong><small id="pdf-upload-help">or click to upload</small></span>
-            </button>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              className="sr-only"
-              onChange={(event) => {
-                openFile(event.target.files?.[0]);
-                event.target.value = '';
-              }}
-            />
-            <p id="pdf-upload-error" className="drop-zone__error" role="alert">{fileError}</p>
+            <PdfDropZone onFile={openFile} />
           </div>
 
           <div className="hero__visual" aria-label="A PDF document opening into a voice chat">

@@ -1,0 +1,91 @@
+.pdf-drop-zone {
+  width: min(100%, 480px);
+}
+
+.drop-zone {
+  position: relative;
+  display: flex;
+  width: min(100%, 480px);
+  min-height: 116px;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 24px;
+  border: 2px dashed #63a1ff;
+  border-radius: 24px;
+  background: rgba(249, 252, 255, 0.84);
+  box-shadow: 0 16px 44px rgba(30, 107, 255, 0.08);
+  color: var(--site-ink, #0b1220);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.drop-zone:focus-visible {
+  outline: 3px solid rgba(30, 107, 255, 0.45);
+  outline-offset: 4px;
+}
+
+.drop-zone:hover,
+.drop-zone--active {
+  border-color: var(--site-blue, #1e6bff);
+  background: #eef6ff;
+  transform: translateY(-2px);
+}
+
+.drop-zone strong,
+.drop-zone small {
+  display: block;
+}
+
+.drop-zone strong {
+  margin-bottom: 6px;
+  font-size: 1.02rem;
+}
+
+.drop-zone small {
+  color: #657087;
+  font-size: 0.94rem;
+}
+
+.drop-zone__icon {
+  display: grid;
+  width: 68px;
+  height: 76px;
+  flex: none;
+  place-items: center;
+  border: 1px solid #d8eaff;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fff, #ddebff);
+  box-shadow: 0 12px 26px rgba(30, 107, 255, 0.16);
+}
+
+.drop-zone__icon svg {
+  width: 42px;
+  height: 50px;
+}
+
+.drop-zone__error {
+  min-height: 24px;
+  margin: 8px 0 0;
+  color: #b42318;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 760px) {
+  .drop-zone {
+    min-height: 104px;
+    padding: 14px 16px;
+    border-radius: 20px;
+  }
+
+  .drop-zone__icon {
+    width: 58px;
+    height: 66px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-zone {
+    transition: none;
+  }
+}
