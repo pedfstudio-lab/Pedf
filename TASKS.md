@@ -6702,8 +6702,9 @@ product's difference from iLovePDF / Smallpdf / Sejda-online, and it must stay t
 greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and fails if found.
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
-51 Tools framework ✅ → 52 Merge → 53 Split → 54 JPG to PDF → 55 PDF to JPG → 56 Rotate → 57 Organize →
-58 Page numbers → 59 Watermark → 60 Repair → 61 Sign → 62 Compress → **then the front door (Task 51A) last**.
+51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF → 55 PDF to JPG → **56 Resize / move images
+(editor)** → 57 Rotate → 58 Organize → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+**then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
 tool adds its card to `/tools` automatically.
@@ -6712,9 +6713,9 @@ tool adds its card to `/tools` automatically.
 finished tools because they are only links: (a) **tool first** — a row of tool cards under the landing hero; click
 a card → that tool asks for the file → the tool runs (this is what `/tools/<slug>` already does); (b) **file
 first** — drop a PDF in the landing hero box → a chooser of tools with the file already loaded (Task 51A as
-written). Likely both. Decide after Task 62.
+written). Likely both. Decide after Task 63.
 
-**Shared conventions (apply to every task 52–62):**
+**Shared conventions (apply to every task 52–63):**
 - A tool = one `ToolDefinition` registered in `src/lib/tools/registry.ts` + one pure `run()` in
   `src/lib/tools/<slug>.ts` + (only if it needs custom UI) one options component in `src/components/tools/<Slug>Options.tsx`.
 - Inputs are `File`s; outputs are `{ name: string; bytes: Uint8Array; mime: string }[]`. One output → direct
@@ -6735,7 +6736,7 @@ written). Likely both. Decide after Task 62.
 > `lib/tools` helpers, privacy-guard test, `pendingFiles` list, hidden `/tools/copy` smoke tool, `fflate` added.
 > Verified live end to end. 566 tests / typecheck / lint / build green. Visible change: a **Tools** nav link and a
 > Tools page with the Edit card only — the front door is deliberately untouched (see the order note above).
-**Goal:** the plumbing every tool reuses, plus the `/tools` index page, so Tasks 52–62 are each small.
+**Goal:** the plumbing every tool reuses, plus the `/tools` index page, so Tasks 52–63 are each small.
 
 **Steps:**
 1. **Routes.** Extend `src/lib/site/routes.ts`: `/tools` → `{ kind: 'tools' }`, `/tools/<slug>` →
@@ -6792,7 +6793,7 @@ file already loaded → pick Edit or any tool → that page opens with the file 
    - For PDFs: **Edit PDF** (→ `/app`) · **Compress** · **Sign** · **Merge** (card says "add more PDFs" when only
      one was dropped) · **Split** · **Organize** · **Rotate** · **Page numbers** · **Watermark** · **PDF to JPG** ·
      **Repair**. Cards for tools that aren't built yet are shown **greyed with "Coming soon"** so the layout is
-     stable across Tasks 52–62 — the registry knows which slugs exist (`listTools()`); a static
+     stable across Tasks 52–63 — the registry knows which slugs exist (`listTools()`); a static
      `PLANNED_TOOLS` list in `src/lib/tools/planned.ts` supplies the rest.
    - For images: **JPG to PDF** first, then **Edit** (opens the editor with a blank page and the images placed? —
      no: v1 just JPG to PDF; other image tools are out of scope).
@@ -6823,7 +6824,7 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
 > `mergeForms.ts` re-registers them (values kept, clashing names suffixed `_2`, widget `/P` fixed, DR fonts carried
 > per file) — three dedicated tests. Framework gained `minInputs` and `onWarning`. 581 tests / typecheck / lint /
 > build green; verified live. **User note:** moving individual pages (e.g. page 1 of file A to the end) is the
-> **Organize** tool (Task 57), not Merge — consider pulling 57 forward.
+> **Organize** tool (Task 58 after the 2026-09-10 renumbering), not Merge — user chose to leave it in place.
 1. Register `merge` (`accepts: 'pdf'`, `multiple: true`, min 2 files; the ToolPage reorder list IS the merge order).
 2. `run()`: `const out = await PDFDocument.create()`; for each input `loadPdfLib` → `out.copyPages(src,
    src.getPageIndices())` → `addPage` each. Progress per file. Output `<first-name>-merged.pdf` (or `merged.pdf` if
@@ -6856,7 +6857,13 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    and the right texts; bad ranges → errors. **Verify (user):** split GOA into `1-8` and `9-16`, download the zip.
 **Land:** `Split PDF tool (Task 53)`.
 
-### Task 54 — JPG to PDF  🔲 TODO → branch `tool-jpg-to-pdf`   *(Easy · 1–2 days)*
+### Task 54 — JPG to PDF  ✅ MERGED to `main` (`15d9b93`)   *(Easy · 1–2 days)*
+> ✅ **Done & merged** (`15d9b93`, branch `tool-jpg-to-pdf` deleted). JPG/PNG/WebP → one PDF; upright phone
+> photos; HEIC rejected with guidance; page size / orientation / margin. **Added on the user's call (implemented by
+> Claude, not Codex): images per page 1 / 2 / 4** — `gridCells()` grid with the margin as gap, 2-up stacks on
+> portrait / side by side on landscape, 4-up 2×2, auto orientation matches most photos, grids use A4/Letter; plus a
+> >100 MB warning (never a block) and one-at-a-time decoding. 641 tests / typecheck / lint / build green; verified
+> live (five images at 4-up → a 2-page PDF) and by the user.
 1. Register `jpg-to-pdf` (`accepts: 'image'`, multiple; JPG / PNG / WebP; HEIC → "Convert HEIC to JPG on your
    phone first"). Order = the reorder list.
 2. Options: **Page size** (Fit to image · A4 · Letter), **Orientation** (Auto · Portrait · Landscape), **Margin**
@@ -6879,15 +6886,64 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    (user):** GOA page 2 at High → the beach photo is sharp; all pages → zip.
 **Land:** `PDF to JPG tool (Task 55)`.
 
-### Task 56 — Rotate PDF  🔲 TODO → branch `tool-rotate`   *(Easy · 1 day)*
+### Task 56 — Resize / move images in the editor  🔲 TODO → branch `image-resize-move`   *(Easy–Medium · 2–3 days)*
+**Why (user request, 2026-09-10):** today an image can be moved / resized only while it is being ADDED (draft,
+before confirm — `ImageOverlay.tsx` `beginDraftTransform`). Images already in the PDF, and placed images after
+confirm, only get Replace / Crop / Delete. Users want to **drag a photo somewhere else** and **make it smaller or
+bigger**. The August crop notes flagged "resize/move existing come almost for free" but no task was ever written.
+
+**What the user gets (image mode):** tap any image (existing or placed) → its frame becomes live: **drag** to
+move, **corner handles** to resize with proportions locked, a small **W × H** readout in mm with editable fields
+for exact size (typing one recomputes the other), **Done / Cancel**. The picture stays sharp; the page underneath
+where it used to be is filled with the page colour (same as Delete). Text that sat on top of the image stays where
+it was — only the picture moves.
+
+**How (reuse, don't reinvent):**
+1. **Get the picture bytes** — new shared module `src/lib/images/extractImage.ts` (also reused by Compress, Task 63):
+   `extractImageBytes(pdfLibDoc, pageIndex, rect) → { bytes, mime } | undefined`. Find the Image XObject drawn at
+   that rect (walk `Resources → XObject`, incl. Form XObjects, matching by the drawn rect from the pdf.js operator
+   list as `src/lib/pdf/images.ts` already does). `DCTDecode` → the JPEG bytes as-is; `FlateDecode` RGB/Gray 8-bit →
+   build a PNG (add an SMask as alpha if present); anything else (JPX, CCITT, Indexed, 16-bit) → **fallback:**
+   render that region from the page canvas at 2× and warn "Moved image was re-rendered; it may be slightly
+   softer." Unit-test on the GOA sample (DCT photo reopens with the same pixel size) and a generated Flate PNG.
+2. **Existing image → commit = cover + image**, exactly like Delete + Add: `makeExistingCover(rect,
+   'image-move-cover', z)` (Task 48 sampler) over the ORIGINAL rect, then an `ImageEdit` at the NEW rect with the
+   extracted bytes (z above the cover). `visibleRegions` already hides the original via `isRegionCovered` (Task 48
+   Rev 1). Re-editing later: it is now a placed `ImageEdit`, so the same path as step 3 applies.
+3. **Placed image → update in place**: `updateEdit(id, { rect })` on the existing `ImageEdit` — the bytes already
+   exist. Undo/redo comes free from the edits store.
+4. **UI:** reuse the draft's move/resize interaction (`beginDraftTransform` — lift it into a small hook usable for
+   both draft and selected image), four corner handles, page-edge clamping, optional snap to page centre / other
+   images' edges via `src/lib/edit/moveSnap.ts`. Aspect ratio locked in v1 (no free stretch). Minimum 20 pt.
+   Keyboard: arrow keys nudge 1 pt, Shift+arrow 10 pt. Escape = cancel.
+5. **Export:** nothing new — the image handler already embeds PNG/JPEG bytes at an exact rect, and the cover
+   handler paints the old spot.
+
+**⚠ Guardrails:** never rasterize the page; never move text; do not touch Replace / Crop / Delete behaviour;
+extraction must not mutate the source document; if extraction returns `undefined` and the canvas fallback fails,
+show "This image can't be moved" and do nothing.
+
+**Tests:** `extractImage.test.ts` (DCT on GOA, generated Flate RGB → PNG reopens with the right size, unknown
+filter → undefined); `ImageOverlay` (RTL): selecting an existing image and dragging commits one cover at the old
+rect + one image edit at the new rect; resizing keeps the aspect ratio; typing W recomputes H; placed image →
+`updateEdit` only; Cancel leaves the edits list untouched. Export test: reopened PDF has an image XObject drawn at
+the new rect and none visible at the old one (cover present).
+
+**Verify (user, GOA page 8):** drag a photo to the other side of the page and shrink it → the old spot blends
+into the page, the photo is sharp at the new spot; type an exact width → height follows; export → open in another
+viewer → same. Then move the same photo again (now a placed image) and undo.
+
+**Land it:** merge `image-resize-move` → `main`. Commit: `Resize and move images in the editor (Task 56)`.
+
+### Task 57 — Rotate PDF  🔲 TODO → branch `tool-rotate`   *(Easy · 1 day)*
 1. Register `rotate` (single PDF). Options: **Angle** (90° right · 180° · 90° left), **Pages** (All · ranges).
    Thumbnail strip with per-page rotate buttons is a nice-to-have.
 2. `run()`: `page.setRotation(degrees((page.getRotation().angle + delta + 360) % 360))` for the chosen pages.
 3. **Tests:** 90° → every page's rotation +90 (reopen with pdf.js: `page.rotate`); ranges. **Verify (user):**
    rotate a scanned PDF that's sideways.
-**Land:** `Rotate PDF tool (Task 56)`.
+**Land:** `Rotate PDF tool (Task 57)`.
 
-### Task 57 — Organize PDF  🔲 TODO → branch `tool-organize`   *(Easy · 2–3 days)*
+### Task 58 — Organize PDF  🔲 TODO → branch `tool-organize`   *(Easy · 2–3 days)*
 1. Register `organize` (single PDF, but **Add pages from another PDF** button accepts more).
 2. Options component = a thumbnail grid of all pages (offscreen renders, cached), each with: drag handle
    (reorder), rotate, delete, duplicate; toolbar: **Insert blank page** (after selected; size = neighbour's),
@@ -6897,9 +6953,9 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
 3. `run()`: build a new doc by `copyPages` in plan order (+ blank pages via `addPage([w, h])`), apply rotations.
 4. **Tests:** plan ops; run on the sample with a reversed order → texts reversed; blank inserted at index 2 has no
    text. **Verify (user):** reorder GOA pages by drag, delete one, add a page from Corporate Governance, download.
-**Land:** `Organize PDF tool (Task 57)`.
+**Land:** `Organize PDF tool (Task 58)`.
 
-### Task 58 — Page numbers  🔲 TODO → branch `tool-page-numbers`   *(Easy · 1–2 days)*
+### Task 59 — Page numbers  🔲 TODO → branch `tool-page-numbers`   *(Easy · 1–2 days)*
 1. Register `page-numbers` (single PDF). Options: **Position** (6: top/bottom × left/centre/right), **Format**
    (`1` · `Page 1` · `1 / N` · `Page 1 of N`), **Start at** (default 1), **Pages** (All · ranges), **Font size**
    (10 / 12 / 14), **Colour** (black / grey / blue), **Margin** (small / normal). Live preview on the first
@@ -6910,21 +6966,21 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    sees it, not in unrotated space — unit-tested for all four rotations × six positions.
 3. **Tests:** reopen → each page's text contains the number; rotated sample page places it visually at the bottom.
    **Verify (user):** bottom-centre `Page 1 of 16` on GOA; a rotated page still shows it at the bottom.
-**Land:** `Page numbers tool (Task 58)`.
+**Land:** `Page numbers tool (Task 59)`.
 
-### Task 59 — Watermark  🔲 TODO → branch `tool-watermark`   *(Easy · 2 days)*
+### Task 60 — Watermark  🔲 TODO → branch `tool-watermark`   *(Easy · 2 days)*
 1. Register `watermark` (single PDF). Options: **Type** (Text · Image), text (default `CONFIDENTIAL`), font
    (Helvetica / Times / Courier standard), size, colour, **Opacity** (10–100%), **Angle** (0 · 45 · −45),
    **Layout** (Centre · Tiled 3×3 · Custom corner), **Pages** (All · ranges). Image: PNG/JPG, scale %. Live preview
    on page 1.
 2. `run()`: `page.drawText` / `page.drawImage` with `{ opacity, rotate: degrees(angle) }`; centre maths per page
-   size and rotation (share the helper from Task 58). v1 draws **over** the content (pdf-lib can't draw under;
+   size and rotation (share the helper from Task 59). v1 draws **over** the content (pdf-lib can't draw under;
    opacity makes it read as a watermark) — say so in the UI copy ("semi-transparent stamp").
 3. **Tests:** reopen → text found on every selected page; opacity operator present (pdf-lib `ExtGState`); tiled
    → 9 occurrences. **Verify (user):** `DRAFT` at 45°, 30% on all GOA pages; image logo bottom-right.
-**Land:** `Watermark tool (Task 59)`.
+**Land:** `Watermark tool (Task 60)`.
 
-### Task 60 — Repair PDF  🔲 TODO → branch `tool-repair`   *(Easy · 1–2 days)*
+### Task 61 — Repair PDF  🔲 TODO → branch `tool-repair`   *(Easy · 1–2 days)*
 1. Register `repair` (single PDF). No options; a **What we did** report in the result card.
 2. `run()` in three escalating steps, stopping at the first success: (a) `PDFDocument.load(bytes, {
    ignoreEncryption: true, updateMetadata: false })` → `save()` (rewrites xref / streams — fixes most "damaged"
@@ -6934,9 +6990,9 @@ files; `/app` and `/tools/<slug>` keep working when reached directly. **Land:** 
    red. If pdf.js can't open it either → "This file is too damaged to repair."
 3. **Tests:** a sample with a truncated xref (make one in-test by chopping the trailer) → step (a) or (b) repairs it
    and the text is intact; a random-bytes file → the final error. **Verify (user):** a PDF that Acrobat refuses.
-**Land:** `Repair PDF tool (Task 60)`.
+**Land:** `Repair PDF tool (Task 61)`.
 
-### Task 61 — Sign PDF  🔲 TODO → branch `tool-sign`   *(Medium · 3–4 days)*
+### Task 62 — Sign PDF  🔲 TODO → branch `tool-sign`   *(Medium · 3–4 days)*
 **Goal:** a signature the user draws, types, or uploads, placed on one page (or every page) — and the same
 signature panel available inside the editor as **Sign** in the toolbar.
 1. **Signature maker** `src/components/tools/SignatureMaker.tsx` (shared): three tabs.
@@ -6963,9 +7019,10 @@ signature panel available inside the editor as **Sign** in the toolbar.
    chosen page(s) and the date text; editor: the Sign button adds an `ImageEdit`. **Verify (user):** draw a
    signature on the phone, place it on page 3, date on, download; type "Sidharth" in each font; in the editor,
    Sign → move it → export.
-**Land:** `Sign PDF tool + Sign in the editor (Task 61)`.
+**Land:** `Sign PDF tool + Sign in the editor (Task 62)`.
 
-### Task 62 — Compress PDF  🔲 TODO → branch `tool-compress`   *(Medium · 4–6 days)*
+### Task 63 — Compress PDF  🔲 TODO → branch `tool-compress`   *(Medium · 4–6 days)*
+> Reuses `src/lib/images/extractImage.ts` from Task 56 for the per-image decode where it applies.
 **Goal:** smaller files by shrinking the **images** inside the PDF. Text, fonts and vector graphics are never
 touched, so text stays sharp and selectable. Three presets; the user sees before/after sizes for each.
 1. **Analysis** `src/lib/tools/compress/analyze.ts` (pure over a pdf-lib doc + pdf.js doc): walk every page's
@@ -7002,4 +7059,4 @@ touched, so text stays sharp and selectable. Three presets; the user sees before
    exported bytes. Optional; skip if it grows the task.
 **Guardrails:** never rasterize a page; never touch fonts, text, vectors, annotations, forms; skip anything the
 analysis doesn't understand rather than guessing; the original file is untouched on disk (we only download a new
-one). **Land:** `Compress PDF tool (Task 62)`.
+one). **Land:** `Compress PDF tool (Task 63)`.
