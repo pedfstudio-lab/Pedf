@@ -54,6 +54,9 @@
 .tool-select-field select { width: 100%; min-height: 46px; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; padding: 10px 36px 10px 12px; }
 .tool-select-field select:focus { border-color: var(--site-blue); outline: 3px solid rgba(30, 107, 255, .16); }
 .tool-select-field small { color: var(--site-body); font-size: .8rem; font-weight: 400; line-height: 1.45; }
+.tool-pixel-size { margin: 2px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--site-band); color: #255093; font-size: .875rem; }
+.tool-option-details select { width: min(360px, 100%); min-height: 46px; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; padding: 10px 36px 10px 12px; }
+.tool-page-selection { padding-top: 10px; padding-left: 0; }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

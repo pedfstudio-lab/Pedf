@@ -16,6 +16,7 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Merge PDF/ }).getAttribute('href')).toBe('/tools/merge');
     expect(screen.getByRole('link', { name: /Split PDF/ }).getAttribute('href')).toBe('/tools/split');
     expect(screen.getByRole('link', { name: /JPG to PDF/ }).getAttribute('href')).toBe('/tools/jpg-to-pdf');
+    expect(screen.getByRole('link', { name: /PDF to JPG/ }).getAttribute('href')).toBe('/tools/pdf-to-jpg');
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -50,5 +51,14 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('button', { name: /Drop image files here/ })).toBeTruthy();
     expect(screen.getByLabelText('Page size')).toBeTruthy();
     expect(screen.getByLabelText('Orientation')).toBeTruthy();
+  });
+
+  it('opens PDF to JPG with one PDF input and image options', () => {
+    render(<ToolsApp slug="pdf-to-jpg" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('PDF to JPG');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect(screen.getByLabelText('Format')).toBeTruthy();
+    expect(screen.getByLabelText('Quality')).toBeTruthy();
+    expect(screen.getByLabelText('Pages')).toBeTruthy();
   });
 });

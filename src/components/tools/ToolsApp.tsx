@@ -3,6 +3,7 @@ import { copyTool } from '@/lib/tools/copy';
 import { mergeTool } from '@/lib/tools/merge';
 import { splitTool } from '@/lib/tools/split';
 import { jpgToPdfTool } from '@/lib/tools/jpgToPdf';
+import { pdfToJpgTool } from '@/lib/tools/pdfToJpg';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -15,6 +16,7 @@ if (!getTool('copy')) registerTool(copyTool);
 if (!getTool('merge')) registerTool(mergeTool);
 if (!getTool('split')) registerTool(splitTool);
 if (!getTool('jpg-to-pdf')) registerTool(jpgToPdfTool);
+if (!getTool('pdf-to-jpg')) registerTool(pdfToJpgTool);
 
 function ToolsIndex() {
   const tools = listTools();
