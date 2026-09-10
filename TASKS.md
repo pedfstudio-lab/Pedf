@@ -6702,8 +6702,8 @@ product's difference from iLovePDF / Smallpdf / Sejda-online, and it must stay t
 greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and fails if found.
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
-51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF → 55 PDF to JPG → **56 Resize / move images
-(editor)** → 57 Rotate → 58 Organize → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
+(editor) ✅ → **57 Rotate** → 58 Organize → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -6945,7 +6945,7 @@ unchanged."
 
 **Land:** merge `tool-pdf-to-jpg` → `main`. Commit: `PDF to JPG tool (Task 55)`.
 
-### Task 56 — Resize / move images in the editor  🔲 TODO → branch `image-resize-move`   *(Easy–Medium · 2–3 days)*
+### Task 56 — Resize / move images in the editor  ✅ MERGED to `main` (`b2588b2`, 2026-09-10; includes Rev 1 + Rev 2; branch `image-resize-move` deleted)   *(Easy–Medium · 2–3 days)*
 **Why (user request, 2026-09-10):** today an image can be moved / resized only while it is being ADDED (draft,
 before confirm — `ImageOverlay.tsx` `beginDraftTransform`). Images already in the PDF, and placed images after
 confirm, only get Replace / Crop / Delete. Users want to **drag a photo somewhere else** and **make it smaller or
@@ -6994,7 +6994,7 @@ viewer → same. Then move the same photo again (now a placed image) and undo.
 
 **Land it:** merge `image-resize-move` → `main`. Commit: `Resize and move images in the editor (Task 56)`.
 
-#### Task 56 — Revision 1  🔲 TODO (same branch `image-resize-move`)   *(Easy–Medium · half a day)*
+#### Task 56 — Revision 1  ✅ DONE by Codex, reviewed and merged in `b2588b2`   *(Easy–Medium · half a day)*
 
 **Review of the Task 56 build (2026-09-10):** typecheck / lint / build green, 676 tests (14 new). Verified live on GOA
 page 1: one click selects an existing image in ~0.1 s; drag, corner resize with locked ratio, Done → one
@@ -7130,7 +7130,7 @@ Delete fill, Add image / Edit text unchanged. The hover outline could not be che
 reports no hover-capable pointer, and Tailwind's `hover:` rules are skipped there) — user to confirm on a desktop
 mouse.
 
-#### Task 56 — Revision 2  ✅ DONE by Claude (2026-09-10) — floating toolbars stay on the page
+#### Task 56 — Revision 2  ✅ DONE by Claude (2026-09-10), merged in `b2588b2` — floating toolbars stay on the page
 
 **Bug (user screenshot):** the W × H / Cancel / Done bar hung off the frame's left edge (`left-0` +
 `bottom-full` / `top-full`). The page box has `overflow-hidden`, so with a small image near the right edge the
