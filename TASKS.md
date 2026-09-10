@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → **58 Organize** → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → **59 Page numbers** → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7326,7 +7326,7 @@ button disabled again; run with 90° right → Open in editor: pages landscape; 
 
 **Land:** together with Task 57 in one commit `Rotate PDF tool (Task 57)`; merge `tool-rotate` → `main`.
 
-### Task 58 — Organize PDF  🔲 TODO → branch `tool-organize` (already created from `main` at `2f22ca1`)   *(Medium · 2–3 days)*
+### Task 58 — Organize PDF  ✅ MERGED to `main` (`bb95cfd`, 2026-09-10; includes Rev 1; branch `tool-organize` deleted)   *(Medium · 2–3 days)*
 
 **What the user gets:** `/tools/organize`. Drop a PDF → a **grid of page thumbnails**, one card per page. On each
 card: **drag** to reorder (plus ◀ ▶ buttons for keyboard and touch), **↺ ↻ rotate this page**, **⧉ duplicate**,
@@ -7463,7 +7463,7 @@ lint / build green, 752 tests (27 new); live on GOA + Corporate Governance (101 
 duplicate, blank, second file appended with per-file captions, build in ~1 s, Open in editor shows 101 pages with
 page 1 landscape and the blank in matching landscape size.
 
-#### Task 58 — Revision 1  ✅ DONE by Claude (2026-09-10) — no output bloat, and all pages laid out at once
+#### Task 58 — Revision 1  ✅ DONE by Claude (2026-09-10), merged in `bb95cfd` — no output bloat, and all pages laid out at once
 
 1. **Output bloat (real defect):** `run()` copied pages one `copyPages` call at a time. Every call starts a fresh
    object copier, so fonts and images shared between pages were copied again for each page. Measured on
