@@ -22,6 +22,8 @@ import {
 } from '@/lib/edit/moveSnap';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
+import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar';
+import type { ElementSize } from '@/lib/edit/floatingToolbar';
 import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
@@ -128,6 +130,8 @@ interface TextEditOverlayProps {
   readonly screenRect: ScreenRect;
   readonly zoom: number;
   readonly pageWidthPt: number;
+  /** Page box in CSS pixels; floating bars are kept inside it because the page clips overflow. */
+  readonly pageSizePx: ElementSize;
   readonly backgroundColor: string;
   readonly verticalTargets: readonly SnapTarget[];
   readonly horizontalTargets: readonly SnapTarget[];
@@ -147,6 +151,7 @@ export function TextEditOverlay({
   screenRect,
   zoom,
   pageWidthPt,
+  pageSizePx,
   backgroundColor,
   verticalTargets,
   horizontalTargets,
@@ -198,6 +203,8 @@ export function TextEditOverlay({
   const [width, setWidth] = useState(initialWidth);
   const [height, setHeight] = useState(initialHeight);
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
+  const [toolbarRef, toolbarSize] = useElementSize<HTMLDivElement>();
+  const [errorRef, errorSize] = useElementSize<HTMLDivElement>();
   const editableRef = useRef<HTMLDivElement>(null);
   const selectionRangeRef = useRef<Range | null>(null);
   const initialRenderedHeightRef = useRef(initialHeight);
@@ -328,7 +335,18 @@ export function TextEditOverlay({
       onCancel,
     );
   };
-  const controlsAbove = screenRect.top + moveOffset.y > 52;
+  const editorFrame: ScreenRect = {
+    left: screenRect.left + moveOffset.x,
+    top: screenRect.top + moveOffset.y,
+    width: width * zoom,
+    height: height * zoom,
+  };
+  // The formatting bar and the error note are kept inside the page box (Task 56 Rev 2).
+  const toolbarOffset = toolbarOffsetInFrame(editorFrame, toolbarSize, pageSizePx, 8);
+  const errorOffset = {
+    left: toolbarOffsetInFrame(editorFrame, errorSize, pageSizePx, 8).left,
+    top: editorFrame.height + 8,
+  };
   const lineHeight = textBlockLineHeight(block, style);
   const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const resizeToContent = useCallback(() => {
@@ -477,7 +495,9 @@ export function TextEditOverlay({
       }}
     >
       <div
-        className={`absolute left-0 z-20 flex items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl ${controlsAbove ? 'bottom-full mb-2' : 'top-full mt-2'}`}
+        ref={toolbarRef}
+        className="absolute z-20 flex items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
+        style={toolbarOffset}
         role="toolbar"
         aria-label="Text formatting"
       >
@@ -513,8 +533,10 @@ export function TextEditOverlay({
 
       {visibleError && (
         <div
+          ref={errorRef}
           role="alert"
-          className="absolute left-0 top-full z-30 mt-2 whitespace-nowrap rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
+          className="absolute z-30 whitespace-nowrap rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
+          style={errorOffset}
         >
           {visibleError}
         </div>

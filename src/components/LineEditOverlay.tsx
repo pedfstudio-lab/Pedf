@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ScreenRect } from '@/lib/export/coordinates';
+import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar';
+import type { ElementSize } from '@/lib/edit/floatingToolbar';
 import {
   SNAP_THRESHOLD_PX,
   snapAxis,
@@ -10,6 +12,8 @@ import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 interface LineEditOverlayProps {
   readonly screenRect: ScreenRect;
   readonly zoom: number;
+  /** Page box in CSS pixels; the action bar is kept inside it because the page clips overflow. */
+  readonly pageSizePx: ElementSize;
   readonly verticalTargets: readonly SnapTarget[];
   readonly horizontalTargets: readonly SnapTarget[];
   onMoveStateChange(state: MoveGuideState | null): void;
@@ -21,6 +25,7 @@ interface LineEditOverlayProps {
 export function LineEditOverlay({
   screenRect,
   zoom,
+  pageSizePx,
   verticalTargets,
   horizontalTargets,
   onMoveStateChange,
@@ -29,7 +34,14 @@ export function LineEditOverlay({
   onCancel,
 }: LineEditOverlayProps) {
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
-  const controlsAbove = screenRect.top + moveOffset.y > 48;
+  const [toolbarRef, toolbarSize] = useElementSize<HTMLDivElement>();
+  const lineFrame: ScreenRect = {
+    left: screenRect.left + moveOffset.x,
+    top: screenRect.top + moveOffset.y,
+    width: Math.max(1, screenRect.width),
+    height: Math.max(1, screenRect.height),
+  };
+  const toolbarOffset = toolbarOffsetInFrame(lineFrame, toolbarSize, pageSizePx, 8);
 
   useEffect(() => () => onMoveStateChange(null), [onMoveStateChange]);
 
@@ -115,9 +127,11 @@ export function LineEditOverlay({
     >
       <div className="absolute inset-0 rounded-sm bg-fuchsia-500/40 outline outline-2 outline-fuchsia-500" />
       <div
+        ref={toolbarRef}
         role="toolbar"
         aria-label="Divider line actions"
-        className={`pointer-events-auto absolute left-0 z-20 flex items-center gap-1 whitespace-nowrap rounded-lg border border-neutral-300 bg-white p-1 shadow-xl ${controlsAbove ? 'bottom-full mb-2' : 'top-full mt-2'}`}
+        className="pointer-events-auto absolute z-20 flex items-center gap-1 whitespace-nowrap rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
+        style={toolbarOffset}
       >
         <button
           type="button"

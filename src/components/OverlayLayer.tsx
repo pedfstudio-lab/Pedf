@@ -869,6 +869,7 @@ export function OverlayLayer({
         viewport={viewport}
         dpr={dpr}
         imageMode={imageMode}
+        directMode={!editMode && !textAddMode && !imageMode && !peek}
       />
 
       <SmartSpanLayer
@@ -1092,6 +1093,7 @@ export function OverlayLayer({
           <LineEditOverlay
             screenRect={screenRect}
             zoom={zoom}
+            pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
             verticalTargets={verticalTargets}
             horizontalTargets={horizontalTargets}
             onMoveStateChange={setMoveGuideState}
@@ -1171,6 +1173,7 @@ export function OverlayLayer({
               screenRect={screenRect}
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
+            pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
               backgroundColor={colorCss(sampleBackground(activeBulletList?.coverRect ?? activeBlock.rect))}
               verticalTargets={verticalTargets}
               horizontalTargets={horizontalTargets}
@@ -1265,6 +1268,7 @@ export function OverlayLayer({
             screenRect={screenRect}
             zoom={zoom}
             pageWidthPt={viewport.width / (zoom * dpr)}
+            pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
             backgroundColor="transparent"
             verticalTargets={verticalTargets}
             horizontalTargets={horizontalTargets}

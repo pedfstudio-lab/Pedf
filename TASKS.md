@@ -6994,6 +6994,171 @@ viewer → same. Then move the same photo again (now a placed image) and undo.
 
 **Land it:** merge `image-resize-move` → `main`. Commit: `Resize and move images in the editor (Task 56)`.
 
+#### Task 56 — Revision 1  🔲 TODO (same branch `image-resize-move`)   *(Easy–Medium · half a day)*
+
+**Review of the Task 56 build (2026-09-10):** typecheck / lint / build green, 676 tests (14 new). Verified live on GOA
+page 1: one click selects an existing image in ~0.1 s; drag, corner resize with locked ratio, Done → one
+`image-move-cover` + one `ImageEdit`; moving the placed image again → `updateEdit` only; Cancel and Undo leave
+nothing behind. Three things to change — **A** is a bug, **B** is a one-line spec miss, **C** is the user's request
+(move images without pressing Add image).
+
+---
+
+**Part A — Typing an exact size is impossible (bug, verified live).**
+`ImageOverlay.tsx` W / H inputs are controlled by `(rect.w / POINTS_PER_MM).toFixed(1)` and `onChange` calls
+`setExactSize` on **every keystroke**. Each keystroke is clamped (min 20 pt = 7.1 mm) and re-formatted, so typing
+`6` then `0` gives `7.1` → `7.10` → 7.1 mm. Pasting `60` works, typing never does.
+
+Fix — keep what the user types until they commit:
+1. Local draft state: `const [sizeDraft, setSizeDraft] = useState<{ field: 'width' | 'height'; text: string }>()`.
+2. Each input's `value` = `sizeDraft.text` when `sizeDraft.field` is this field, otherwise the formatted number.
+3. `onChange` → only `setSizeDraft({ field, text: event.target.value })`. **No resize here.**
+4. Commit on **Enter** (`onKeyDown`, `event.preventDefault()`, `event.stopPropagation()`) and on **blur**:
+   `const value = Number(text)`; if finite and `> 0` → `setExactSize(field, value)`; then `setSizeDraft(undefined)`
+   so the field shows the clamped result (and the other field follows).
+5. **Escape inside a field** = discard the draft and keep the selection (`stopPropagation` so the frame's Escape
+   handler does not cancel the whole selection). Escape on the frame itself still cancels.
+6. Reset the draft whenever the selection changes or ends (`useEffect` on `transformSelection`).
+7. Tests (`ImageOverlay.test.tsx`): type `6` then `0` → field shows `60` (no jump), H unchanged; press Enter → W
+   `60.0`, H `30.0` (REGION is 80 × 40 pt); blur commits the same way; Escape in the field restores the number and
+   the Done button is still there. Update the existing test `'links the millimetre fields…'`: after `change` to
+   `50`, H is still the old value; after Enter, H is `25.0`.
+
+**Part B — The moved image's old spot must use the Delete colour picker (spec miss, one line).**
+`makeExistingCover` only calls `sampleDeleteImageCover` (the Task 48 sampler) when
+`prefix === 'image-delete-cover'`; the move cover falls through to the plain 4-px `sampleOutsideImage`. The spec
+said "filled with the page colour (same as Delete)". Change the gate to
+`prefix === 'image-delete-cover' || prefix === 'image-move-cover'`. The delete sampler may return an expanded rect;
+`isRegionCovered` still hides the original because the expanded rect contains it.
+Test: give the harness `getPageCanvas` a registration (`{ canvas: document.createElement('canvas'), viewport,
+dpr: 1 }`) and make the `outsideBackground` mock's `sampleDeleteImageCover` a `vi.fn` returning
+`{ color: { r: 0.5, g: 0.5, b: 0.5 }, rect: REGION.rect }`; move an existing image, press Done → the cover's
+`color` is that grey and the sampler was called with `REGION.rect`.
+
+**Part C — Move / resize images in the plain view (no button pressed).**
+*User request 2026-09-10:* "as soon as we open the PDF, without clicking Add image, we can move images here and
+there and reduce their size. Add image keeps Crop / Replace / Delete and drawing new images."
+
+C1. **Prop.** `ImageOverlay` gets `readonly directMode: boolean`. `OverlayLayer.tsx` passes
+    `directMode={!editMode && !textAddMode && !imageMode && !peek}` — nothing else in OverlayLayer changes.
+    **No layering change is needed:** `ImageOverlay` already renders inside the text-overlay container at `z-30`
+    with `pointer-events-none` on its root, and in the plain view nothing in OverlayLayer takes clicks (every text
+    button is gated by `editMode`). Verified with `elementFromPoint`: the top element at an image centre is the
+    inert "Text overlays" root. Hit areas rendered inside ImageOverlay with `pointer-events-auto` receive the
+    pointer as-is.
+
+C2. **Which images get a hit area** in direct mode: every `visibleRegions` entry and every `pageImages` entry
+    **except** existing regions that cover ≥ 90 % of the page area (`BACKGROUND_AREA_RATIO = 0.9`). Full-page
+    backgrounds are left alone in the plain view — otherwise every click on the page would grab the background;
+    they stay editable in Add image mode. Pure helper `isBackgroundRegion(rect: PdfRect, pageRect: PdfRect): boolean`
+    in `src/lib/images/useImageRectTransform.ts` with a unit test (`useImageRectTransform.test.ts`). Placed images
+    are never excluded.
+
+C3. **Hit-area markup** (direct mode, only while `!transformSelection && !draft && !cropTarget`): one `<button>` per
+    image, `pointer-events-auto absolute z-30 cursor-move bg-transparent rounded-sm hover:outline
+    hover:outline-2 hover:outline-blue-400/80 focus-visible:outline focus-visible:outline-2
+    focus-visible:outline-blue-500`. **No fill, no amber border, no Crop / Replace / ×, no draw layer, no hint
+    toast** — the plain view must look untouched until the pointer is over a picture. aria-labels stay the same
+    as image mode (`Move or resize image N on page P` / `Move or resize added image N on page P`), title
+    "Drag to move, click to select". Keep the "Preparing image…" toast.
+
+C4. **Press-and-drag in one gesture** (mouse / pen) with a threshold — `DRAG_THRESHOLD_PX = 5`:
+    - `onPointerDown` (`event.button === 0` only): remember `startX / startY / pointerType`, the image's screen
+      rect (`pdfRectToScreenRect`), and add window `pointermove` / `pointerup` / `pointercancel` listeners
+      (`setPointerCapture?.(…)` optional-chained, like the hook). Start the selection at once: placed →
+      `startPlacedTransform(edit)`; existing → `void startExistingTransform(region)` (async, ~0.1 s).
+    - Mouse / pen: on `pointermove`, once `Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX` the gesture is a drag. From
+      then on set the selection rect to `screenRectToPdfRect(moveScreenRect(startScreen, dx, dy, pageW, pageH),
+      viewport, dpr)`. If the bytes are not ready yet (selection still `undefined`), keep the latest `dx / dy` in a
+      ref (`pendingDragRef`) and apply it in a `useEffect` when `transformSelection` appears, so the picture jumps
+      to the pointer the moment it is ready.
+    - `pointerup`: remove listeners. Below the threshold it was a **click** → the selection stays with handles,
+      nothing else. Above it → the selection stays at the dropped spot with handles + W × H fields. **Do not
+      auto-commit on release**; Done / Enter commits, Escape / Cancel discards. Undo still works after Done.
+    - **Touch** (`pointerType === 'touch'`): no drag on press and no `preventDefault` — a tap selects, then the
+      frame's existing move button handles the drag. Page scrolling keeps working.
+    - Implementation hint: add `beginMoveFromPress(event, startRect)` to `useImageRectTransform` (starts from a
+      given rect rather than the current selection and applies the threshold), or do it inline with a ref. Reuse
+      `moveScreenRect`; `beginDraw` and every image-mode handler stay untouched.
+
+C5. **Deselect by clicking elsewhere** (direct mode): while a selection exists, a `pointerdown` anywhere outside
+    the frame **and** its toolbar cancels the selection (same as Cancel). Document-level listener registered in a
+    `useEffect` while `transformSelection && directMode`; ignore events whose target is inside the frame element
+    (keep a `ref` on the frame). Escape keeps working. (Optional: same in image mode.)
+
+C6. **Mode changes.** The `useEffect` that resets state on `!imageMode` currently also clears `transformSelection`.
+    Split it: draft / crop state clears on `!imageMode` as now; `transformSelection` clears when
+    `!imageMode && !directMode`. So switching from the plain view to Edit text / Add text drops the selection.
+
+C7. **Tests** (`ImageOverlay.test.tsx`, render with `directMode imageMode={false}`; viewport scale 1 so screen px =
+    pt):
+    - direct mode shows one hit area per image and **no** Crop / Replace / Delete buttons, no "Draw image region"
+      layer, no hint toast; a region whose rect equals the page gets **no** hit area; a placed image does.
+    - pointerdown on the hit area (`pointerType: 'mouse'`, clientX 50 / clientY 50) + pointermove to 80 / 70 +
+      pointerup → selection exists, its rect moved by ≈ (30, −20) in PDF space, `addEdits` not called; Done → one
+      cover at `REGION.rect` + one image at the new rect.
+    - pointerdown + pointerup with no move → selection exists at `REGION.rect`.
+    - pointerdown + move of 3 px + pointerup → rect unchanged (below threshold).
+    - `pointerType: 'touch'` pointerdown + move 30 px → selection exists, rect unchanged.
+    - pointerdown on `document.body` while selected → selection gone, `addEdits` / `updateEdit` not called.
+    - bytes arrive **after** the pointer moved: make `harness.extract` return `undefined` and `harness.capture`
+      return a promise you resolve by hand; pointerdown + move 40 px while it is pending; then resolve it → the
+      selection appears already at the moved rect.
+    - `directMode={false} imageMode={false}` → no hit areas at all (Edit text mode).
+    - All existing image-mode tests keep passing unchanged (except the Part A field test noted above).
+
+C8. **Guardrails:** never rasterize the page; never move text; Add image mode, Crop, Replace, Delete, drawing,
+    export — unchanged; no new module beyond the helper in C2; `noNetwork` untouched; keep `intent: 'print'` in
+    `capturePdfRegion`.
+
+**Verify (user):** open GOA with no button pressed. Page 8: hover a photo → thin blue outline; press and drag →
+it moves at once; release → corners + W × H; type `60` → the box shows 60 while typing; Enter → resized, H
+follows; click elsewhere → deselected with nothing changed; repeat and press Done → old spot filled (same look as
+Delete), photo at the new spot; Undo restores. Page 1: pressing on the sky background does nothing; the green
+card and the logos can be dragged. Add image still shows the amber frames with Crop / Replace / × and lets you
+draw a new image. Edit text: images are not selectable. Export → open in another viewer → same as on screen.
+
+**Known limit (unchanged from Task 48):** the old spot is a flat fill; on a photo background it shows as a patch.
+
+**Land:** stays on `image-resize-move`; one commit `Resize and move images in the editor (Task 56)` including
+Rev 1.
+
+**Rev 1 review (2026-09-10):** ✅ Codex build accepted — typecheck / lint / build green, 689 tests (13 new).
+Verified live with real mouse input on GOA page 1 and page 8: press-and-drag moves in one gesture, click selects
+without moving, click elsewhere deselects, typing `6` `0` Enter → 60.0 × 75.0 mm, old spot after Done is the
+Delete fill, Add image / Edit text unchanged. The hover outline could not be checked in the review browser (it
+reports no hover-capable pointer, and Tailwind's `hover:` rules are skipped there) — user to confirm on a desktop
+mouse.
+
+#### Task 56 — Revision 2  ✅ DONE by Claude (2026-09-10) — floating toolbars stay on the page
+
+**Bug (user screenshot):** the W × H / Cancel / Done bar hung off the frame's left edge (`left-0` +
+`bottom-full` / `top-full`). The page box has `overflow-hidden`, so with a small image near the right edge the
+bar was cut off ("Canc…") and Done was unreachable until the image was dragged away. Same pattern on the new-image
+Confirm bar and the crop bar.
+
+**Same bug on text (user screenshot, "Chapora Fort"):** the text formatting bar (size / B / I / font / Cancel /
+Done) in `TextEditOverlay.tsx`, its error note, and the divider-line bar in `LineEditOverlay.tsx` used the same
+`left-0` + `bottom-full` / `top-full` pattern and were cut off at the right edge too.
+
+**Fix (shared):** new module `src/lib/edit/floatingToolbar.ts` — `placeSelectionToolbar(frame, toolbarSize,
+pageSize, gap = 12)` keeps a bar inside the page: it follows the frame's left edge but is clamped so the whole bar
+stays on the page; it sits above the frame when there is room, otherwise below, and is pulled up to the page bottom
+when neither fits (so it overlaps the frame's lower part rather than vanishing). `toolbarOffsetInFrame(...)` gives
+the same as an offset from the frame corner. `useElementSize()` returns a callback ref + live size
+(`useLayoutEffect` + `ResizeObserver`, zero in jsdom). Applied to: the three image bars (`ImageOverlay.tsx`), the
+text formatting bar and error note (`TextEditOverlay.tsx`, gap 8), and the divider-line bar
+(`LineEditOverlay.tsx`, gap 8). Both text overlays take a new required prop `pageSizePx` (CSS px), passed by
+`OverlayLayer.tsx` at all three render sites. Bars stay inside their frame elements, so click-outside checks and
+`stopPropagation` are unchanged. 7 unit tests in `floatingToolbar.test.ts`. Verified live on GOA: page 8
+right-column photo shrunk to 26 × 45 mm at the page's right edge, and a text box opened at the right edge of
+page 1 (bar would have overflowed by 175 px) → in both cases the bar's right edge lands on the page edge, Done
+fully visible. Checks: typecheck / lint / build green, 696 tests.
+
+**Still open (user chose to defer):** the selection frame never receives keyboard focus (`autoFocus` on a `div`
+is ignored by React), so Escape / Enter / arrow nudges only work after tabbing into the frame. Fix when wanted:
+focus the frame in an effect keyed on the selected image, not on every rect change.
+
 ### Task 57 — Rotate PDF  🔲 TODO → branch `tool-rotate`   *(Easy · 1 day)*
 1. Register `rotate` (single PDF). Options: **Angle** (90° right · 180° · 90° left), **Pages** (All · ranges).
    Thumbnail strip with per-page rotate buttons is a nice-to-have.

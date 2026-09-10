@@ -153,7 +153,7 @@ export async function capturePdfRegion(
   pageCanvas.height = Math.ceil(viewport.height);
   const pageContext = pageCanvas.getContext('2d');
   if (!pageContext) throw new Error('2D canvas context unavailable for PDF image capture.');
-  await page.render({ canvasContext: pageContext, viewport }).promise;
+  await page.render({ canvasContext: pageContext, viewport, intent: 'print' }).promise;
 
   const output = document.createElement('canvas');
   output.width = Math.max(1, Math.round(sourceRect.width));
