@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → **57 Rotate** → 58 Organize → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → **58 Organize** → 59 Page numbers → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7159,7 +7159,7 @@ fully visible. Checks: typecheck / lint / build green, 696 tests.
 is ignored by React), so Escape / Enter / arrow nudges only work after tabbing into the frame. Fix when wanted:
 focus the frame in an effect keyed on the selected image, not on every rect change.
 
-### Task 57 — Rotate PDF  🔲 TODO → branch `tool-rotate` (already created from `main` at `22e1b76`)   *(Easy · 1 day)*
+### Task 57 — Rotate PDF  ✅ MERGED to `main` (`5ddd291`, 2026-09-10; includes Rev 1; branch `tool-rotate` deleted)   *(Easy · 1 day)*
 
 **What the user gets:** `/tools/rotate`. Drop **one** PDF → choose **Angle** (90° right · 180° · 90° left) and
 **Pages** (All pages · Only these pages, typed like `1-3, 5, 8-10`) → **Rotate** → download `name-rotated.pdf` or
@@ -7246,10 +7246,11 @@ right place, Export keeps the rotation; (4) a 100+ page file → progress moves 
 **Land:** merge `tool-rotate` → `main`. Commit: `Rotate PDF tool (Task 57)`.
 
 **Review of the Task 57 build (2026-09-10):** ✅ accepted — typecheck / lint / build green, 714 tests (18 new); live
-on GOA (16 pages): output `GOA 2026-rotated.pdf`, Open in editor shows every page landscape. Not committed yet:
-Rev 1 below lands in the same commit.
+on GOA (16 pages): output `GOA 2026-rotated.pdf`, Open in editor shows every page landscape. Rev 1 review: 725
+tests (11 new), live on GOA: preview turns with each click, label and Reset correct, Rotate PDF disabled until a
+direction is chosen, run produces the rotated file. Committed together in `5ddd291`.
 
-#### Task 57 — Revision 1  🔲 TODO (same branch `tool-rotate`) — Left / Right buttons with a live preview   *(Easy · half a day)*
+#### Task 57 — Revision 1  ✅ DONE by Codex, reviewed and merged in `5ddd291` — Left / Right buttons with a live preview   *(Easy · half a day)*
 
 **Why (user request, 2026-09-10, iLovePDF screenshot):** the Angle dropdown (90° right · 180° · 90° left) feels
 abstract. Users want two buttons, **Left** and **Right**, and a preview of the page that turns as they click, so
