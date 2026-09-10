@@ -26,6 +26,9 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   const dragged = useRef<number | null>(null);
   const running = status === 'running';
   const minimumInputs = tool.minInputs ?? 1;
+  const inputFiles = files.map(({ file }) => file);
+  const canRunReason = tool.canRun?.(options, inputFiles);
+  const runDisabled = files.length < minimumInputs || !!canRunReason;
   const Options = tool.Options;
   useToolMetadata(tool.title, tool.description);
 
@@ -63,7 +66,8 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   }
 
   async function run() {
-    if (files.length < minimumInputs || activeRun.current) return;
+    const selectedFiles = files.map(({ file }) => file);
+    if (files.length < minimumInputs || activeRun.current || tool.canRun?.(options, selectedFiles)) return;
     const controller = new AbortController();
     activeRun.current = controller;
     setError('');
@@ -72,7 +76,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     setStatus('running');
     setProgress({ value: 0, label: 'Preparing…' });
     try {
-      const result = await tool.run(files.map(({ file }) => file), structuredClone(options), {
+      const result = await tool.run(selectedFiles, structuredClone(options), {
         signal: controller.signal,
         onProgress(done, total, label) {
           if (activeRun.current !== controller || controller.signal.aborted) return;
@@ -158,14 +162,16 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
         </ol>
       </section>}
       {Options && <section className="tool-section" aria-label="Tool options"><Options
-        options={options} onChange={setOptions} inputs={files.map(({ file }) => file)} disabled={running} /></section>}
+        options={options} onChange={setOptions} inputs={inputFiles} disabled={running} /></section>}
       {running ? <section className="tool-progress" aria-label="Processing">
         <p role="status">{progress.label}</p>
         <progress value={progress.value} max={100} aria-label="Tool progress" />
         <button className="tool-secondary" type="button" onClick={cancel}>Cancel</button>
       </section> : <div className="tool-run">
-        <button className="site-button" type="button" disabled={files.length < minimumInputs} onClick={() => void run()}>{tool.title}</button>
+        <button className="site-button" type="button" disabled={runDisabled} aria-disabled={runDisabled}
+          title={canRunReason} onClick={() => void run()}>{tool.title}</button>
         {minimumInputs > 1 && files.length < minimumInputs && <p className="tool-hint">Choose at least {minimumInputs} files to continue.</p>}
+        {canRunReason && <p className="tool-hint">{canRunReason}</p>}
         {status === 'cancelled' && <p role="status">Cancelled. Your original files are unchanged.</p>}
       </div>}
     </>}

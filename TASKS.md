@@ -7159,13 +7159,171 @@ fully visible. Checks: typecheck / lint / build green, 696 tests.
 is ignored by React), so Escape / Enter / arrow nudges only work after tabbing into the frame. Fix when wanted:
 focus the frame in an effect keyed on the selected image, not on every rect change.
 
-### Task 57 — Rotate PDF  🔲 TODO → branch `tool-rotate`   *(Easy · 1 day)*
-1. Register `rotate` (single PDF). Options: **Angle** (90° right · 180° · 90° left), **Pages** (All · ranges).
-   Thumbnail strip with per-page rotate buttons is a nice-to-have.
-2. `run()`: `page.setRotation(degrees((page.getRotation().angle + delta + 360) % 360))` for the chosen pages.
-3. **Tests:** 90° → every page's rotation +90 (reopen with pdf.js: `page.rotate`); ranges. **Verify (user):**
-   rotate a scanned PDF that's sideways.
-**Land:** `Rotate PDF tool (Task 57)`.
+### Task 57 — Rotate PDF  🔲 TODO → branch `tool-rotate` (already created from `main` at `22e1b76`)   *(Easy · 1 day)*
+
+**What the user gets:** `/tools/rotate`. Drop **one** PDF → choose **Angle** (90° right · 180° · 90° left) and
+**Pages** (All pages · Only these pages, typed like `1-3, 5, 8-10`) → **Rotate** → download `name-rotated.pdf` or
+**Open in editor**. Same drop zone, file card with thumbnail, progress + Cancel, and result buttons as Split.
+
+**How it works (no rendering, lossless):** every PDF page carries a `/Rotate` number (0 / 90 / 180 / 270) that
+viewers apply on screen. The tool only changes that number for the chosen pages — text, images, forms, bookmarks,
+metadata are untouched, so it is instant even on a 500-page file. The new angle is **added to** the page's existing
+rotation, never written over it (a page already at 90 turned right becomes 180; turned left from 0 becomes 270).
+
+**Reuse (don't reinvent):** framework from Task 51 (`ToolPage`, `registerTool`, results/zip/open-in-editor);
+`loadPdfLib` / `savePdf` / `outputName` from `src/lib/tools/pdfIo.ts`; `selectedPageIndices(options, pageCount)`
+from `src/lib/tools/pdfToJpgOptions.ts` (reads `pageSelection: 'all' | 'custom'` + `ranges: string`, flattens,
+de-duplicates, sorts, and throws the specific `ToolError`s from `parsePageRanges`); `ToolError` from
+`src/lib/tools/errors.ts`; `split.ts` as the pattern for `run()`; `PdfToJpgOptions.tsx` as the pattern for the
+option panel. No new dependencies.
+
+**Steps**
+
+1. **Options module** `src/lib/tools/rotateOptions.ts`
+   - `export type RotateAngle = 'right' | 'half' | 'left';`
+   - `export interface RotateOptionsValue { angle: RotateAngle; pageSelection: 'all' | 'custom'; ranges: string }`
+     — keep the key names `pageSelection` / `ranges` exactly, so `selectedPageIndices` works unchanged.
+   - `export const DEFAULT_ROTATE_OPTIONS: RotateOptionsValue = { angle: 'right', pageSelection: 'all', ranges: '' }`.
+   - `export function parseRotateOptions(options: ToolOptions): RotateOptionsValue` — unknown / missing values fall
+     back to the defaults (same style as `parsePdfToJpgOptions`).
+   - `export function rotationDelta(angle: RotateAngle): 90 | 180 | 270` — right = 90, half = 180, left = 270.
+   - `export function nextRotation(current: number, delta: number): number` — pure: snap `current` to the nearest
+     multiple of 90 (some PDFs carry odd or negative values like −90), add `delta`, normalise into 0…359:
+     `(((Math.round(current / 90) * 90 + delta) % 360) + 360) % 360`.
+
+2. **Option panel** `src/components/tools/RotateOptions.tsx` (`ToolOptionsProps`, pattern `PdfToJpgOptions.tsx`)
+   - `<fieldset className="tool-options" disabled={disabled}>` with legend "Rotate options".
+   - **Angle** `<select id="rotate-angle">` with three options: `90° right (clockwise)`, `180°`,
+     `90° left (counter-clockwise)`.
+   - **Pages** `<select id="rotate-pages">` All pages / Only these pages; when custom, the ranges text input
+     (`inputMode="numeric"`, placeholder `1-3, 5, 8-10`) + hint "Use commas between pages or ranges." — copy the
+     markup from `PdfToJpgOptions.tsx` so the two tools look identical.
+   - Every change calls `onChange({ ...value, ...next })`. No page-count loading needed.
+
+3. **Tool** `src/lib/tools/rotate.ts`
+   - `export const ROTATE_INPUT_ERROR = 'Choose one PDF file to rotate.';`
+   - `run(inputs, options, ctx)`: `signal.throwIfAborted()`; exactly one input or `throw new ToolError(ROTATE_INPUT_ERROR)`;
+     `const doc = await loadPdfLib(file)`; `const value = parseRotateOptions(options)`;
+     `const delta = rotationDelta(value.angle)`; `const pages = selectedPageIndices(options, doc.getPageCount())`.
+   - Loop over `pages` with `entries()`: `signal.throwIfAborted()`; `onProgress(index, pages.length,
+     \`Rotating page ${pageIndex + 1} of ${doc.getPageCount()}\`)`; `const page = doc.getPage(pageIndex)`;
+     `page.setRotation(degrees(nextRotation(page.getRotation().angle, delta)))`; every 50 pages
+     `await new Promise((resolve) => setTimeout(resolve, 0))` (a timer, not an animation frame) so Cancel stays
+     responsive on long files.
+   - `const bytes = await savePdf(doc)`; return one output `{ name: outputName(file, 'rotated'), bytes,
+     mime: 'application/pdf' }`; final `onProgress(pages.length, pages.length, 'Rotated PDF ready')`.
+   - `export const rotateTool: ToolDefinition = { slug: 'rotate', title: 'Rotate PDF', description: 'Turn pages 90°
+     or 180° — all of them, or only the ones you choose.', accepts: 'pdf', multiple: false, defaultOptions:
+     DEFAULT_ROTATE_OPTIONS, Options: RotateOptions, icon: '⟳', run }`.
+
+4. **Register** in `src/components/tools/ToolsApp.tsx` right after `pdf-to-jpg`:
+   `if (!getTool('rotate')) registerTool(rotateTool);` — the index grid follows registration order, so Rotate
+   appears after PDF to JPG. Add its card to `ToolsApp.test.tsx`'s index check.
+
+5. **Tests**
+   - `rotateOptions.test.ts`: `nextRotation` — 0+90 = 90, 270+90 = 0, 90+270 = 0 (left from 90), 180+180 = 0,
+     −90+90 = 0, 95+90 = 180 (snapped); `parseRotateOptions` falls back to defaults on junk; `rotationDelta`.
+   - `rotate.test.ts`: build a 4-page PDF with pdf-lib where page 2 already has `setRotation(degrees(90))` →
+     run with `angle: 'right'`, all pages → reopen with pdf.js (`getDocument`), `page.rotate` is `[90, 180, 90, 90]`;
+     `angle: 'left'`, `pageSelection: 'custom'`, `ranges: '2-3'` → `[0, 0, 270, 0]` and pages 1 and 4 untouched;
+     `angle: 'half'` → 180 everywhere; the output name is `sample-rotated.pdf`; two inputs → `ROTATE_INPUT_ERROR`;
+     an empty custom range → the `EMPTY_PAGE_RANGE_ERROR` from `pageRanges.ts` reaches the caller unchanged; an
+     already-aborted `signal` → rejects before touching the file. Also assert page **content** survives: the reopened
+     page's text (`getTextContent`) equals the original's.
+   - `RotateOptions.test.tsx` (RTL): the ranges box appears only for "Only these pages"; changing Angle calls
+     `onChange` with `angle: 'left'`.
+   - `noNetwork.test.ts` needs nothing — it scans every file in `src/lib/tools` and `src/components/tools`.
+
+6. **Guardrails:** never rasterise or re-draw pages; never touch content streams; every user-facing message is a
+   `ToolError`; no `fetch` anywhere; do not build the per-page thumbnail strip with rotate buttons (nice-to-have,
+   later — ranges cover it).
+
+**Verify (user):** (1) a scan that opens sideways → 90° right, all pages → upright in the browser preview and in
+another viewer; (2) a PDF that already mixes portrait and landscape pages → rotate only the landscape ones with a
+range → the rest untouched; (3) Open in editor → the rotated pages show rotated, text editing still lands in the
+right place, Export keeps the rotation; (4) a 100+ page file → progress moves and Cancel stops it.
+
+**Land:** merge `tool-rotate` → `main`. Commit: `Rotate PDF tool (Task 57)`.
+
+**Review of the Task 57 build (2026-09-10):** ✅ accepted — typecheck / lint / build green, 714 tests (18 new); live
+on GOA (16 pages): output `GOA 2026-rotated.pdf`, Open in editor shows every page landscape. Not committed yet:
+Rev 1 below lands in the same commit.
+
+#### Task 57 — Revision 1  🔲 TODO (same branch `tool-rotate`) — Left / Right buttons with a live preview   *(Easy · half a day)*
+
+**Why (user request, 2026-09-10, iLovePDF screenshot):** the Angle dropdown (90° right · 180° · 90° left) feels
+abstract. Users want two buttons, **Left** and **Right**, and a preview of the page that turns as they click, so
+they see the result before pressing Rotate. Two Right clicks = 180°.
+
+**What the user gets:** under the option panel's legend, a **preview of page 1** (a small rendered thumbnail,
+about 180 px on its long side) inside a square box, with two big buttons **↺ Left** and **↻ Right**, a label
+("Not turned yet" · "Turned 90° right" · "Turned 180°" · "Turned 90° left") and a **Reset** link. Each click turns
+the preview on the spot (a CSS turn — nothing is re-rendered). The **Pages** choice (All · Only these pages + ranges)
+stays exactly as it is. **Rotate PDF is disabled until a direction is chosen**, so a click can never produce an
+unchanged file.
+
+**Steps**
+
+1. **Options module** `src/lib/tools/rotateOptions.ts`
+   - Replace `angle: RotateAngle` with `turns: 0 | 1 | 2 | 3` — quarter turns **clockwise** (1 = 90° right,
+     2 = 180°, 3 = 90° left). `DEFAULT_ROTATE_OPTIONS = { turns: 0, pageSelection: 'all', ranges: '' }`.
+   - `parseRotateOptions`: accept only integers 0–3, otherwise 0.
+   - `export function turnLeft(turns): Turns` = `(turns + 3) % 4`; `export function turnRight(turns): Turns` =
+     `(turns + 1) % 4`; `export function rotationDelta(turns): number` = `turns * 90`;
+     `export function describeTurns(turns): string` → the four labels above. Keep `nextRotation` as is.
+   - Remove `RotateAngle` / `rotationDelta(angle)`; update `rotateOptions.test.ts` (turnLeft / turnRight wrap
+     around: `turnLeft(0) === 3`, `turnRight(3) === 0`; `describeTurns`; parse rejects `4`, `-1`, `'1'`).
+
+2. **Run** `src/lib/tools/rotate.ts`
+   - `export const NO_TURN_ERROR = 'Click Left or Right to choose the direction first.';` — if `turns === 0`
+     throw `new ToolError(NO_TURN_ERROR)` before loading the file (belt and braces; the button is also disabled).
+   - `const delta = rotationDelta(value.turns)`. Everything else unchanged. Add the test.
+
+3. **Disable Rotate until a direction is chosen.** `ToolDefinition` gets an optional
+   `canRun?(options: ToolOptions, inputs: File[]): string | undefined` — returns a reason while running is not
+   allowed. `ToolPage` disables the Run button when a reason comes back and shows it as the button's `title`
+   and in a small `tool-hint` under the button (screen readers: `aria-disabled` + the hint text). `rotateTool.canRun
+   = (options) => parseRotateOptions(options).turns === 0 ? NO_TURN_ERROR : undefined`. Other tools are untouched
+   (no `canRun` → always allowed). Test in `ToolPage.test.tsx`: a fake tool with `canRun` returning a reason →
+   Run is disabled and the reason is shown; returning `undefined` → enabled.
+
+4. **Option panel** `src/components/tools/RotateOptions.tsx` (rewrite; pattern `PdfToJpgOptions.tsx` for the
+   pdf.js loading)
+   - **Preview:** when `inputs[0]` changes, `loadPdfJs(file)` → `getPage(1)` → `page.getViewport({ scale })` with
+     `scale` chosen so the long side is 180 px → offscreen canvas painted white first →
+     `page.render({ canvasContext, viewport, intent: 'print' })` (background-tab rule) → `canvas.toDataURL()` into
+     state → `page.cleanup()`, `doc.destroy()`, canvas released. Cancelled flag on unmount / file change like
+     `PdfToJpgOptions`. While loading: an empty square with "Loading preview…"; on failure: "Preview unavailable"
+     (the tool still works).
+   - **Layout:** a square box (`.rotate-preview`, 200 × 200, light border, centred image, `object-fit: contain`)
+     and the `<img alt="Page 1 preview">` inside it with `style={{ transform: \`rotate(${turns * 90}deg)\`,
+     transition: 'transform 200ms' }}`. Because the box is square, a 90° turn always fits. Under it: a row with
+     `<button aria-label="Rotate left">↺ Left</button>`, `<button aria-label="Rotate right">↻ Right</button>`, the
+     label from `describeTurns(turns)` in `aria-live="polite"`, and a `Reset` button (turns → 0, hidden while 0).
+   - Buttons call `onChange({ ...value, turns: turnLeft(value.turns) })` / `turnRight`. No preview → the buttons
+     still work (the label updates), so the tool is usable even if pdf.js fails.
+   - Keep the **Pages** select + ranges input + hint from the current panel unchanged (ids `rotate-pages`,
+     `rotate-ranges`).
+   - Styles in `src/components/tools/tools.css` (`.rotate-preview`, `.rotate-controls`, big touch-friendly buttons,
+     the active label). Mobile: buttons side by side under the preview.
+
+5. **Tests** `RotateOptions.test.tsx`: mock `loadPdfJs` (as other panel tests do) → the preview image appears with
+   `transform: rotate(0deg)`; click Right → `onChange` called with `turns: 1`; rerender with `turns: 1` → the image
+   style is `rotate(90deg)` and the label reads "Turned 90° right"; Left from 0 → `turns: 3`, label "Turned 90°
+   left"; two Rights → "Turned 180°"; Reset → `turns: 0` and Reset hidden; ranges box only for custom pages;
+   disabled fieldset during processing. `ToolsApp.test.tsx`: the Rotate page shows the Left / Right buttons and a
+   disabled Rotate button at first.
+
+6. **Guardrails:** the preview is display-only — never write the CSS turn into the file; the file gets exactly
+   `turns * 90` added to each chosen page's existing rotation (same `nextRotation`); no per-page thumbnails or
+   per-page arrows here — that grid is Task 58 Organize, where per-page rotate arrives on the same grid; keep
+   `noNetwork` clean (no `fetch`).
+
+**Verify (user):** drop the GOA file → page 1 preview appears → click Right: the preview turns, label "Turned 90°
+right", Rotate PDF becomes enabled → click Right again: "Turned 180°" → click Left: back to 90° right → Reset →
+button disabled again; run with 90° right → Open in editor: pages landscape; sideways scan → one click fixes it.
+
+**Land:** together with Task 57 in one commit `Rotate PDF tool (Task 57)`; merge `tool-rotate` → `main`.
 
 ### Task 58 — Organize PDF  🔲 TODO → branch `tool-organize`   *(Easy · 2–3 days)*
 1. Register `organize` (single PDF, but **Add pages from another PDF** button accepts more).

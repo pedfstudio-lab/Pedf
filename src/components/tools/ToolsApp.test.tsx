@@ -17,6 +17,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Split PDF/ }).getAttribute('href')).toBe('/tools/split');
     expect(screen.getByRole('link', { name: /JPG to PDF/ }).getAttribute('href')).toBe('/tools/jpg-to-pdf');
     expect(screen.getByRole('link', { name: /PDF to JPG/ }).getAttribute('href')).toBe('/tools/pdf-to-jpg');
+    expect(screen.getByRole('link', { name: /Rotate PDF/ }).getAttribute('href')).toBe('/tools/rotate');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(7);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -60,5 +62,17 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByLabelText('Format')).toBeTruthy();
     expect(screen.getByLabelText('Quality')).toBeTruthy();
     expect(screen.getByLabelText('Pages')).toBeTruthy();
+  });
+
+  it('opens Rotate PDF with angle and page-range options', () => {
+    render(<ToolsApp slug="rotate" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Rotate PDF');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Rotate left' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Rotate right' })).toBeTruthy();
+    expect(screen.getByLabelText('Pages')).toBeTruthy();
+    const rotate = screen.getByRole('button', { name: 'Rotate PDF' }) as HTMLButtonElement;
+    expect(rotate.disabled).toBe(true);
+    expect(rotate.title).toBe('Click Left or Right to choose the direction first.');
   });
 });

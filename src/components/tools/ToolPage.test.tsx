@@ -36,6 +36,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); takePendingFiles(); });
 
 describe('ToolPage', () => {
+  it('uses canRun to explain a disabled action and enables it when the reason clears', () => {
+    const canRun = vi.fn((options: Record<string, unknown>) => options.label === 'Ready' ? undefined : 'Choose an option first.');
+    show({ ...dummy, canRun });
+    pick(file('one.pdf'));
+    const button = screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.title).toBe('Choose an option first.');
+    expect(screen.getByText('Choose an option first.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Output label'), { target: { value: 'Ready' } });
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('false');
+    expect(screen.queryByText('Choose an option first.')).toBeNull();
+  });
+
   it('enforces a two-file minimum after picking and removing files', () => {
     show({ ...dummy, minInputs: 2 });
     pick(file('one.pdf'));

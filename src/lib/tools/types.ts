@@ -28,6 +28,7 @@ export interface ToolDefinition {
   accepts: 'pdf' | 'image' | 'pdf-or-image';
   multiple: boolean;
   minInputs?: number;
+  canRun?(options: ToolOptions, inputs: File[]): string | undefined;
   run(inputs: File[], options: ToolOptions, ctx: ToolContext): Promise<ToolOutput[]>;
   Options?: ComponentType<ToolOptionsProps>;
   defaultOptions: ToolOptions;
