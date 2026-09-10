@@ -5,6 +5,7 @@ import { splitTool } from '@/lib/tools/split';
 import { jpgToPdfTool } from '@/lib/tools/jpgToPdf';
 import { pdfToJpgTool } from '@/lib/tools/pdfToJpg';
 import { rotateTool } from '@/lib/tools/rotate';
+import { organizeTool } from '@/lib/tools/organize';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -19,6 +20,7 @@ if (!getTool('split')) registerTool(splitTool);
 if (!getTool('jpg-to-pdf')) registerTool(jpgToPdfTool);
 if (!getTool('pdf-to-jpg')) registerTool(pdfToJpgTool);
 if (!getTool('rotate')) registerTool(rotateTool);
+if (!getTool('organize')) registerTool(organizeTool);
 
 function ToolsIndex() {
   const tools = listTools();

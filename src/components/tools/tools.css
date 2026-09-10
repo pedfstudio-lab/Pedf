@@ -65,6 +65,20 @@
 .rotate-turn-button:hover:not(:disabled) { border-color: var(--site-blue); background: #e6efff; }
 .rotate-turn-label { min-width: 138px; color: var(--site-ink); font-size: .9rem; font-weight: 700; text-align: center; }
 .rotate-reset { border: 0; background: transparent; color: var(--site-blue-dark); font: inherit; font-size: .875rem; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.organize-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.organize-toolbar .tool-hint { flex: 1; min-width: 230px; margin: 0; }
+.organize-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; max-height: 560px; overflow-y: auto; overscroll-behavior: contain; list-style: none; padding: 4px; margin: 4px 0 0; }
+.organize-card { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 8px; border: 1px solid var(--site-line); border-radius: 14px; background: #fff; cursor: grab; transition: border-color 120ms, box-shadow 120ms, opacity 120ms; }
+.organize-card.is-dragging { opacity: .45; }
+.organize-card.is-drop-target { border-color: var(--site-blue); box-shadow: 0 0 0 2px rgba(30, 107, 255, .2); }
+.organize-thumbnail { width: 140px; height: 140px; display: grid; place-items: center; justify-self: center; overflow: hidden; border: 1px solid var(--site-line); border-radius: 9px; background: #f5f7fa; color: var(--site-body); font-size: .75rem; text-align: center; }
+.organize-thumbnail img { display: block; max-width: 132px; max-height: 132px; object-fit: contain; transform-origin: center; }
+.organize-blank { width: 90px; height: 118px; display: grid; place-items: center; border: 1px solid #d8e1ed; background: #fff; color: var(--site-body); }
+.organize-caption { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; font-size: .8rem; }
+.organize-caption span { min-width: 0; overflow: hidden; color: var(--site-body); text-overflow: ellipsis; white-space: nowrap; }
+.organize-actions { display: grid; grid-template-columns: repeat(4, 30px); justify-content: center; gap: 5px; }
+.organize-actions button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid #c9d8ed; border-radius: 7px; background: #fff; color: #253754; font: inherit; font-weight: 700; cursor: pointer; }
+.organize-actions button:hover:not(:disabled) { border-color: var(--site-blue); background: var(--site-band); color: var(--site-blue-dark); }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -85,6 +99,8 @@
   .rotate-controls { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rotate-turn-button { min-width: 0; width: 100%; }
   .rotate-turn-label, .rotate-reset { grid-column: 1 / -1; justify-self: center; }
+  .organize-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .organize-thumbnail { width: min(140px, 100%); }
   .tool-result-actions { flex-direction: column; align-items: stretch; }
   .tool-result-actions button, .tool-run > button { width: 100%; }
 }

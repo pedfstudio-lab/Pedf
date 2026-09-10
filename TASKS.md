@@ -7326,17 +7326,160 @@ button disabled again; run with 90° right → Open in editor: pages landscape; 
 
 **Land:** together with Task 57 in one commit `Rotate PDF tool (Task 57)`; merge `tool-rotate` → `main`.
 
-### Task 58 — Organize PDF  🔲 TODO → branch `tool-organize`   *(Easy · 2–3 days)*
-1. Register `organize` (single PDF, but **Add pages from another PDF** button accepts more).
-2. Options component = a thumbnail grid of all pages (offscreen renders, cached), each with: drag handle
-   (reorder), rotate, delete, duplicate; toolbar: **Insert blank page** (after selected; size = neighbour's),
-   **Add pages from PDF…**, **Reset**. The grid state is a pure `OrganizePlan` (`src/lib/tools/organizePlan.ts`:
-   entries `{ sourceFile, sourcePage } | { blank: { w, h } }`, with `move / rotate / remove / duplicate /
-   insertBlank` functions — reuse the ideas in `src/state/pagePlan.ts` but keep this one tool-local). Unit-tested.
-3. `run()`: build a new doc by `copyPages` in plan order (+ blank pages via `addPage([w, h])`), apply rotations.
-4. **Tests:** plan ops; run on the sample with a reversed order → texts reversed; blank inserted at index 2 has no
-   text. **Verify (user):** reorder GOA pages by drag, delete one, add a page from Corporate Governance, download.
-**Land:** `Organize PDF tool (Task 58)`.
+### Task 58 — Organize PDF  🔲 TODO → branch `tool-organize` (already created from `main` at `2f22ca1`)   *(Medium · 2–3 days)*
+
+**What the user gets:** `/tools/organize`. Drop a PDF → a **grid of page thumbnails**, one card per page. On each
+card: **drag** to reorder (plus ◀ ▶ buttons for keyboard and touch), **↺ ↻ rotate this page**, **⧉ duplicate**,
+**＋ blank page after**, **× delete**. Above the grid: page count, a hint "Drop another PDF above to add its pages
+at the end", and **Reset**. Drop a second PDF on the same drop zone and its pages join the grid, so two files can be
+combined page by page. **Organize PDF** builds the new file → download `name-organized.pdf` or **Open in editor**.
+This is where **per-page rotate arrows** arrive (Task 57 Rev 1 deliberately left them out).
+
+**How it works:** the grid is just a list — the **plan**. Each entry says "page N of file X, turned T quarter
+turns" or "a blank page W × H". Every button is a small pure function on that list; the PDF is not touched until
+Organize PDF is pressed. Then a new document is built by copying pages in plan order (the same `copyPages` Merge
+and Split use), adding blanks, and applying each entry's rotation to the copied page's existing rotation. The
+editor's own `src/state/pagePlan.ts` proves the idea (duplicate / insert blank / delete already work there) — copy
+the approach, but keep this plan **tool-local** and JSON-plain (it travels inside `options`).
+
+**Reuse:** `ToolPage` (drop zone accepts more files because the tool is `multiple: true`), `loadPdfJs` /
+`loadPdfLib` / `savePdf` / `outputName` (`pdfIo.ts`), `nextRotation` (`rotateOptions.ts`), `ToolError`,
+`canRun` (Task 57 Rev 1), the thumbnail idea in `src/lib/tools/preview.ts` (page 1 only today — generalise it),
+CSS turn of thumbnails from `RotateOptions.tsx`. No new dependencies.
+
+**Steps**
+
+1. **Plan module** `src/lib/tools/organizePlan.ts` (pure, no DOM, fully unit-tested in `organizePlan.test.ts`)
+   - `export type Turns = 0 | 1 | 2 | 3` (import from `rotateOptions.ts`).
+   - `export type OrganizeEntry =
+       | { id: string; kind: 'page'; fileKey: string; pageIndex: number; turns: Turns }
+       | { id: string; kind: 'blank'; widthPt: number; heightPt: number; turns: 0 }`;
+     `export type OrganizePlan = readonly OrganizeEntry[]`.
+   - `export function fileKey(file: File): string` = `` `${file.name}|${file.size}|${file.lastModified}` `` —
+     stable across re-renders and across the file list being reordered.
+   - `createEntries(fileKey, pageCount, newId)`; `movePage(plan, from, to)` (clamped, no-op when equal);
+     `rotatePage(plan, position, 'left' | 'right')` (uses `turnLeft` / `turnRight`; blanks rotate too — a blank
+     turned 90° becomes a landscape blank: swap `widthPt` / `heightPt` and keep `turns: 0`);
+     `removePage(plan, position)` (may empty the plan — `canRun` guards it); `duplicatePage(plan, position,
+     newId)` (copies `turns`); `insertBlankAfter(plan, position, size, newId)` (size = that page's size in
+     points, as displayed, i.e. rotated size); `reconcilePlan(plan, files: { key: string; pageCount: number }[],
+     newId)` — drops entries whose file is gone, appends `createEntries` for files not yet in the plan, keeps order
+     otherwise; `isIdentityPlan(plan, files)` — true when the plan is exactly all files' pages in file order, no
+     turns, no blanks; `parsePlan(value: unknown): OrganizePlan` — validates JSON from `options`, drops junk.
+   - Tests: every function incl. bounds (`movePage(plan, 0, 99)` clamps), rotate wrap-around, blank turn swaps
+     size, reconcile add/remove/keep, identity true/false, parse rejects bad entries.
+
+2. **Thumbnails** `src/lib/tools/preview.ts` — add
+   `export async function previewPdfPages(file, signal, onPage: (pageIndex, thumbnail: string, sizePt: { w; h })
+   => void, longSidePx = 140)`: one `loadPdfJs` per file, iterate pages **sequentially**, each rendered on an
+   offscreen canvas painted white first with `page.render({ canvasContext, viewport, intent: 'print' })`
+   (background-tab rule — do not use the editor's `renderPage` here), `viewport = page.getViewport({ scale })`
+   with `scale = longSidePx / max(width, height)` of `getViewport({ scale: 1 })` (already the rotated size);
+   `onPage` per page as soon as it is ready; `page.cleanup()`, canvas released, a `setTimeout(0)` yield between
+   pages so a 200-page file streams in without freezing; `signal` aborts the loop; `doc.destroy()` in `finally`.
+   Keep `previewPdf` as it is (the file card uses it).
+
+3. **Option panel** `src/components/tools/OrganizeOptions.tsx` (`ToolOptionsProps`)
+   - Options value = `{ plan: OrganizeEntry[] }`; `DEFAULT_ORGANIZE_OPTIONS = { plan: [] }` in
+     `src/lib/tools/organizeOptions.ts` with `parseOrganizeOptions`.
+   - **Files → plan:** keep a `useRef(Map<fileKey, { file; pageCount?; sizes: {w;h}[]; thumbs: (string |
+     undefined)[]; controller: AbortController }>)`. When `inputs` change: start `previewPdfPages` for new files,
+     abort and drop entries for removed files, and when a file's page count is known call
+     `onChange({ plan: reconcilePlan(plan, files) })`. Never call `onChange` during render — only from effects
+     and handlers.
+   - **Grid** `<ol className="organize-grid">` of `<li className="organize-card" draggable>`: thumbnail
+     `<img>` (or a "…" placeholder until ready; blanks show an empty white card labelled "Blank") with
+     `style={{ transform: rotate(turns * 90deg) }}`, caption "Page N" + a short file name when more than one file
+     is loaded, and the buttons ◀ ▶ ↺ ↻ ⧉ ＋ × with `aria-label`s "Move page N left/right", "Rotate page N
+     left/right", "Duplicate page N", "Insert blank page after N", "Delete page N". Every button → the matching
+     plan function → `onChange`.
+   - **Drag to reorder:** same HTML5 DnD pattern as `ToolPage`'s file list (`dragstart` sets the entry id,
+     `dragover` prevents default, `drop` → `movePage`); a `.is-dragging` class on the moved card and a
+     `.is-drop-target` outline on the hovered one. Touch devices use ◀ ▶.
+   - **Toolbar** above the grid: "N pages", the drop hint, **Reset** (plan = `reconcilePlan([], files)`), all
+     disabled while `disabled`.
+   - Whole panel inside `<fieldset className="tool-options" disabled={disabled}>` with legend "Pages".
+   - Styles in `tools.css`: `.organize-grid` (`grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))`,
+     gap 14px, max-height 560px with `overflow-y: auto`), `.organize-card` (white, 1px border, radius 14px,
+     padding 8px, `cursor: grab`), thumbnail box 140 × 140 with the image centred (`object-fit: contain`,
+     `transition: transform 200ms`), button row of 30 px icon buttons, mobile: two columns.
+
+4. **Tool** `src/lib/tools/organize.ts`
+   - `export const EMPTY_PLAN_ERROR = 'Keep at least one page.'`, `NO_CHANGE_ERROR = 'Move, rotate, delete, or
+     add a page first.'`, `MISSING_FILE_ERROR = 'A file used by the plan was removed. Press Reset and try
+     again.'`, `FORMS_WARNING = 'Form fields are not carried over to the organized file.'`.
+   - `organizeTool = { slug: 'organize', title: 'Organize PDF', description: 'Reorder, rotate, delete, duplicate,
+     and add pages — from one PDF or several.', accepts: 'pdf', multiple: true, minInputs: 1, defaultOptions,
+     Options: OrganizeOptions, icon: '⋮⋮', canRun, run }`.
+   - `canRun(options, inputs)`: plan empty → `EMPTY_PLAN_ERROR`; `isIdentityPlan` → `NO_CHANGE_ERROR`;
+     an entry's `fileKey` not among `inputs` → `MISSING_FILE_ERROR`; else `undefined`.
+   - `run(inputs, options, ctx)`: `signal.throwIfAborted()`; parse the plan and re-check the three conditions
+     with `ToolError`s; load each referenced input once with `loadPdfLib` into a `Map<fileKey, PDFDocument>`;
+     warn once via `onWarning(FORMS_WARNING)` if any source catalog has `AcroForm` (`doc.catalog.has(
+     PDFName.of('AcroForm'))`); `const output = await PDFDocument.create()`; for each entry (progress
+     "Adding page i of n"): page → `const [copied] = await output.copyPages(source, [entry.pageIndex])`,
+     `copied.setRotation(degrees(nextRotation(copied.getRotation().angle, entry.turns * 90)))`,
+     `output.addPage(copied)`; blank → `output.addPage([entry.widthPt, entry.heightPt])`; `throwIfAborted`
+     each loop and a `setTimeout(0)` yield every 20 pages; `savePdf(output)`; one output
+     `{ name: outputName(inputs[0], 'organized'), bytes, mime: 'application/pdf' }`; final progress "Organized PDF
+     ready". (Optional speed-up: group consecutive entries from the same source into one `copyPages` call.)
+
+5. **Register** in `ToolsApp.tsx` after `rotate`; `ToolsApp.test.tsx` → 8 cards and the Organize page shows a
+   grid legend "Pages" and a disabled Organize PDF button with `NO_CHANGE_ERROR`… (with no file the button is
+   disabled by `minInputs` already; assert the heading and the drop zone).
+
+6. **Tests**
+   - `organize.test.ts` (pdf-lib fixture of 4 pages with distinct text, like `rotate.test.ts`): reversed plan →
+     reopened texts reversed; blank inserted at position 2 with size 300 × 400 → page 3 has no text and
+     `getViewport({scale:1})` is 300 × 400; `turns: 1` on entry 0 → `rotate` 90 and text preserved; two sources
+     interleaved (A1, B1, A2, B2) → texts in that order; duplicate → same text twice; empty plan →
+     `EMPTY_PLAN_ERROR`; identity plan → `NO_CHANGE_ERROR`; a plan naming a missing file → `MISSING_FILE_ERROR`;
+     already-aborted signal → rejects before reading; `onProgress` last call "Organized PDF ready"; a source with
+     a form field → `onWarning(FORMS_WARNING)` once.
+   - `OrganizeOptions.test.tsx` (mock `loadPdfJs`-based `previewPdfPages` from `@/lib/tools/preview`): one file
+     with 3 pages → 3 cards with thumbnails and captions; clicking "Delete page 2" → `onChange` with a 2-entry
+     plan; "Rotate page 1 right" → `turns: 1` and the image style `rotate(90deg)`; "Move page 3 left" → order
+     1, 3, 2; "Duplicate page 1" → 4 entries; "Insert blank page after 1" → a blank with page 1's size; Reset →
+     original; adding a second file (rerender with two inputs) → its pages appended; removing it → its pages
+     gone; `disabled` → fieldset disabled.
+   - `preview.test.ts`: `previewPdfPages` calls `onPage` once per page in order with `intent: 'print'`, stops
+     on abort, destroys the doc.
+   - `noNetwork` needs nothing.
+
+7. **Guardrails:** output pages are **copied, never rasterised** — thumbnails are display-only; keep every
+   user-facing message a `ToolError`; `intent: 'print'` for thumbnails; Merge stays file-level (no page moves
+   there); do not touch the editor's `pagePlan.ts`; no `fetch`.
+
+**Verify (user):** GOA → drag page 12 to position 2, delete one page, duplicate the cover, rotate one page with
+↻, insert a blank after page 3, then drop the Corporate Governance PDF → its pages appear at the end → move one of
+them to position 2 → Organize PDF → download → open in another viewer: order, rotation, blank, and the foreign
+page all correct; Open in editor works. A 100+ page file: thumbnails stream in without freezing; Cancel stops
+the build. Phone: ◀ ▶ buttons reorder.
+
+**Land:** merge `tool-organize` → `main`. Commit: `Organize PDF tool (Task 58)`.
+
+**Review of the Task 58 build (2026-09-10):** ✅ accepted with two fixes (Rev 1 below). Codex's build: typecheck /
+lint / build green, 752 tests (27 new); live on GOA + Corporate Governance (101 pages): rotate, delete, move,
+duplicate, blank, second file appended with per-file captions, build in ~1 s, Open in editor shows 101 pages with
+page 1 landscape and the blank in matching landscape size.
+
+#### Task 58 — Revision 1  ✅ DONE by Claude (2026-09-10) — no output bloat, and all pages laid out at once
+
+1. **Output bloat (real defect):** `run()` copied pages one `copyPages` call at a time. Every call starts a fresh
+   object copier, so fonts and images shared between pages were copied again for each page. Measured on
+   Corporate Governance (84 pages): 2.9 MB in → **28.0 MB** out page-by-page, 2.9 MB in one call; the 101-page
+   live run produced 31.9 MB. Fix: collect each source's page indices in plan order (repeats included for
+   duplicates), **one `copyPages` call per source**, then assemble the copies in plan order and apply each
+   entry's rotation. Test: a 20-page fixture sharing one image, moved and duplicated → the output has **one**
+   image object and stays under 1.5× the input. Live: Corporate Governance organized → **2.9 MB**, build 0.5 s.
+2. **Pages laid out before thumbnails (data-loss trap):** the grid only grew as thumbnails streamed in, so
+   pressing Organize PDF on a long file while previews were still loading would have silently dropped the pages
+   not yet shown. Fix: `previewPdfPages` gains an `onCount(pageCount)` callback fired before the first
+   thumbnail; the panel creates every card at once (placeholders "…" until each thumbnail lands; Insert blank
+   stays disabled until that page's size is known). Live: 84 cards in 0.26 s with 83 placeholders. Tests in
+   `preview.test.ts` and `OrganizeOptions.test.tsx`.
+
+**Known limit:** form fields are not carried over (warned once), same as Split.
 
 ### Task 59 — Page numbers  🔲 TODO → branch `tool-page-numbers`   *(Easy · 1–2 days)*
 1. Register `page-numbers` (single PDF). Options: **Position** (6: top/bottom × left/centre/right), **Format**

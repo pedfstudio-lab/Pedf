@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { siteHref } from '@/lib/site/config';
 import { navigate } from '@/lib/site/navigate';
 import { setPendingFiles, takePendingFiles } from '@/lib/site/pendingFiles';
@@ -26,7 +26,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   const dragged = useRef<number | null>(null);
   const running = status === 'running';
   const minimumInputs = tool.minInputs ?? 1;
-  const inputFiles = files.map(({ file }) => file);
+  const inputFiles = useMemo(() => files.map(({ file }) => file), [files]);
   const canRunReason = tool.canRun?.(options, inputFiles);
   const runDisabled = files.length < minimumInputs || !!canRunReason;
   const Options = tool.Options;

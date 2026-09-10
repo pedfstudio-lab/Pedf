@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { previewPdf } from './preview';
+import { previewPdf, previewPdfPages } from './preview';
 
 const { loadPdfJs, renderPage } = vi.hoisted(() => ({ loadPdfJs: vi.fn(), renderPage: vi.fn() }));
 vi.mock('./pdfIo', () => ({ loadPdfJs }));
@@ -48,5 +48,64 @@ describe('local PDF previews', () => {
     await rejection;
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('streaming page previews', () => {
+  function setupPages(count = 3) {
+    const destroy = vi.fn(async () => {});
+    const pages = Array.from({ length: count }, (_, index) => ({
+      getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: (300 + index * 10) * scale, height: 500 * scale })),
+      render: vi.fn((options: { intent: string }) => ({
+        promise: Promise.resolve(), cancel: vi.fn(), intent: options.intent,
+      })),
+      cleanup: vi.fn(),
+    }));
+    const getPage = vi.fn(async (pageNumber: number) => pages[pageNumber - 1]);
+    loadPdfJs.mockResolvedValue({ doc: { getPage, numPages: count, destroy } });
+    const context = { fillStyle: '', fillRect: vi.fn() };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(function (this: HTMLCanvasElement) {
+      return `data:image/png;base64,${this.width}x${this.height}`;
+    });
+    return { destroy, getPage, pages, context };
+  }
+
+  it('renders pages sequentially with print intent and reports each size', async () => {
+    const { destroy, getPage, pages, context } = setupPages(2);
+    const onPage = vi.fn<(pageIndex: number, thumbnail: string, size: { w: number; h: number }) => void>();
+    await previewPdfPages(new File(['pdf'], 'pages.pdf'), new AbortController().signal, onPage);
+    expect(getPage.mock.calls.map(([pageNumber]) => pageNumber)).toEqual([1, 2]);
+    expect(onPage.mock.calls.map(([pageIndex, , size]) => [pageIndex, size])).toEqual([
+      [0, { w: 300, h: 500 }], [1, { w: 310, h: 500 }],
+    ]);
+    expect(pages.every((page) => page.render.mock.calls[0]?.[0].intent === 'print')).toBe(true);
+    expect(pages.every((page) => page.cleanup.mock.calls.length === 1)).toBe(true);
+    expect(context.fillRect).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('reports the page count once before the first thumbnail', async () => {
+    setupPages(3);
+    const calls: string[] = [];
+    await previewPdfPages(
+      new File(['pdf'], 'pages.pdf'),
+      new AbortController().signal,
+      (pageIndex) => calls.push(`page-${pageIndex}`),
+      140,
+      (count) => calls.push(`count-${count}`),
+    );
+    expect(calls).toEqual(['count-3', 'page-0', 'page-1', 'page-2']);
+  });
+
+  it('stops between pages when aborted and still destroys the document', async () => {
+    const { destroy, getPage } = setupPages(3);
+    const controller = new AbortController();
+    const onPage = vi.fn(() => controller.abort());
+    await expect(previewPdfPages(new File(['pdf'], 'pages.pdf'), controller.signal, onPage))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(onPage).toHaveBeenCalledOnce();
+    expect(getPage).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 });
