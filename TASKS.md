@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → **59 Page numbers** → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7481,7 +7481,10 @@ page 1 landscape and the blank in matching landscape size.
 
 **Known limit:** form fields are not carried over (warned once), same as Split.
 
-### Task 59 — Page numbers  🔲 TODO → branch `tool-page-numbers`   *(Easy · 1–2 days)*
+### PARKED — Task 59 — Page numbers  ⏸ (parked 2026-09-10 by the user: "leave this task for now"; no branch — create `tool-page-numbers` from `main` when resumed)   *(Easy · 1–2 days)*
+> When resumed, write it in full first. Additions agreed in discussion: "of N" means the last number shown (so
+> skipping the cover gives "Page 1 of 15"); a **White** colour for dark photo pages; a **Skip the first page**
+> checkbox. Its rotation-aware position helper is the same maths Task 57A needs.
 1. Register `page-numbers` (single PDF). Options: **Position** (6: top/bottom × left/centre/right), **Format**
    (`1` · `Page 1` · `1 / N` · `Page 1 of N`), **Start at** (default 1), **Pages** (All · ranges), **Font size**
    (10 / 12 / 14), **Colour** (black / grey / blue), **Margin** (small / normal). Live preview on the first
@@ -7494,17 +7497,223 @@ page 1 landscape and the blank in matching landscape size.
    **Verify (user):** bottom-centre `Page 1 of 16` on GOA; a rotated page still shows it at the bottom.
 **Land:** `Page numbers tool (Task 59)`.
 
-### Task 60 — Watermark  🔲 TODO → branch `tool-watermark`   *(Easy · 2 days)*
-1. Register `watermark` (single PDF). Options: **Type** (Text · Image), text (default `CONFIDENTIAL`), font
-   (Helvetica / Times / Courier standard), size, colour, **Opacity** (10–100%), **Angle** (0 · 45 · −45),
-   **Layout** (Centre · Tiled 3×3 · Custom corner), **Pages** (All · ranges). Image: PNG/JPG, scale %. Live preview
-   on page 1.
-2. `run()`: `page.drawText` / `page.drawImage` with `{ opacity, rotate: degrees(angle) }`; centre maths per page
-   size and rotation (share the helper from Task 59). v1 draws **over** the content (pdf-lib can't draw under;
-   opacity makes it read as a watermark) — say so in the UI copy ("semi-transparent stamp").
-3. **Tests:** reopen → text found on every selected page; opacity operator present (pdf-lib `ExtGState`); tiled
-   → 9 occurrences. **Verify (user):** `DRAFT` at 45°, 30% on all GOA pages; image logo bottom-right.
-**Land:** `Watermark tool (Task 60)`.
+### Task 60 — Watermark  🔲 TODO → branch `tool-watermark` (create from `main`)   *(Easy–Medium · 2–3 days)*
+
+**What the user gets:** `/tools/watermark`. Drop **one** PDF → choose **Text** or **Image** → set the look →
+**Watermark PDF** → download `name-watermarked.pdf` or **Open in editor**. A preview of the first chosen page shows
+the real result and updates as options change.
+
+- **Text:** the words (default `CONFIDENTIAL`), font (Sans / Serif / Mono, plus **Bold**), size (**Auto** · 24 ·
+  36 · 48 · 72), colour (Grey · Black · Red · Blue · **White** — white is for dark photo pages like GOA).
+- **Image:** a logo or stamp picked inside the panel (PNG, JPG, WebP), width as a % of the page width (default 40%).
+- **For both:** **Opacity** (10–100%, default 30%), **Angle** (Diagonal 45° · Horizontal · Diagonal −45° ·
+  Vertical 90°), **Position** (a 3 × 3 grid picker, default centre) or **Tile across the page**, and **Pages**
+  (All pages · Only these pages).
+
+**Use cases:** "CONFIDENTIAL" or "DRAFT" on a report before sharing; "COPY" or "SAMPLE" on certificates and ID
+copies sent to agents (common in India — "Only for bank KYC" across an Aadhaar/PAN copy); a company logo on every
+page of a quotation or brochure.
+
+**How it works (no rendering, lossless):** the watermark is drawn **on top of** each chosen page as real text or
+one embedded image, semi-transparent. Nothing is turned into a picture; text stays selectable, the file grows by a
+few KB (or by the image once). v1 is **over the content only** — say so in the panel ("a semi-transparent stamp over
+your pages"); "behind the content" is a later option.
+
+**Watermark label (added 2026-09-11, user: "add it"):** every watermark we draw is wrapped in the PDF standard's
+"this is a watermark" label (marked content `/Artifact` with `/Subtype /Watermark`). Nothing changes on screen, in
+print, or in size (a few bytes). Why: a future **Remove watermark** tool can delete exactly our watermark and nothing
+else (e.g. a "DRAFT" stamp on a 20-page report once it is approved), and readers — including our voice reader later —
+can skip the stamp instead of reading "CONFIDENTIAL" on every page. The document's own text is untouched and stays
+fully readable and askable.
+
+**Turned pages (shared helper, reused later by Sign 62, Page numbers 59 and the editor fix 57A):** a page turned by
+Rotate/Organize/a scanner carries a `/Rotate` note, and viewers turn it on screen. If we drew in the page's raw
+coordinates, the watermark would land off-centre and read sideways. So **all layout happens "as the reader sees the
+page"**, and only at the end each point is converted to the page's raw coordinates and the page's turn is added to
+the angle.
+
+**Reuse:** `loadPdfLib` / `loadPdfJs` / `savePdf` / `outputName` (`pdfIo.ts`), `selectedPageIndices`
+(`pdfToJpgOptions.ts` — keep the option keys `pageSelection` / `ranges`), `ToolError`, `canRun` (Task 57 Rev 1),
+`prepareImageForPdf` (`jpgToPdf.ts`: upright JPEG/PNG bytes, WebP → PNG), `HEIC_GUIDANCE` (`files.ts`), the preview
+box and print-intent render from `RotateOptions.tsx`. No new dependencies.
+
+**Steps**
+
+1. **Shared helper** `src/lib/pdf/readerFrame.ts` (pure maths, unit-tested) — put it in `lib/pdf`, not `lib/tools`,
+   because the editor will use it in 57A.
+   - `readerFrame(page: PDFPage)` → `{ x0, y0, W, H, rotation: 0 | 90 | 180 | 270, width, height }` from
+     `page.getCropBox()` (x0, y0, W, H in raw coordinates) and `page.getRotation().angle` snapped to a multiple of
+     90 and normalised to 0–270 (reuse `nextRotation(angle, 0)` from `rotateOptions.ts`). `width` / `height` are the
+     page **as the reader sees it**: W × H for 0 / 180, H × W for 90 / 270.
+   - `readerToRaw(frame, u, v)` → `{ x, y }`, where (u, v) is a point as the reader sees it, measured from the
+     **bottom-left of the displayed page**:
+     - 0°: `x = x0 + u`, `y = y0 + v`
+     - 90°: `x = x0 + W − v`, `y = y0 + u`
+     - 180°: `x = x0 + W − u`, `y = y0 + H − v`
+     - 270°: `x = x0 + v`, `y = y0 + H − u`
+   - `readerAngleToRaw(frame, degrees)` → `degrees + frame.rotation` (so text drawn "horizontal for the reader"
+     reads horizontal on a turned page).
+   - Tests: for each of the four turns, the four displayed corners map to the right raw corners; a CropBox that
+     does not start at (0, 0) is respected; and an end-to-end check — draw "X" with pdf-lib at reader point
+     (width / 2, 20) with `rotate: degrees(readerAngleToRaw(frame, 0))` on pages turned 0/90/180/270, reopen with
+     pdf.js, convert the text's origin with `page.getViewport({ scale: 1 })` → it sits near the **bottom centre**
+     of the displayed page and its direction is left-to-right on screen.
+
+2. **Options** `src/lib/tools/watermarkOptions.ts` (+ test)
+   - `WatermarkOptionsValue`: `mode: 'text' | 'image'`; `text`; `font: 'sans' | 'serif' | 'mono'`; `bold`;
+     `size: 'auto' | 24 | 36 | 48 | 72`; `colour: 'grey' | 'black' | 'red' | 'blue' | 'white'`; `opacity` (0.1–1,
+     default 0.3); `angle: 45 | 0 | -45 | 90`; `position: 'tl' | 't' | 'tr' | 'l' | 'c' | 'r' | 'bl' | 'b' |
+     'br' | 'tile'` (default `'c'`); `imageBytes?: Uint8Array`, `imageMime?: 'image/png' | 'image/jpeg'`,
+     `imageName?`, `imageWidth?`, `imageHeight?`; `imageScale` (0.1–1, default 0.4); `pageSelection`; `ranges`.
+     Plain values only — `ToolPage` passes options through `structuredClone` (a `Uint8Array` is fine, a `File` is
+     not reliable).
+   - `DEFAULT_WATERMARK_OPTIONS`, `parseWatermarkOptions(options)` (junk → defaults), colour table (grey = 0.5,
+     black, red `#d32f2f`, blue `#1e6bff`, white), font table (sans → Helvetica / HelveticaBold, serif → TimesRoman /
+     TimesRomanBold, mono → Courier / CourierBold).
+   - `watermarkProblem(value)` → a reason string or `undefined` (used by `canRun` and `run`):
+     text mode + empty text → **"Type the watermark text first."**; text with characters the standard fonts cannot
+     draw (anything outside basic Latin: Hindi, emoji…) → **"Use English letters, numbers and common symbols for
+     now."**; text over 100 characters → **"Keep the watermark under 100 characters."**; image mode without an
+     image → **"Choose an image for the watermark first."**
+   - Tests: parse fallbacks, each problem message, a clean value → `undefined`.
+
+3. **Layout** `src/lib/tools/watermarkLayout.ts` (pure, no pdf-lib, unit-tested) — everything in **reader space**.
+   - `watermarkPlacements({ pageWidth, pageHeight, itemWidth, itemHeight, angle, position, margin })` → a list of
+     `{ u, v }` start points. Each item is drawn from its start point (the bottom-left corner of the text / image)
+     and turned by `angle` around that point, the way pdf-lib's `rotate` works.
+   - **Centring an item** at point C: start = C − (w/2)(cos a, sin a) − (h/2)(−sin a, cos a).
+   - **3 × 3 positions:** margin = 5% of the shorter page side. Work out the turned item's bounding box and push it
+     against the chosen edges (top-left → touching top and left margins; `c` → page centre; etc.).
+   - **Tile:** a grid laid out along the watermark's own direction, centred on the page, spacing `w × 1.5` along
+     the text and `h × 4` across it, covering the whole page diagonal; drop items whose centre is more than
+     `w / 2 + h` outside the page.
+   - **Auto size (text):** the font size that makes the text as long as 60% of the page width (horizontal), 60% of
+     the page diagonal (±45°) or 60% of the page height (vertical); clamp to 12–200 pt. Computed **per page** — pages
+     can differ in size. Export `autoFontSize(textWidthAt1pt, pageWidth, pageHeight, angle)`.
+   - Tests: centre item's box is centred for all four angles; corner positions keep the turned box inside the
+     margins; tile covers the four page corners and returns a sensible count (e.g. 6–30 on A4 with the default
+     text); auto size grows with the page.
+
+4. **Tool** `src/lib/tools/watermark.ts` (+ test)
+   - `WATERMARK_INPUT_ERROR = 'Choose one PDF file to watermark.'`.
+   - `export async function prepareWatermarkAssets(doc, value)` → embeds **once per document**: the standard font
+     (`doc.embedFont(StandardFonts…)`) or the image (`embedPng` / `embedJpg`). Every page then uses the same
+     objects — the Organize lesson: embedding per page would copy the image once per page.
+   - `export function watermarkPage(page, value, assets)` — the one function used by both the run and the preview:
+     `frame = readerFrame(page)` → item size (text: `font.widthOfTextAtSize(text, size)` and the font's height
+     without the descender; image: `frame.width × imageScale`, height from the image's aspect ratio) →
+     `watermarkPlacements(...)` → for each start point: `readerToRaw` + `readerAngleToRaw`, then
+     `page.drawText(text, { x, y, size, font, color, opacity, rotate: degrees(angle) })` or
+     `page.drawImage(image, { x, y, width, height, opacity, rotate: degrees(angle) })`.
+   - **Label the watermark** on each page: before the page's first watermark draw, push the begin-marked-content
+     operator `/Artifact << /Type /Pagination /Subtype /Watermark >> BDC`; after the last draw (all tiles included),
+     push `EMC`. One pair per page. With pdf-lib this is `page.pushOperators(PDFOperator.of(<BDC name>, [PDFName.of(
+     'Artifact'), <dict>]))` and `PDFOperator.of(<EMC name>)` — confirm the exact operator-name constants in pdf-lib
+     and that the draws between them land in the same content stream, in order (the test below checks it). Put this
+     inside `watermarkPage`, so the preview shows exactly what the file gets.
+   - `run(inputs, options, ctx)`: `signal.throwIfAborted()`; exactly one input or `ToolError(WATERMARK_INPUT_ERROR)`;
+     `watermarkProblem` → `ToolError`; `loadPdfLib`; `pages = selectedPageIndices(value, count)`;
+     `prepareWatermarkAssets`; loop with progress **"Watermarking page i of n"**, `throwIfAborted` each page and a
+     `setTimeout(0)` yield every 20 pages; `savePdf`; one output `{ name: outputName(file, 'watermarked'), bytes,
+     mime: 'application/pdf' }`; last progress **"Watermarked PDF ready"**.
+   - `watermarkTool = { slug: 'watermark', title: 'Watermark PDF', description: 'Stamp text or a logo across your
+     pages — see it before you save.', accepts: 'pdf', multiple: false, defaultOptions, Options: WatermarkOptions,
+     icon: '◈', canRun: (options) => watermarkProblem(parseWatermarkOptions(options)), run }`.
+
+5. **Option panel** `src/components/tools/WatermarkOptions.tsx` (+ test)
+   - `<fieldset className="tool-options">`, legend "Watermark". A **Text / Image** segmented switch at the top.
+   - Text mode: text input (`maxLength` 100), Font select + Bold checkbox, Size select, Colour swatches (five round
+     buttons with `aria-label`s and a visible selected ring).
+   - Image mode: "Choose image…" button → hidden `<input type="file" accept="image/png,image/jpeg,image/webp">` →
+     HEIC → `HEIC_GUIDANCE`; over 10 MB → **"Choose an image smaller than 10 MB."**; otherwise `prepareImageForPdf`
+     → store bytes, mime, name, width, height in options; show the file name and a small thumbnail with **Remove**.
+     Width slider 10–100% (label "Width: 40% of the page").
+   - Shared: Opacity slider (label "Opacity: 30%"), Angle select, **Position grid** (3 × 3 small buttons with
+     `aria-label`s like "Top left", "Centre"; the selected one filled) plus a **Tile across the page** checkbox that
+     disables the grid, and the Pages select + ranges input copied from `RotateOptions.tsx`.
+   - **Preview** (square box ~240 px, like Rotate's): keep the loaded pdf-lib source in a ref per file. On every
+     option change, **debounce 300 ms**, then: copy the first chosen page (page 1 if the range is invalid) into a
+     new one-page document → `prepareWatermarkAssets` + `watermarkPage` → `save()` → render with pdf.js
+     (`intent: 'print'`, white background, long side ~240 px) → show it. A newer change cancels an older preview.
+     "Updating preview…" while it works; "Preview unavailable" on failure (the tool still runs). Show the
+     `watermarkProblem` message under the preview when there is one.
+   - Styles in `tools.css`: segmented switch, swatches, the 3 × 3 grid, preview box; mobile stacks the controls.
+
+6. **Register** in `ToolsApp.tsx` after `organize`; `ToolsApp.test.tsx` → 9 cards, the Watermark page opens with the
+   Text / Image switch and Watermark PDF enabled once a file is chosen with the default text.
+
+7. **Tests**
+   - `watermark.test.ts` (4-page pdf-lib fixture with page 3 turned 90°): default options → reopened text contains
+     `CONFIDENTIAL` on every page; the operator list shows a transparency setting (`ca 0.3`); custom range `2-3` →
+     only pages 2 and 3 have it; on the turned page the watermark's centre is at the **displayed** page centre
+     (±2 pt) and it reads at 45° on screen; tile → more than one occurrence per page; image mode with a 20-page
+     fixture → the output has exactly **one** extra image object and every page draws it; output size stays within
+     input + 50 KB for text mode; each `watermarkProblem` message reaches `run` as a `ToolError`; two files →
+     `WATERMARK_INPUT_ERROR`; already-aborted signal → rejects before reading; **label:** on every watermarked page
+     pdf.js `getOperatorList()` shows a begin-marked-content with tag `Artifact` before the watermark's text / image
+     and the matching end after it, with the page's own content outside that block, and
+     `getTextContent({ includeMarkedContent: true })` shows the watermark text inside a marked-content item while
+     the page's own text is not; pages outside the chosen range have no such block.
+   - `WatermarkOptions.test.tsx` (mock `loadPdfJs` / pdf-lib preview path): switching to Image shows the picker and
+     hides text fields; choosing a HEIC shows `HEIC_GUIDANCE`; a colour swatch click → `onChange` with that colour;
+     Tile disables the grid; opacity slider label follows the value; the preview requests a render after the
+     debounce (fake timers) and a second quick change cancels the first; fieldset disabled while processing.
+   - `readerFrame.test.ts`, `watermarkLayout.test.ts`, `watermarkOptions.test.ts` as described above.
+   - `noNetwork` needs nothing.
+
+8. **Guardrails:** never rasterise pages; embed the font / image **once per document**; every watermark drawing sits
+   inside the watermark label, and nothing else does; all layout in reader space
+   through `readerFrame` (no special cases for turned pages anywhere else); every user-facing message is a
+   `ToolError` or a `canRun` reason; preview renders with `intent: 'print'`; no `fetch`; do not touch the editor —
+   57A will adopt `readerFrame` later.
+
+**Verify (user):** GOA → default `CONFIDENTIAL`, diagonal, 30% grey → every page; switch colour to **White** →
+readable on the dark photo pages; **Tile** → repeated across the page; Image mode with a PNG logo, top-right, 20%
+width → transparent parts stay transparent; Corporate Governance → the text under the watermark stays readable and
+selectable; a file turned with **Rotate** first → the watermark is still centred and at the same angle as on
+upright pages; output size ≈ input + a few KB (or + the image once); Open in editor works.
+
+**Known limits:** English letters, numbers and common symbols only (Indian-language watermarks need an embedded
+Unicode font — later); drawn over the content only; a watermark is a visible stamp, not protection — anyone with a
+PDF editor can remove it, and the label makes our own watermarks easier to remove cleanly (accepted on purpose;
+Acrobat's own Remove button may not recognise it, since it looks for Acrobat's extra markers); this tool cannot
+remove watermarks already in a PDF. **Later, not in this task:** a Remove watermark tool for labelled watermarks,
+sticker (annotation) watermarks and our own; the voice reader skipping labelled watermarks.
+
+**Land:** merge `tool-watermark` → `main`. Commit: `Watermark PDF tool (Task 60)`.
+
+**Review of the Task 60 build (2026-09-11):** ✅ accepted — typecheck / lint / build green, 796 tests (41 new). Live on
+GOA with pages turned 0/90/180/270 by the Rotate tool: the text watermark sits exactly at the displayed centre at 45°
+on every page (+5 KB); a logo at top-right, 20% width, lands on the margin on upright and turned pages (+7 KB for a
+5 KB logo on 16 pages → embedded once). Not seen by eye (screenshots timed out): the preview picture and PNG
+transparency — user to check.
+
+#### Task 60 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself") — drag the watermark anywhere
+
+**Why (user request):** "instead of giving arrows for placing watermarks, can we give user custom movement of wherever
+they want to place the watermark?" The 3 × 3 grid is kept as small **Quick spots** shortcuts (one click for centre /
+corners); dragging fine-tunes.
+
+- **Options:** `position: 'custom'` + `customX` / `customY` — the stamp's centre as shares of the page the reader sees
+  (x from the left, y from the top), default 0.5 / 0.5, out-of-range → 0.5.
+- **Layout:** `centreRange(pageW, pageH, itemW, itemH, angle)` gives the centre limits that keep the whole turned
+  stamp on the page (centred if it cannot fit); `watermarkPlacements` places a custom spot at the same share of every
+  chosen page, clamped — so pages of other sizes, landscape or turned get the same relative spot.
+- **Tool:** `watermarkPage()` now returns its geometry (reader page size, item size, font size, angle, placements);
+  the preview uses it to put the drag handle exactly over the stamp.
+- **Panel:** the preview is a bigger stage (long side 400 px, rendered at up to 2× for sharpness) holding the page
+  picture plus a dashed, draggable box over the stamp. While dragging (or while the real preview refreshes), the
+  plain page is shown with a live copy of the stamp (CSS text or the logo, same angle and fade); on release the real
+  result replaces it. Snaps to the page centre (guide lines) and to the edge limits within 2%; arrow keys nudge 1%,
+  Shift + arrow 5%; a click without moving keeps the chosen quick spot; hidden while tiling. Pointer capture is
+  wrapped in `try` — a refused capture must not stop the drag (found live).
+- **Tests (10 new):** option parse, centre-at-share and edge clamp, bigger-than-page item, a dragged spot landing at
+  25% / 20% of the displayed page on pages turned 0/90/180/270 (pdf.js positions), panel drag with snap guides,
+  click-without-move, arrow nudges, tile hides the handle. 806 tests / typecheck / lint / build green.
+- **Live (GOA):** dragging from the centre shows both guide lines, moving to 25% / 25% updates the stamp live, the
+  quick spot deselects, and the real preview refreshes at the new spot; a file built with that spot puts
+  "CONFIDENTIAL" at 25% across / 25% down on upright and turned pages. The drag was driven by pointer events in the
+  page (the review browser pane was collapsed), not the OS mouse.
 
 ### Task 61 — Repair PDF  🔲 TODO → branch `tool-repair`   *(Easy · 1–2 days)*
 1. Register `repair` (single PDF). No options; a **What we did** report in the result card.

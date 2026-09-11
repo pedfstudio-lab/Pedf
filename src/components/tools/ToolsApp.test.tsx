@@ -19,7 +19,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /PDF to JPG/ }).getAttribute('href')).toBe('/tools/pdf-to-jpg');
     expect(screen.getByRole('link', { name: /Rotate PDF/ }).getAttribute('href')).toBe('/tools/rotate');
     expect(screen.getByRole('link', { name: /Organize PDF/ }).getAttribute('href')).toBe('/tools/organize');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(8);
+    expect(screen.getByRole('link', { name: /Watermark PDF/ }).getAttribute('href')).toBe('/tools/watermark');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(9);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -83,5 +84,14 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('button', { name: /Drop PDF files here/ })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Pages' })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Organize PDF' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('opens Watermark PDF with text, placement and preview options', () => {
+    render(<ToolsApp slug="watermark" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Watermark PDF');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect(screen.getByLabelText('Watermark text')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Watermark position' })).toBeTruthy();
+    expect(screen.getByText('Choose a PDF to preview the watermark.')).toBeTruthy();
   });
 });
