@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair ✅ → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair ✅ → 62 Sign ✅ → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7893,7 +7893,7 @@ page itself.
 - **Not done (suggested, not approved):** add "Try downloading it again, or ask the sender for a new copy." to the
   "too damaged" message.
 
-### Task 62 — Sign PDF  🔲 TODO → branch `tool-sign` (create from `main`)   *(Medium–Large · 4–5 days)*
+### Task 62 — Sign PDF  ✅ MERGED to `main` (`e4ee158`, 2026-09-12; includes Rev 1 + Rev 2; branch `tool-sign` deleted)   *(Medium–Large · 4–5 days)*
 
 **What the user gets:** `/tools/sign`. Drop **one** PDF → **1. Make or pick a signature** (Draw · Type · Upload, or a
 saved one) → **2. Place it**: pick the page from thumbnails, drag the signature onto the line, resize it by its
@@ -8062,7 +8062,7 @@ visible-area offset (`boxOffset`); (D) a signature dragged to the very bottom ca
 the edge; (E) Watermark's live copy of the text is sized for a 400 px stage, so it looks too big on a narrow phone
 stage while dragging.
 
-#### Task 62 — Revision 1  ✅ DONE by Codex, reviewed — phone photos, faster placing, small fixes   *(Easy–Medium · half a day)*
+#### Task 62 — Revision 1  ✅ DONE by Codex, reviewed and merged in `e4ee158` — phone photos, faster placing, small fixes   *(Easy–Medium · half a day)*
 
 Do Part A, then B, then C, D, E. Run the touched test files after each part.
 
@@ -8132,7 +8132,7 @@ part of the line, but still dark enough to pass as ink (≈5 100 leftover pixels
 **Cleaning strength** slider made it worse, because line finding used the slider's threshold — fewer line pixels
 counted, whole stretches of a line stopped being found, and they stayed.
 
-#### Task 62 — Revision 2  ✅ DONE by Claude (2026-09-12, user: "do it yourself") — no pale line streaks, bold red margins, pen strokes kept
+#### Task 62 — Revision 2  ✅ DONE by Claude (2026-09-12, user: "do it yourself"), merged in `e4ee158` — no pale line streaks, bold red margins, pen strokes kept
 
 - **Line finding no longer depends on the slider** (`src/lib/sign/cleanSignature.ts`, `removeRuledLines`): a pixel
   counts toward a line when it is more than 20 below the paper (`LINE_DETECT_DARKNESS`), whatever the slider says.
