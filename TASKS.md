@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair ✅ → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7715,7 +7715,7 @@ corners); dragging fine-tunes.
   "CONFIDENTIAL" at 25% across / 25% down on upright and turned pages. The drag was driven by pointer events in the
   page (the review browser pane was collapsed), not the OS mouse.
 
-### Task 61 — Repair PDF  🔲 TODO → branch `tool-repair` (create from `main`)   *(Medium · 2–3 days)*
+### Task 61 — Repair PDF  ✅ MERGED to `main` (`46e0f0c`, 2026-09-11; includes Rev 1; branch `tool-repair` deleted)   *(Medium · 2–3 days)*
 
 **What the user gets:** `/tools/repair`. Drop **one** PDF → the panel first **checks** it and says in plain words
 what it found (healthy · damaged · password-protected · not a PDF · digitally signed) → **Repair PDF** → download
@@ -7868,7 +7868,7 @@ error now also suggests Repair. User tested files 1–5 by hand. **Gap found:** 
 damaged". User also flagged the red "This file could not be read. Try Repair PDF." in the file card on the Repair
 page itself.
 
-#### Task 61 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself") — rescue pages when the page list is gone
+#### Task 61 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself"), merged in `46e0f0c` — rescue pages when the page list is gone
 
 - **Rescue** `src/lib/tools/repairRescue.ts` → `rescuePageList(bytes)`: cut after the last complete `endobj` (drops a
   half-written object at the cut), read every complete object with pdf-lib's low-level `PDFParser` (object streams
