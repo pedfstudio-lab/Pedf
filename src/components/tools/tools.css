@@ -120,6 +120,17 @@
 .watermark-positions button { width: 46px; height: 42px; border: 1px solid #b8c9df; border-radius: 8px; background: #fff; color: #253754; font: inherit; font-size: 1.1rem; cursor: pointer; }
 .watermark-positions button[aria-pressed="true"] { border-color: var(--site-blue); background: var(--site-band); color: var(--site-blue-dark); box-shadow: 0 0 0 1px var(--site-blue); }
 .watermark-preview { min-height: 270px; display: grid; place-items: center; padding: 14px; overflow: hidden; border: 1px solid var(--site-line); border-radius: 16px; background: #f4f6f9; color: var(--site-body); font-size: .875rem; text-align: center; }
+.placement-stage { position: relative; max-width: 100%; background: #fff; user-select: none; }
+.placement-stage > img { display: block; width: 100%; height: 100%; }
+.placement-handle { position: absolute; display: grid; place-items: center; padding: 0; touch-action: none; }
+.placement-guide { position: absolute; z-index: 4; pointer-events: none; background: rgba(30, 107, 255, .75); }
+.placement-guide-v { top: 0; bottom: 0; left: 50%; width: 1px; }
+.placement-guide-h { left: 0; right: 0; top: 50%; height: 1px; }
+.placement-resize-handle { position: absolute; z-index: 5; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: var(--site-blue); box-shadow: 0 1px 5px rgba(20, 42, 78, .35); touch-action: none; }
+.placement-resize-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.placement-resize-ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.placement-resize-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.placement-resize-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
 .watermark-stage { position: relative; max-width: 100%; box-shadow: 0 5px 18px rgba(23, 49, 89, .16); background: #fff; user-select: none; }
 .watermark-stage > img { display: block; width: 100%; height: 100%; }
 .watermark-handle { position: absolute; display: grid; place-items: center; padding: 0; overflow: visible; border: 1px dashed rgba(30, 107, 255, .55); border-radius: 3px; background: transparent; cursor: grab; touch-action: none; }
@@ -132,6 +143,32 @@
 .watermark-guide-h { left: 0; right: 0; top: 50%; height: 1px; }
 .watermark-drag-hint { margin: -8px 0 0; }
 .watermark-problem { margin: -8px 0 0; color: #a32020; }
+.sign-options { gap: 18px; }
+.sign-kind-note { margin: -8px 0 0; padding: 12px 14px; border-radius: 10px; background: #fff9e8; color: #79520c; line-height: 1.5; }
+.sign-step { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--site-line); border-radius: 16px; background: #fff; }
+.sign-step h3 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 1.05rem; }
+.sign-step h3 > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--site-band); color: var(--site-blue-dark); }
+.sign-selected-signature { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sign-selected-signature .signature-upload-preview { width: 180px; min-height: 100px; padding: 8px; }
+.sign-selected-signature .signature-upload-preview img { display: block; max-width: 100%; max-height: 82px; }
+.sign-selected-signature > div:not(.signature-upload-preview) { display: grid; flex: 1; gap: 4px; }
+.sign-selected-signature small { color: var(--site-body); }
+.sign-page-picker { display: flex; gap: 9px; padding: 4px 4px 10px; overflow-x: auto; }
+.sign-page-picker button { position: relative; flex: 0 0 74px; height: 90px; display: grid; place-items: center; padding: 5px; border: 1px solid var(--site-line); border-radius: 9px; background: #f5f7fa; cursor: pointer; }
+.sign-page-picker button[aria-pressed="true"] { border-color: var(--site-blue); box-shadow: 0 0 0 2px rgba(30, 107, 255, .2); }
+.sign-page-picker img { display: block; max-width: 62px; max-height: 72px; }
+.sign-page-picker small { position: absolute; right: 3px; bottom: 2px; padding: 1px 4px; border-radius: 5px; background: rgba(255,255,255,.9); color: var(--site-body); }
+.sign-placement-preview { min-height: 290px; display: grid; place-items: center; padding: 14px; overflow: hidden; border: 1px solid var(--site-line); border-radius: 16px; background: #f4f6f9; color: var(--site-body); font-size: .875rem; text-align: center; }
+.sign-placement-stage { box-shadow: 0 5px 18px rgba(23, 49, 89, .16); }
+.sign-placement-handle { border: 1px dashed rgba(30, 107, 255, .75); background: rgba(255,255,255,.08); cursor: grab; }
+.sign-placement-handle:hover, .sign-placement-handle:focus-visible { border: 2px dashed var(--site-blue); outline: none; background: rgba(30, 107, 255, .06); }
+.sign-placement-handle.is-dragging { border: 2px solid var(--site-blue); cursor: grabbing; }
+.sign-stamp { position: relative; width: 100%; height: 100%; pointer-events: none; }
+.sign-stamp > img { display: block; width: 100%; height: 100%; object-fit: fill; }
+.sign-stamp > small { position: absolute; top: calc(100% + 3px); left: 0; color: #404751; font: 500 clamp(5px, 1.25vw, 9px) Arial, sans-serif; white-space: nowrap; }
+.sign-placement-hint { margin: -8px 0 0; }
+.sign-options-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sign-ranges { padding-bottom: 0; }
 .tool-run { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .tool-run .site-button, .tool-result-actions .site-button { cursor: pointer; }
 .tool-progress { margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -155,6 +192,8 @@
   .organize-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .organize-thumbnail { width: min(140px, 100%); }
   .watermark-section, .watermark-shared { padding: 14px; }
+  .sign-step { padding: 14px; }
+  .sign-options-grid { grid-template-columns: 1fr; }
   .tool-result-actions { flex-direction: column; align-items: stretch; }
   .tool-result-actions button, .tool-run > button { width: 100%; }
 }

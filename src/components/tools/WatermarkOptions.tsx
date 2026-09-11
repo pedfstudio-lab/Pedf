@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PDFDocument, type PDFPage } from 'pdf-lib';
-import { useElementSize } from '@/lib/edit/floatingToolbar';
 import { readerFrame } from '@/lib/pdf/readerFrame';
 import { HEIC_GUIDANCE, isHeicFile } from '@/lib/tools/files';
 import { prepareImageForPdf } from '@/lib/tools/jpgToPdf';
@@ -10,6 +8,7 @@ import { selectedPageIndices } from '@/lib/tools/pdfToJpgOptions';
 import type { ToolOptionsProps } from '@/lib/tools/types';
 import { prepareWatermarkAssets, watermarkPage, type WatermarkGeometry } from '@/lib/tools/watermark';
 import { centreRange } from '@/lib/tools/watermarkLayout';
+import { PlacementStage, type PlacementLimits } from './PlacementStage';
 import {
   parseWatermarkOptions,
   WATERMARK_COLOURS,
@@ -29,10 +28,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_SIZE_ERROR = 'Choose an image smaller than 10 MB.';
 /** Long side of the preview stage in CSS pixels. */
 const STAGE_LONG_SIDE = 400;
-/** Snap to the page centre / edges within this share of the page. */
-const SNAP = 0.02;
-const NUDGE = 0.01;
-const NUDGE_BIG = 0.05;
 const CSS_FONTS: Record<WatermarkFont, string> = {
   sans: 'Helvetica, Arial, sans-serif',
   serif: '"Times New Roman", Times, serif',
@@ -54,24 +49,8 @@ const positions: readonly { value: Exclude<WatermarkPosition, 'tile' | 'custom'>
 interface RenderedPage { url: string; width: number; height: number; geometry?: WatermarkGeometry }
 interface RealPreview extends RenderedPage { geometry: WatermarkGeometry; forValue: WatermarkOptionsValue }
 /** Limits for the stamp's centre, as shares of the page (y from the top). */
-interface Limits { minX: number; maxX: number; minY: number; maxY: number }
-interface DragState { x: number; y: number; snapX: boolean; snapY: boolean }
-
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
-}
-
-/** Snap near the centre lines and the edge limits, then keep the whole stamp on the page. */
-function snapSpot(x: number, y: number, limits: Limits): DragState {
-  let snapX = false;
-  let snapY = false;
-  if (Math.abs(x - 0.5) < SNAP) { x = 0.5; snapX = true; }
-  else if (Math.abs(x - limits.minX) < SNAP) x = limits.minX;
-  else if (Math.abs(x - limits.maxX) < SNAP) x = limits.maxX;
-  if (Math.abs(y - 0.5) < SNAP) { y = 0.5; snapY = true; }
-  else if (Math.abs(y - limits.minY) < SNAP) y = limits.minY;
-  else if (Math.abs(y - limits.maxY) < SNAP) y = limits.maxY;
-  return { x: clamp(x, limits.minX, limits.maxX), y: clamp(y, limits.minY, limits.maxY), snapX, snapY };
 }
 
 function cssColour(colour: WatermarkColour): string {
@@ -135,20 +114,14 @@ export function WatermarkOptions({ options, onChange, inputs, disabled }: ToolOp
   const file = inputs[0];
   const imageInput = useRef<HTMLInputElement>(null);
   const source = useRef<{ file: File; doc: PDFDocument } | null>(null);
-  const stageElement = useRef<HTMLDivElement | null>(null);
   const [sourceVersion, setSourceVersion] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [base, setBase] = useState<RenderedPage | null>(null);
   const [real, setReal] = useState<RealPreview | null>(null);
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty');
-  const [drag, setDrag] = useState<DragState | null>(null);
+  const [interacting, setInteracting] = useState(false);
   const [imageError, setImageError] = useState('');
   const [thumbnailUrl, setThumbnailUrl] = useState('');
-  const [measureStage, stageSize] = useElementSize<HTMLDivElement>();
-  const setStage = useCallback((node: HTMLDivElement | null) => {
-    stageElement.current = node;
-    measureStage(node);
-  }, [measureStage]);
   const update = (next: Partial<WatermarkOptionsValue>) => onChange({ ...value, ...next });
   const problem = watermarkProblem(value);
   const pageIndex = useMemo(() => {
@@ -239,7 +212,7 @@ export function WatermarkOptions({ options, onChange, inputs, disabled }: ToolOp
     if (!geometry || value.position === 'tile' || problem) return null;
     const { pageWidth, pageHeight, itemWidth, itemHeight, angle } = geometry;
     const range = centreRange(pageWidth, pageHeight, itemWidth, itemHeight, angle);
-    const limits: Limits = {
+    const limits: PlacementLimits = {
       minX: range.minX / pageWidth,
       maxX: range.maxX / pageWidth,
       minY: 1 - range.maxY / pageHeight,
@@ -270,67 +243,6 @@ export function WatermarkOptions({ options, onChange, inputs, disabled }: ToolOp
     };
   }, [geometry, problem, value.customX, value.customY, value.position]);
 
-  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (disabled || !handle || event.button !== 0) return;
-    const rect = stageElement.current?.getBoundingClientRect();
-    if (!rect || !rect.width || !rect.height) return;
-    event.preventDefault();
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Capture is only a nicety (keeps the drag if the pointer leaves the window); the window listeners below
-      // track the drag either way, so a refused capture must not stop it.
-    }
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const origin = { x: handle.x, y: handle.y };
-    const { limits } = handle;
-    let latest: DragState = { ...origin, snapX: false, snapY: false };
-    let moved = false;
-    setDrag(latest);
-    const move = (moveEvent: PointerEvent) => {
-      moved = true;
-      latest = snapSpot(
-        origin.x + (moveEvent.clientX - startX) / rect.width,
-        origin.y + (moveEvent.clientY - startY) / rect.height,
-        limits,
-      );
-      setDrag(latest);
-    };
-    const cleanup = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', cancel);
-    };
-    const finish = () => {
-      cleanup();
-      // A click without moving keeps the chosen quick spot.
-      if (moved) update({ position: 'custom', customX: latest.x, customY: latest.y });
-      setDrag(null);
-    };
-    const cancel = () => {
-      cleanup();
-      setDrag(null);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', cancel);
-  };
-
-  const nudge = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    if (!handle) return;
-    const step = event.shiftKey ? NUDGE_BIG : NUDGE;
-    const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
-    const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
-    if (!dx && !dy) return;
-    event.preventDefault();
-    update({
-      position: 'custom',
-      customX: clamp(handle.x + dx, handle.limits.minX, handle.limits.maxX),
-      customY: clamp(handle.y + dy, handle.limits.minY, handle.limits.maxY),
-    });
-  };
-
   async function chooseImage(selected?: File) {
     if (!selected) return;
     setImageError('');
@@ -353,20 +265,21 @@ export function WatermarkOptions({ options, onChange, inputs, disabled }: ToolOp
   }
 
   // The real picture when it matches the current options; otherwise the plain page with a live copy of the stamp.
-  const fresh = !!real && real.forValue === value && previewStatus !== 'loading' && !drag;
+  const fresh = !!real && real.forValue === value && previewStatus !== 'loading' && !interacting;
   const stageImage = fresh ? real.url : base?.url ?? real?.url;
   const pageSize = base ?? real;
-  const spot = drag ?? handle;
   const previewMessage = previewStatus === 'loading' ? 'Updating preview…'
     : previewStatus === 'failed' ? 'Preview unavailable'
       : file ? 'Preview will appear when the watermark is ready.' : 'Choose a PDF to preview the watermark.';
-  const ghost = !fresh && handle ? (value.mode === 'image'
+  const fallbackStageWidth = pageSize
+    ? STAGE_LONG_SIDE * pageSize.width / Math.max(pageSize.width, pageSize.height) : STAGE_LONG_SIDE;
+  const ghost = (stageWidthPx: number) => handle ? (value.mode === 'image'
     ? (thumbnailUrl ? <img className="watermark-ghost-image" src={thumbnailUrl} alt="" draggable={false}
       style={{ opacity: value.opacity }} /> : null)
     : <span className="watermark-ghost-text" style={{
       fontFamily: CSS_FONTS[value.font],
       fontWeight: value.bold ? 700 : 400,
-      fontSize: `${handle.fontShare * stageSize.width}px`,
+      fontSize: `${handle.fontShare * (stageWidthPx || fallbackStageWidth)}px`,
       color: cssColour(value.colour),
       opacity: value.opacity,
     }}>{value.text}</span>) : null;
@@ -464,29 +377,29 @@ export function WatermarkOptions({ options, onChange, inputs, disabled }: ToolOp
     </div>
 
     <div className="watermark-preview" aria-busy={previewStatus === 'loading'}>
-      {pageSize && stageImage ? <div ref={setStage} className="watermark-stage" style={{
+      {pageSize && stageImage ? handle ? <PlacementStage
+        className="watermark-stage"
+        handleClassName="watermark-handle"
+        pageImage={stageImage}
+        imageAlt={fresh ? 'Watermarked page preview' : 'Page preview'}
+        pageWidth={pageSize.width}
+        pageHeight={pageSize.height}
+        value={{ x: handle.x, y: handle.y, widthShare: handle.widthShare, heightShare: handle.heightShare, angle: -handle.angle }}
+        limits={handle.limits}
+        disabled={disabled}
+        label="Move the watermark. Drag it, or use the arrow keys."
+        title="Drag to place the watermark"
+        style={{
+          width: `min(100%, ${Math.round(STAGE_LONG_SIDE * pageSize.width / Math.max(pageSize.width, pageSize.height))}px)`,
+          aspectRatio: `${pageSize.width} / ${pageSize.height}`,
+        }}
+        onInteractionChange={setInteracting}
+        onChange={(next) => update({ position: 'custom', customX: next.x, customY: next.y })}
+      >{(_placement, active, stageWidthPx) => (!fresh || active) ? ghost(stageWidthPx) : null}</PlacementStage> : <div className="watermark-stage" style={{
         width: `min(100%, ${Math.round(STAGE_LONG_SIDE * pageSize.width / Math.max(pageSize.width, pageSize.height))}px)`,
         aspectRatio: `${pageSize.width} / ${pageSize.height}`,
-      }}>
-        <img src={stageImage} alt={fresh ? 'Watermarked page preview' : 'Page preview'} draggable={false} />
-        {drag?.snapX && <span className="watermark-guide watermark-guide-v" aria-hidden="true" />}
-        {drag?.snapY && <span className="watermark-guide watermark-guide-h" aria-hidden="true" />}
-        {handle && spot && <button type="button"
-          className={`watermark-handle${drag ? ' is-dragging' : ''}`}
-          style={{
-            left: `${spot.x * 100}%`,
-            top: `${spot.y * 100}%`,
-            width: `${handle.widthShare * 100}%`,
-            height: `${handle.heightShare * 100}%`,
-            transform: `translate(-50%, -50%) rotate(${-handle.angle}deg)`,
-          }}
-          aria-label="Move the watermark. Drag it, or use the arrow keys."
-          title="Drag to place the watermark"
-          onPointerDown={beginDrag}
-          onKeyDown={nudge}>
-          {ghost}
-        </button>}
-      </div> : <span>{previewMessage}</span>}
+      }}><img src={stageImage} alt={fresh ? 'Watermarked page preview' : 'Page preview'} draggable={false} /></div>
+        : <span>{previewMessage}</span>}
     </div>
     {handle && <p className="tool-hint watermark-drag-hint">Drag the stamp anywhere on the page. It snaps to the centre.</p>}
     {problem && <p className="tool-hint watermark-problem">{problem}</p>}

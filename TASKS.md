@@ -7893,34 +7893,269 @@ page itself.
 - **Not done (suggested, not approved):** add "Try downloading it again, or ask the sender for a new copy." to the
   "too damaged" message.
 
-### Task 62 — Sign PDF  🔲 TODO → branch `tool-sign`   *(Medium · 3–4 days)*
-**Goal:** a signature the user draws, types, or uploads, placed on one page (or every page) — and the same
-signature panel available inside the editor as **Sign** in the toolbar.
-1. **Signature maker** `src/components/tools/SignatureMaker.tsx` (shared): three tabs.
-   **Draw:** a canvas with pointer events (mouse / touch / pen), smoothed strokes (quadratic curves through
-   midpoints), pen colour (black · blue), thickness (2 / 3 / 4 px), Undo stroke, Clear; export = trimmed transparent
-   PNG at 3× device pixels. **Type:** a name field + three script fonts bundled as `woff2` in `public/fonts/`
-   (open-licence, e.g. Caveat, Dancing Script, Great Vibes — check each licence file into the folder) loaded via
-   `FontFace`, rendered to a canvas → transparent PNG (no font embedding in the PDF needed). **Upload:** PNG/JPG →
-   optional **Remove white background** (pixels within tolerance of white → transparent; pure function
-   `whiteToTransparent(imageData, tolerance)` unit-tested) → PNG.
-   **Remember on this device** toggle: stores the PNG data-URL + a label in `localStorage` (`pedf.signatures`, max
-   5); a picker shows saved ones with delete.
-2. **Placement** on the tool page: a page picker (thumbnails) + a rendered page with a draggable, resizable box
-   (keep aspect ratio; corner handles; min 40 px) — reuse the coordinate helpers in `src/lib/export/coordinates.ts`.
-   Options: **Also add the date** (small text under the signature, format `08 Sep 2026`), **Apply to** (This page ·
-   All pages · ranges — initials on every page).
-3. `run()`: `embedPng` once, `drawImage` at the PDF-space rect on each chosen page (+ `drawText` for the date,
-   Helvetica 9 pt). Output `<name>-signed.pdf`.
-4. **Editor integration:** a **Sign** button in `Toolbar.tsx` opens `SignatureMaker` in a modal; on Done the
-   signature becomes a normal placed image (`ImageEdit` via `addEdits`, default size 160 pt wide, centred on the
-   visible page) so it can be moved / resized / deleted with the existing image tools and exports through the
-   existing image handler. No new edit kind.
-5. **Tests:** `whiteToTransparent`; trimming of the drawn canvas; run → reopen and confirm an image XObject on the
-   chosen page(s) and the date text; editor: the Sign button adds an `ImageEdit`. **Verify (user):** draw a
-   signature on the phone, place it on page 3, date on, download; type "Sidharth" in each font; in the editor,
-   Sign → move it → export.
-**Land:** `Sign PDF tool + Sign in the editor (Task 62)`.
+### Task 62 — Sign PDF  🔲 TODO → branch `tool-sign` (create from `main`)   *(Medium–Large · 4–5 days)*
+
+**What the user gets:** `/tools/sign`. Drop **one** PDF → **1. Make or pick a signature** (Draw · Type · Upload, or a
+saved one) → **2. Place it**: pick the page from thumbnails, drag the signature onto the line, resize it by its
+corners → optionally **add the date** under it → **Apply to** this page · all pages · chosen pages (initials on every
+page) → **Sign PDF** → download `name-signed.pdf` or **Open in editor**. The editor also gets a **Sign** button that
+opens the same signature maker.
+
+**Use cases:** a rent agreement or offer letter emailed to you "to sign and send back"; a school or college form;
+approvals and declarations; initials on every page of a contract; a signed quotation or invoice.
+
+**Example:** Rahul gets a 6-page rent agreement by email. On his phone he opens `/tools/sign`, draws his signature
+with his finger, picks page 6, drags it onto the "Tenant signature" line, shrinks it a little, ticks **Add the date**
+("11 Sep 2026" appears under it) and taps **Sign PDF**. For initials he signs the result again with **All pages**.
+
+**What it is — and is not (say this in the tool):** it adds a **picture of your signature** (an electronic
+signature). It is **not** a certified digital signature (DSC token, Aadhaar e-Sign) as needed for MCA filings,
+tenders or tax returns — those need a certificate from an authority. One line under the title:
+"Adds a picture of your signature. It is not a certified digital signature (DSC or Aadhaar e-Sign)."
+
+**Privacy:** the signature never leaves the device. Saved signatures live only in this browser, and only if the user
+turns on **Remember on this device** (off by default, with the hint "Leave this off on a shared or office computer").
+
+**How it works:** the signature is one transparent PNG, embedded **once** and drawn on every chosen page (the file
+barely grows). Placement is done **as the reader sees the page** through `src/lib/pdf/readerFrame.ts` (Task 60), so a
+signature lands the right way up on turned pages. The spot is stored as shares of the page (centre x / y, width), so
+"all pages" puts it in the same relative place on pages of other sizes or orientations.
+
+**Reuse:** `ToolPage` / `canRun` / `ToolError`, `loadPdfLib` / `savePdf` / `outputName`, `selectedPageIndices`
+(keep keys `pageSelection` / `ranges`), `readerFrame` + `readerToRaw` + `readerAngleToRaw`, `previewPdfPages`
+(Organize's streaming thumbnails) for the page picker, the drag stage from `WatermarkOptions.tsx` (Task 60 Rev 1),
+`prepareImageForPdf` + `HEIC_GUIDANCE`, the editor's `addEdits` + `ImageEdit`. Fonts: add `@fontsource/caveat`,
+`@fontsource/dancing-script`, `@fontsource/great-vibes` (SIL Open Font Licence, the licence ships in each package) —
+import each Latin `woff2` with Vite's `?url` and load it with `FontFace`. No other new dependencies.
+
+**Steps**
+
+1. **Signature cleaning** `src/lib/sign/cleanSignature.ts` (pure, works on `ImageData`, unit-tested) — for photos of
+   a signature on paper, including **ruled notebook pages**, yellow lamp light and shadows. No AI, no server:
+   - **Paper colour per area:** split the image into ~32 × 32 px blocks; per block take the 90th-percentile
+     brightness (paper is the bright majority) as that block's paper colour; smooth it (bilinear between block
+     centres) into a background map. This removes shadows and yellowish or grey paper, not just pure white.
+   - **Keep only ink:** a pixel's "darkness" = paper brightness − its brightness. Alpha = smooth ramp from 0 at
+     `threshold` to 255 at `threshold + 40`, where `threshold` comes from the **Cleaning strength** slider (0–100,
+     default 50 → darkness 25–70). Faint ruled lines (light blue / pink / grey) are far less dark than pen ink, so
+     most of them vanish here.
+   - **Remove ruled lines:** on the kept mask, find rows where kept pixels run across more than 50% of the width in a
+     band at most 4 px tall (the ruling), and columns running more than 50% of the height (the red margin line).
+     Clear those pixels **unless** they are clearly darker than that line's median darkness (ink crossing the line
+     stays). Toggle **Remove notebook lines** (on by default).
+   - **Ink colour:** Keep original · Black · Blue — recolour kept pixels, keep their alpha.
+   - **Crop** to the kept pixels plus 8 px padding; downscale to at most 1600 px wide.
+   - Export `cleanSignature(imageData, { strength, removeLines, ink }) → ImageData` and
+     `trimToInk(imageData, padding) → ImageData`.
+
+2. **Saved signatures** `src/lib/sign/savedSignatures.ts` (+ test): `localStorage` key `pedf.signatures`, at most 5
+   items `{ id, label, pngDataUrl, createdAt }`, newest first; `listSaved()`, `saveSignature()`, `deleteSaved(id)`;
+   every read / write in `try/catch` (private windows, blocked storage) — the tool must work without it.
+
+3. **Signature maker** `src/components/sign/SignatureMaker.tsx` (shared by the tool page and the editor; + test) —
+   props `onDone(signature: { png: Uint8Array; width: number; height: number })`, `onCancel`. Tabs:
+   - **Draw:** canvas with pointer events (mouse / touch / pen, `touch-action: none`), smoothed strokes (quadratic
+     curves through the midpoints of pointer samples), ink Black · Blue, thickness 2 · 3 · 4 px, **Undo stroke**,
+     **Clear**. Export: redraw strokes at 3× size on an offscreen canvas → `trimToInk` → PNG.
+   - **Type:** name field (English letters; other scripts → hint "Use Draw or Upload for other scripts"), three
+     preview cards, one per font, the chosen one ringed; ink Black · Blue. Export: render at 120 px font size on an
+     offscreen canvas after `document.fonts.load(...)` → `trimToInk` → PNG.
+   - **Upload:** PNG / JPG / WebP (HEIC → `HEIC_GUIDANCE`, over 10 MB → "Choose an image smaller than 10 MB.") →
+     `prepareImageForPdf` (upright) → **Clean up background** (on by default) with **Cleaning strength**, **Remove
+     notebook lines**, **Ink colour** → live result shown on a **checkered background** so the user sees exactly
+     what is kept (see-through areas show the checks).
+   - **Saved:** when there are saved signatures, a row of them above the tabs (click = use it; × = delete).
+   - **Remember on this device** checkbox + hint; **Use this signature** button (disabled until there is ink).
+
+4. **Shared drag stage** — lift the stage out of `WatermarkOptions.tsx` into
+   `src/components/tools/PlacementStage.tsx`: page picture + a draggable box + centre / edge snapping with guide
+   lines + arrow-key nudges (1% / Shift 5%) + clamp inside the page, positions as shares of the page. Add optional
+   **corner resize** with the aspect ratio locked and a minimum of 40 px (Sign uses it; Watermark keeps sizing through
+   its own controls). **Watermark's behaviour and tests must not change** — run `WatermarkOptions.test.tsx` and
+   `watermark.test.ts` unchanged after the move.
+
+5. **Options + layout** `src/lib/tools/signOptions.ts` (+ test): `{ signature?: { png: Uint8Array; width; height };
+   pageSelection: 'one' | 'all' | 'custom'; pageIndex: number; ranges: string; x: number; y: number;
+   widthShare: number; date: 'none' | 'text' | 'numeric' }` — `x` / `y` = centre of the signature as shares of the
+   page the reader sees (y from the top), `widthShare` = signature width ÷ page width (default 0.25), defaults: one
+   page = last page, centre at x 0.7 / y 0.85. `date` formats: `text` → `11 Sep 2026`, `numeric` → `11/09/2026`
+   (DD/MM/YYYY, local date). `signProblem(options)` → **"Make or pick a signature first."** when there is none.
+   `signatureRect(frameWidth, frameHeight, value, imageAspect)` → the reader-space rect, clamped inside the page.
+
+6. **Tool** `src/lib/tools/sign.ts` (+ test): `SIGN_INPUT_ERROR = 'Choose one PDF file to sign.'`; `run()`:
+   `throwIfAborted`; one input; `signProblem` → `ToolError`; `loadPdfLib`; chosen pages (`one` → `[pageIndex]`,
+   `all`, or `selectedPageIndices` for ranges); `embedPng` **once**; for each page: `readerFrame(page)` →
+   `signatureRect` → `readerToRaw` for the rect's start corner + `readerAngleToRaw(frame, 0)` →
+   `page.drawImage(image, { x, y, width, height, rotate })`; with a date, `drawText` in Helvetica 9 pt, dark grey,
+   left-aligned 4 pt under the signature (same reader-space maths, same rotation). Progress "Signing page i of n",
+   yield every 20 pages; output `outputName(file, 'signed')`; last progress "Signed PDF ready".
+   `signTool = { slug: 'sign', title: 'Sign PDF', description: 'Draw, type or upload your signature and place it
+   exactly where it goes.', accepts: 'pdf', multiple: false, defaultOptions, Options: SignOptions, icon: '✍',
+   canRun: (options) => signProblem(options), run }`.
+
+7. **Tool panel** `src/components/tools/SignOptions.tsx` (+ test): the "picture, not certified" line; step 1 — the
+   `SignatureMaker` inline (or the chosen signature with **Change**); step 2 — page thumbnails (`previewPdfPages`,
+   click to choose the page; hidden for **All pages**, which shows the first page) + `PlacementStage` showing the
+   page with the signature on it (and the date text, CSS-approximated, under it); **Add the date** (No date ·
+   11 Sep 2026 · 11/09/2026); **Apply to** (This page · All pages · Only these pages + ranges input).
+
+8. **Editor: Sign button** — `Toolbar.tsx` gets **Sign** next to Add image; it opens `SignatureMaker` in a modal
+   (focus trapped, Escape closes). On **Use this signature**: `addEdits([{ kind: 'image', … }])` — a normal placed
+   `ImageEdit`, 160 pt wide (height from the aspect ratio), centred on the page currently most visible, top `z`.
+   It can then be moved, resized and deleted with the existing image tools (Task 56) and exports through the
+   existing image handler. **No new edit kind.** Test: clicking Sign → Use this signature adds exactly one `ImageEdit`.
+
+9. **Register** in `ToolsApp.tsx` after `repair`; `ToolsApp.test.tsx` → 11 cards; the Sign page shows the maker and a
+   disabled Sign PDF with "Make or pick a signature first."
+
+10. **Tests**
+    - `cleanSignature.test.ts` (synthetic `ImageData`): black stroke on white → stroke opaque, paper transparent;
+      the same on a yellow paper with a grey shadow gradient → paper gone; light-blue horizontal ruling every 24 px +
+      a red vertical margin + a black stroke crossing two lines → lines transparent, the stroke intact where it
+      crosses; strength 20 vs 80 changes how faint strokes survive; ink Black / Blue recolours; `trimToInk` crops
+      to the ink + padding.
+    - `savedSignatures.test.ts`: max 5 newest first, delete, broken storage → empty list and no throw.
+    - `SignatureMaker.test.tsx`: Draw — pointer strokes enable Use this signature, Undo / Clear; Type — each font
+      card; Upload — HEIC guidance, size cap, cleaning controls update the preview; Remember writes storage only when
+      ticked.
+    - `signOptions.test.ts`: date formats, `signatureRect` clamping, defaults.
+    - `sign.test.ts`: signature on one page → exactly one image object in the output, drawn only on that page;
+      **All pages** on 20 pages → still **one** image object; the date text found under it; on pages turned
+      0 / 90 / 180 / 270 the signature's centre sits at the chosen share of the **displayed** page and its bottom edge
+      is at the bottom as the reader sees it (pdf.js operator list + viewport, like `watermark.test.ts`); no
+      signature → the `canRun` reason as a `ToolError`; two files → `SIGN_INPUT_ERROR`; aborted signal → rejects.
+    - `PlacementStage.test.tsx`: drag, snap, nudge, corner resize with locked ratio and the 40 px minimum;
+      Watermark's existing tests unchanged.
+    - Editor: the Sign button test above. `noNetwork` needs nothing (fonts come from the bundle).
+
+11. **Guardrails:** the signature never leaves the device (no `fetch`); `localStorage` only when Remember is ticked;
+    embed the PNG **once** per document; all placement through `readerFrame`; do not change Watermark's behaviour;
+    every user-facing message is a `ToolError` or a `canRun` reason; no new edit kind in the editor.
+
+**Verify (user):** on a phone, **Draw** a signature with a finger → place it on page 3 of GOA → date on → download →
+opens right in another viewer. **Type** "Sidharth" in each of the three fonts. **Upload** a phone photo of a signature
+on a **ruled notebook** page under normal room light → only the signature remains on the checkered preview (no lines,
+no paper), try the strength slider and Ink colour. **All pages** → the signature on every page, file size barely
+grows. A file turned with **Rotate** first → the signature lands the right way up where it was dropped. In the
+**editor**: Sign → Use this signature → move and resize it → Export.
+
+**Known limits:** a picture signature, not a certified digital signature; typed signatures use English letters only
+(Draw or Upload for other scripts); a light-blue gel pen on blue lines or a faint pencil signature may lose parts of
+strokes or keep bits of line (the slider helps); strong glare leaves marks; in the **editor**, a signature on a turned
+page saves turned until Task 57A (the Sign tool page itself handles turned pages); one signature per run (sign again
+for initials) — several signatures in one run can come later.
+
+**Land:** merge `tool-sign` → `main`. Commit: `Sign PDF tool + Sign in the editor (Task 62)`.
+
+**Review of the Task 62 build (2026-09-11):** accepted with Rev 1 below. typecheck / lint / build green, 871 tests (33
+new). Live: on GOA pages turned 0° / 90° / 180° the signature sits at 70% across / 85% down of the displayed page with
+the date under it, left-aligned; **All pages** on 16 pages adds 6 KB (image embedded once); drag moves, corner resize
+keeps the aspect ratio; the editor's **Sign** button adds one ordinary image on the most visible page with Undo.
+**Watermark after the stage move:** its logic files and all its tests are untouched; only `WatermarkOptions.tsx` now
+uses `PlacementStage`; snapping, nudges, click-without-move and the safe pointer capture carried over; live drag to
+25% / 25% + arrow nudge behave exactly as before. **Problems found:** (A) notebook lines are **not** removed from
+normal phone photos — at 1000–1500 px wide the lines vanish, but on a 4000 px photo they are ~8 px thick, over the
+4 px line limit, so they stay (≈80 000 leftover pixels on a lines-only test image), and each slider move re-cleans the
+full photo (~3 s freeze); (B) the drag area appears only after **all** page thumbnails are drawn, because the default
+page is the last page and thumbnails render in order (~8 s on GOA); (C) the editor signature ignores the page's
+visible-area offset (`boxOffset`); (D) a signature dragged to the very bottom can have its date overlap it or sit on
+the edge; (E) Watermark's live copy of the text is sized for a 400 px stage, so it looks too big on a narrow phone
+stage while dragging.
+
+#### Task 62 — Revision 1  ✅ DONE by Codex, reviewed — phone photos, faster placing, small fixes   *(Easy–Medium · half a day)*
+
+Do Part A, then B, then C, D, E. Run the touched test files after each part.
+
+**Part A — Shrink big photos before cleaning (the ruled-notebook case).**
+1. In `src/lib/sign/cleanSignature.ts` add a pure `shrinkForCleaning(image: ImageData, maxSide = 1600): ImageData`:
+   if the longest side is over `maxSide`, scale so the longest side is exactly `maxSide`, keeping proportions, using
+   **area averaging** (each output pixel = the average of the source pixels it covers — do not use nearest-neighbour
+   here, it can skip thin lines and leave broken dashes); smaller images are returned unchanged (never enlarged).
+2. In `SignatureMaker.tsx` `chooseUpload`: after `decodedImage(...)`, call `shrinkForCleaning` and store **that** as
+   `uploadSource`, so every slider move re-cleans the small image.
+3. Safety net in `removeRuledLines`: the thickness limit scales with the image —
+   `Math.max(4, Math.round(Math.max(width, height) / 400))` instead of the fixed 4.
+4. Tests (`cleanSignature.test.ts`, synthetic `ImageData`): a 3000 × 2000 "notebook" — yellowish paper with a shadow
+   gradient, light-blue horizontal lines 6 px thick every 90 px, a red vertical margin line, a black stroke crossing
+   two lines — after `shrinkForCleaning` + `cleanSignature` the lines-only version leaves **no** opaque pixels and the
+   stroke version keeps the stroke (its trimmed size matches the stroke-only version); `shrinkForCleaning` keeps
+   proportions, never enlarges, and a 1-px line in a 3200-px image survives as a lighter band (area averaging).
+
+**Part B — Let the user place the signature without waiting for every thumbnail.**
+1. In `src/lib/tools/preview.ts` add `previewPdfPage(file, pageIndex, signal, longSidePx) → { thumbnail, size }` —
+   one page only, white background, `intent: 'print'`, `page.cleanup()`, `doc.destroy()` in `finally`.
+2. In `SignOptions.tsx`: the **stage** uses `previewPdfPage` for the displayed page (re-run when the displayed page
+   changes), rendered at `420 × Math.min(2, devicePixelRatio)` px on its long side so it is sharp; the **page picker**
+   keeps streaming thumbnails with `previewPdfPages` but at 140 px (like Organize). The stage no longer depends on the
+   picker's thumbnails.
+3. Test (`SignOptions.test.tsx`): `previewPdfPage` resolves at once while `previewPdfPages` never resolves → the
+   stage and its handle appear; changing the page re-renders the stage for that page.
+
+**Part C — Editor signature inside the page's visible area.** `src/lib/sign/editorSignature.ts`: add
+`page.boxOffset.x` / `page.boxOffset.y` to the rect's `x` / `y` (edit rects are raw PDF coordinates, which include the
+offset). Test: a `PageGeometry` with `boxOffset { x: 50, y: 30 }` → the rect is centred inside the visible box.
+
+**Part D — Keep room for the date.** In `src/lib/tools/signOptions.ts` add
+`signatureLimits(pageWidth, pageHeight, value, imageAspect) → { minX, maxX, minY, maxY }` (shares of the page, y from
+the top) that keeps the whole signature on the page **and**, when `date !== 'none'`, keeps its bottom at least 16 pt
+above the page bottom (the date baseline sits 13 pt below the signature). Use it in `signatureRect` (clamp) and pass it
+as `limits` to `PlacementStage` in `SignOptions.tsx`, so the preview and the file agree. Tests: date on + `y: 1` →
+the signature's bottom is ≥ 16 pt up and the date baseline ≥ 3 pt; date off + `y: 1` → the signature touches the
+bottom as before.
+
+**Part E — Watermark's live copy sized to the real stage.** `PlacementStage` measures its own width (the existing
+`useElementSize` callback-ref hook from `src/lib/edit/floatingToolbar.ts`) and passes it to the children render function
+as a third argument `stageWidthPx`; `WatermarkOptions.tsx` uses `handle.fontShare * stageWidthPx` for the ghost text
+size (falling back to the old value while the width is 0). Test (`PlacementStage.test.tsx`): the children function
+receives the measured width (mock `offsetWidth`).
+
+**Guardrails:** Watermark's output and its existing test expectations must not change (Part E only adds a render
+argument); keep every current Sign behaviour; no new dependencies; rendering with `intent: 'print'`.
+
+**Verify (user):** a phone photo of a signature on a **ruled notebook** → on the checkered preview only the signature
+remains, no lines, and the strength slider responds instantly; open Sign with GOA → the drag area appears in about a
+second on page 16 while the small thumbnails fill in; drag the signature to the very bottom with the date on → the date
+stays fully visible under it; Watermark on a narrow window → the live copy while dragging matches the final preview.
+Claude prepares a test PDF whose visible area does not start at the corner, to check Part C in the editor.
+
+**Land:** together with Task 62 in one commit, `Sign PDF tool + Sign in the editor (Task 62)`.
+
+**Review of Rev 1:** accepted, with Rev 2 below. typecheck / lint / build green, 878 tests. Parts B–E as specified:
+the stage uses `previewPdfPage` (420 px × up to 2 for sharp screens) while the 140 px picker thumbnails stream in;
+the editor signature adds `page.boxOffset`; `signatureLimits` keeps 16 pt under the signature for the date, and the
+stage and the file use the same limits; Watermark's live copy is sized from the measured stage width. **Watermark:**
+its logic files (`watermark.ts`, `watermarkLayout.ts`, `watermarkOptions.ts`), `readerFrame.ts` and all its tests
+are still untouched. Part A: big photos are shrunk to 1600 px (area averaging) before cleaning, and each slider move
+re-cleans the small image. **Gap found:** on a 3000 × 2000 test notebook, a thin pale streak of every line survived.
+Shrinking puts a line's edge between two pixel rows, so the row beside the line is half blue: too faint to be found as
+part of the line, but still dark enough to pass as ink (≈5 100 leftover pixels at strength 40). Lowering the
+**Cleaning strength** slider made it worse, because line finding used the slider's threshold — fewer line pixels
+counted, whole stretches of a line stopped being found, and they stayed.
+
+#### Task 62 — Revision 2  ✅ DONE by Claude (2026-09-12, user: "do it yourself") — no pale line streaks, bold red margins, pen strokes kept
+
+- **Line finding no longer depends on the slider** (`src/lib/sign/cleanSignature.ts`, `removeRuledLines`): a pixel
+  counts toward a line when it is more than 20 below the paper (`LINE_DETECT_DARKNESS`), whatever the slider says.
+- **Edge rows cleaned:** one row (or column) on each side of a found line is cleaned too (`LINE_EDGE_ROWS = 1`); the
+  thickness limit allows for those two edge rows (+2). Pixels clearly darker than the line (ink crossing it) still
+  stay.
+- **Pen strokes are never "lines":** a long straight band as dark as ink (80th-percentile darkness over 110,
+  `LINE_MAX_DARKNESS`) is kept — an underline, or a tall straight letter in a tightly cropped photo. Needed because
+  the +2 tolerance would otherwise erase such strokes (Codex's crossing-ink test caught it).
+- **Bold red margins still removed:** a dark red margin is as dark as ink overall, but its red stays close to the
+  paper's (200, 40, 50), while black and blue ink are dark in red too. A band is kept as ink only when it is also
+  more than 110 below the paper **in red** (estimated per pixel as darkness + brightness − red).
+- **Tests (8 new):** a 3000 × 2000 notebook whose lines land at every between-rows offset → no pixel above alpha 20
+  at strength 20 / 50 / 80, and the crop matches the signature-only version (±2 px, ≥ 90% of its ink); a black
+  underline across 80% of the page is kept; a bold red margin is removed while a straight blue ballpoint stroke of the
+  same length stays. 886 tests / typecheck / lint / build green.
+- **Sweep (Node, real module, generated images):** widths 1000 / 1500 / 2400 / 3000 / 4000 / 4032 × line offsets
+  0 / 0.5 / 1 / 1.5 px × strength 20 / 35 / 50 / 65 / 80 (120 cases) → 0 leftover line pixels, the crop box the
+  same as the plain-paper signature, 99–101% of the ink kept. Margins from light pink (214, 118, 126) to bold red
+  (200, 40, 50), 2 and 3 px wide → all removed. Straight strokes in black, blue ballpoint, blue gel and pencil →
+  100% kept.
+- **Known limit:** a **red-pen** signature with a perfectly straight stroke running across more than half the photo
+  is removed like a margin (normal curvy strokes are fine; untick **Remove notebook lines** if it happens).
 
 ### Task 63 — Compress PDF  🔲 TODO → branch `tool-compress`   *(Medium · 4–6 days)*
 > Reuses `src/lib/images/extractImage.ts` from Task 56 for the per-image decode where it applies.

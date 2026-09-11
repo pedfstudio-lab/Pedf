@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { previewPdf, previewPdfPages } from './preview';
+import { previewPdf, previewPdfPage, previewPdfPages } from './preview';
 
 const { loadPdfJs, renderPage } = vi.hoisted(() => ({ loadPdfJs: vi.fn(), renderPage: vi.fn() }));
 vi.mock('./pdfIo', () => ({ loadPdfJs }));
@@ -82,6 +82,17 @@ describe('streaming page previews', () => {
     expect(pages.every((page) => page.render.mock.calls[0]?.[0].intent === 'print')).toBe(true);
     expect(pages.every((page) => page.cleanup.mock.calls.length === 1)).toBe(true);
     expect(context.fillRect).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('renders one requested page with print intent and releases its resources', async () => {
+    const { destroy, getPage, pages, context } = setupPages(3);
+    const result = await previewPdfPage(new File(['pdf'], 'pages.pdf'), 2, new AbortController().signal, 420);
+    expect(getPage).toHaveBeenCalledWith(3);
+    expect(result).toEqual({ thumbnail: 'data:image/png;base64,269x420', size: { w: 320, h: 500 } });
+    expect(pages[2]!.render.mock.calls[0]?.[0].intent).toBe('print');
+    expect(pages[2]!.cleanup).toHaveBeenCalledOnce();
+    expect(context.fillRect).toHaveBeenCalledOnce();
     expect(destroy).toHaveBeenCalledOnce();
   });
 

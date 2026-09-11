@@ -1,0 +1,58 @@
+.signature-maker { display: grid; gap: 16px; color: #17233a; }
+.signature-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 12px; background: #eef3fa; }
+.signature-tabs button { min-height: 42px; border: 0; border-radius: 9px; background: transparent; color: #52627a; font: inherit; font-weight: 750; cursor: pointer; }
+.signature-tabs button[aria-selected="true"] { background: #fff; color: #1855b8; box-shadow: 0 2px 8px rgba(23, 49, 89, .14); }
+.signature-panel { display: grid; gap: 14px; }
+.signature-draw-canvas { display: block; width: 100%; max-width: 600px; aspect-ratio: 30 / 11; border: 1px solid #b8c9df; border-radius: 12px; background: repeating-linear-gradient(#fff 0 43px, #dce7f8 44px); cursor: crosshair; touch-action: none; }
+.signature-controls { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.signature-controls label, .signature-inline-select, .signature-clean-controls > label:not(.tool-checkbox), .signature-name { display: grid; gap: 6px; font-size: .85rem; font-weight: 700; }
+.signature-maker select, .signature-name input { min-height: 42px; border: 1px solid #b8c9df; border-radius: 9px; background: #fff; color: inherit; font: inherit; padding: 8px 11px; }
+.signature-controls button, .signature-chosen button, .signature-cancel { min-height: 42px; border: 1px solid #c9d8ed; border-radius: 9px; background: #fff; color: #253754; padding: 8px 12px; font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.signature-name input { width: min(440px, 100%); font-size: 1rem; font-weight: 400; }
+.signature-help, .signature-error { margin: 0; font-size: .85rem; }
+.signature-help { color: #79520c; }
+.signature-error { color: #a32020; }
+.signature-fonts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.signature-fonts button { display: grid; gap: 7px; min-width: 0; min-height: 96px; place-items: center; padding: 12px 8px; border: 1px solid #c9d8ed; border-radius: 12px; background: #fff; color: #182238; cursor: pointer; }
+.signature-fonts button[aria-checked="true"] { border-color: #1e6bff; box-shadow: 0 0 0 2px rgba(30, 107, 255, .2); }
+.signature-fonts span { max-width: 100%; overflow: hidden; font-size: clamp(1.4rem, 4vw, 2.1rem); text-overflow: ellipsis; white-space: nowrap; }
+.signature-fonts small { color: #64748b; font: 600 .7rem system-ui, sans-serif; }
+.signature-upload-button { width: fit-content; min-height: 44px; display: grid; place-items: center; border-radius: 10px; background: #1855b8; color: #fff; padding: 10px 15px; font-weight: 750; cursor: pointer; }
+.signature-upload-button input { display: none; }
+.signature-upload-preview { min-height: 150px; display: grid; place-items: center; padding: 14px; overflow: hidden; border: 1px solid #c9d8ed; border-radius: 12px; background-color: #fff; background-image: linear-gradient(45deg,#e7ecf3 25%,transparent 25%),linear-gradient(-45deg,#e7ecf3 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e7ecf3 75%),linear-gradient(-45deg,transparent 75%,#e7ecf3 75%); background-position: 0 0,0 8px,8px -8px,-8px 0; background-size: 16px 16px; }
+.signature-upload-preview canvas { display: block; max-width: 100%; max-height: 240px; object-fit: contain; }
+.signature-clean-controls { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: end; gap: 14px; }
+.signature-clean-controls input[type="range"] { width: 100%; accent-color: #1e6bff; }
+.signature-saved { display: grid; gap: 8px; }
+.signature-saved > div { display: flex; gap: 9px; flex-wrap: wrap; }
+.signature-saved > div > span { position: relative; display: block; border: 1px solid #c9d8ed; border-radius: 10px; background: #fff; }
+.signature-saved > div > span.is-selected { border-color: #1e6bff; box-shadow: 0 0 0 2px rgba(30, 107, 255, .2); }
+.signature-saved-pick { width: 112px; height: 76px; display: grid; grid-template-rows: 1fr auto; gap: 4px; place-items: center; padding: 8px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+.signature-saved-pick img { display: block; max-width: 86px; max-height: 42px; }
+.signature-saved-pick small { max-width: 92px; overflow: hidden; color: #52627a; text-overflow: ellipsis; white-space: nowrap; }
+.signature-saved-delete { position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #c9d8ed; border-radius: 50%; background: #fff; color: #7b2630; cursor: pointer; }
+.signature-chosen { display: flex; align-items: center; gap: 14px; padding: 14px; border: 1px solid #a7d9c6; border-radius: 12px; background: #f2fcf7; }
+.signature-chosen img { width: 130px; height: 70px; object-fit: contain; }
+.signature-chosen strong { flex: 1; }
+.signature-remember { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 10px; background: #f6f8fb; cursor: pointer; }
+.signature-remember input { width: 18px; height: 18px; margin-top: 2px; accent-color: #1e6bff; }
+.signature-remember span { display: grid; gap: 3px; }
+.signature-remember small { color: #64748b; }
+.signature-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.signature-use { min-height: 44px; border: 0; border-radius: 10px; background: #1855b8; color: #fff; padding: 10px 16px; font: inherit; font-weight: 750; cursor: pointer; }
+.signature-use:disabled { opacity: .5; cursor: not-allowed; }
+.signature-modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(13, 23, 40, .58); }
+.signature-modal { width: min(760px, 100%); max-height: min(880px, calc(100vh - 40px)); overflow-y: auto; border-radius: 18px; background: #fff; padding: 22px; box-shadow: 0 24px 70px rgba(8, 18, 36, .36); }
+.signature-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.signature-modal h2 { margin: 0 0 5px; font-size: 1.35rem; }
+.signature-modal header p { margin: 0; color: #64748b; font-size: .9rem; }
+.signature-modal header > button { width: 38px; height: 38px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid #d3dce9; border-radius: 9px; background: #fff; color: #263750; font-size: 1.4rem; cursor: pointer; }
+@media (max-width: 640px) {
+  .signature-fonts { grid-template-columns: 1fr; }
+  .signature-fonts button { min-height: 76px; }
+  .signature-clean-controls { grid-template-columns: 1fr; align-items: start; }
+  .signature-actions { flex-direction: column-reverse; }
+  .signature-actions button { width: 100%; }
+  .signature-modal-backdrop { padding: 0; align-items: end; }
+  .signature-modal { max-height: 94vh; border-radius: 18px 18px 0 0; padding: 16px; }
+}

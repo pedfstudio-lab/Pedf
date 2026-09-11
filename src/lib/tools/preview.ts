@@ -27,6 +27,45 @@ export async function previewPdf(file: File, signal: AbortSignal): Promise<{ pag
 
 export interface PreviewPageSize { w: number; h: number }
 
+/** Render one page independently so a placement stage never waits for the thumbnail stream. */
+export async function previewPdfPage(
+  file: File,
+  pageIndex: number,
+  signal: AbortSignal,
+  longSidePx: number,
+): Promise<{ thumbnail: string; size: PreviewPageSize }> {
+  const loaded = await loadPdfJs(file);
+  let page: Awaited<ReturnType<typeof loaded.doc.getPage>> | undefined;
+  let canvas: HTMLCanvasElement | undefined;
+  let task: ReturnType<NonNullable<typeof page>['render']> | undefined;
+  const cancel = () => task?.cancel();
+  try {
+    signal.throwIfAborted();
+    page = await loaded.doc.getPage(pageIndex + 1);
+    signal.throwIfAborted();
+    const natural = page.getViewport({ scale: 1 });
+    const scale = longSidePx / Math.max(natural.width, natural.height);
+    const viewport = page.getViewport({ scale });
+    canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas is unavailable.');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    task = page.render({ canvasContext: context, viewport, intent: 'print' });
+    signal.addEventListener('abort', cancel, { once: true });
+    await task.promise;
+    signal.throwIfAborted();
+    return { thumbnail: canvas.toDataURL('image/png'), size: { w: natural.width, h: natural.height } };
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    page?.cleanup();
+    if (canvas) canvas.width = canvas.height = 0;
+    await loaded.doc.destroy();
+  }
+}
+
 export async function previewPdfPages(
   file: File,
   signal: AbortSignal,

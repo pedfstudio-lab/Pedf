@@ -21,7 +21,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Organize PDF/ }).getAttribute('href')).toBe('/tools/organize');
     expect(screen.getByRole('link', { name: /Watermark PDF/ }).getAttribute('href')).toBe('/tools/watermark');
     expect(screen.getByRole('link', { name: /Repair PDF/ }).getAttribute('href')).toBe('/tools/repair');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(10);
+    expect(screen.getByRole('link', { name: /Sign PDF/ }).getAttribute('href')).toBe('/tools/sign');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(11);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -101,5 +102,15 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Repair PDF');
     expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Repair PDF' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('opens Sign PDF with the maker and a disabled action', () => {
+    render(<ToolsApp slug="sign" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Sign PDF');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Draw' })).toBeTruthy();
+    const sign = screen.getByRole('button', { name: 'Sign PDF' }) as HTMLButtonElement;
+    expect(sign.disabled).toBe(true);
+    expect(screen.getAllByText('Make or pick a signature first.').length).toBeGreaterThan(0);
   });
 });

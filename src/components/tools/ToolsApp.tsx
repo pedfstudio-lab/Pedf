@@ -8,6 +8,7 @@ import { rotateTool } from '@/lib/tools/rotate';
 import { organizeTool } from '@/lib/tools/organize';
 import { watermarkTool } from '@/lib/tools/watermark';
 import { repairTool } from '@/lib/tools/repair';
+import { signTool } from '@/lib/tools/sign';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -25,6 +26,7 @@ if (!getTool('rotate')) registerTool(rotateTool);
 if (!getTool('organize')) registerTool(organizeTool);
 if (!getTool('watermark')) registerTool(watermarkTool);
 if (!getTool('repair')) registerTool(repairTool);
+if (!getTool('sign')) registerTool(signTool);
 
 function ToolsIndex() {
   const tools = listTools();

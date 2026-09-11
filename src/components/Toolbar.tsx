@@ -17,6 +17,7 @@ interface ToolbarProps {
   onEditModeChange(enabled: boolean): void;
   onTextAddModeChange(enabled: boolean): void;
   onImageModeChange(enabled: boolean): void;
+  onOpenSign(): void;
   onOpenChat(): void;
   onOpenSettings(): void;
   onPeekChange(peeking: boolean): void;
@@ -38,6 +39,7 @@ export function Toolbar({
   onEditModeChange,
   onTextAddModeChange,
   onImageModeChange,
+  onOpenSign,
   onOpenChat,
   onOpenSettings,
   onPeekChange,
@@ -135,6 +137,14 @@ export function Toolbar({
           className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${imageMode ? 'bg-cyan-700 text-white hover:bg-cyan-600' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
         >
           Add image
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSign}
+          disabled={!fileName}
+          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Sign
         </button>
         <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />
         <button

@@ -4,6 +4,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
 import { PdfViewer } from './components/PdfViewer';
 import { PdfDropZone } from './components/PdfDropZone';
+import { SignatureModal } from './components/sign/SignatureModal';
 import { loadDocument } from './lib/pdf/loadDocument';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
@@ -16,6 +17,8 @@ import {
   ZOOM_STEP,
 } from './lib/pdf/zoom';
 import type { PdfRect, Rgb } from './lib/export/types';
+import type { SignatureAsset } from './lib/tools/signOptions';
+import { editorSignatureEdit } from './lib/sign/editorSignature';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
@@ -102,7 +105,7 @@ function useZoomShortcuts(
 
 function EditorApp() {
   const { document, setDocument, getPageCanvas } = useDocumentStore();
-  const { edits, pagePlan, resetDocument } = useEdits();
+  const { edits, pagePlan, resetDocument, addEdits } = useEdits();
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
   const [repairFile, setRepairFile] = useState<File | null>(null);
@@ -140,6 +143,7 @@ function EditorApp() {
   const [exporting, setExporting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
   const pendingFileChecked = useRef(false);
@@ -266,6 +270,27 @@ function EditorApp() {
     }
   }, [document, edits, exporting, pagePlan, sampleBackground]);
 
+  const addSignature = useCallback((signature: SignatureAsset) => {
+    if (!document) return;
+    const geometries = planToGeometry(pagePlan, document.loaded.pages);
+    const viewport = scrollRef.current?.getBoundingClientRect();
+    let pageIndex = 0;
+    let bestVisible = -1;
+    for (let index = 0; index < geometries.length; index++) {
+      const rect = getPageCanvas(index)?.canvas.getBoundingClientRect();
+      if (!rect || !viewport) continue;
+      const width = Math.max(0, Math.min(rect.right, viewport.right) - Math.max(rect.left, viewport.left));
+      const height = Math.max(0, Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top));
+      const visible = width * height;
+      if (visible > bestVisible) { bestVisible = visible; pageIndex = index; }
+    }
+    const page = geometries[pageIndex];
+    if (!page) return;
+    const image = editorSignatureEdit(signature, pageIndex, page, edits);
+    addEdits([image]);
+    setSignOpen(false);
+  }, [addEdits, document, edits, getPageCanvas, pagePlan]);
+
   return (
     <div className="flex h-full flex-col bg-neutral-100">
       <Toolbar
@@ -301,6 +326,7 @@ function EditorApp() {
             setTextAddMode(false);
           }
         }}
+        onOpenSign={() => setSignOpen(true)}
         onOpenChat={() => {
           setSettingsOpen(false);
           setChatOpen(true);
@@ -313,6 +339,7 @@ function EditorApp() {
         onExport={() => void handleExport()}
       />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SignatureModal open={signOpen} onClose={() => setSignOpen(false)} onDone={addSignature} />
       <PdfChat
         open={chatOpen}
         doc={document?.loaded.doc ?? null}
