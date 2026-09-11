@@ -7,6 +7,7 @@ import { pdfToJpgTool } from '@/lib/tools/pdfToJpg';
 import { rotateTool } from '@/lib/tools/rotate';
 import { organizeTool } from '@/lib/tools/organize';
 import { watermarkTool } from '@/lib/tools/watermark';
+import { repairTool } from '@/lib/tools/repair';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -23,6 +24,7 @@ if (!getTool('pdf-to-jpg')) registerTool(pdfToJpgTool);
 if (!getTool('rotate')) registerTool(rotateTool);
 if (!getTool('organize')) registerTool(organizeTool);
 if (!getTool('watermark')) registerTool(watermarkTool);
+if (!getTool('repair')) registerTool(repairTool);
 
 function ToolsIndex() {
   const tools = listTools();

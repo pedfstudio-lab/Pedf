@@ -149,7 +149,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
               if (from >= 0) reorder(from, index);
               dragged.current = null;
             }}>
-            <ToolFilePreview file={file} />
+            <ToolFilePreview file={file} failureText={tool.previewFailureText} />
             <div className="tool-file-name"><strong title={file.name}>{file.name}</strong><span>{formatBytes(file.size)}</span></div>
             <div className="tool-file-actions">
               {tool.multiple && <>
@@ -178,7 +178,9 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     {status === 'done' && <section className="tool-results" aria-label="Results">
       <h2>Your {outputs.length === 1 ? 'file is' : 'files are'} ready</h2>
       <ul>{outputs.map((output, index) => <li key={index}>
-        <div className="tool-file-name"><strong>{output.name}</strong><span>{formatBytes(output.bytes.byteLength)}</span></div>
+        <div className="tool-file-name"><strong>{output.name}</strong><span>{formatBytes(output.bytes.byteLength)}</span>
+          {output.note && <p className={`tool-result-note tool-result-note-${output.note.tone}`} role="status">{output.note.text}</p>}
+        </div>
         <div className="tool-result-actions">
           <button className="site-button" type="button" onClick={() => download(() => downloadBytes(output.name, output.bytes, output.mime))}>Download</button>
           {output.mime === 'application/pdf' && <button className="tool-secondary" type="button" onClick={() => {

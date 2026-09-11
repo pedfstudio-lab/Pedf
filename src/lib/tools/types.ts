@@ -4,6 +4,7 @@ export interface ToolOutput {
   name: string;
   bytes: Uint8Array;
   mime: string;
+  note?: { text: string; tone: 'ok' | 'warn' | 'danger' };
 }
 
 export type ToolOptions = Record<string, unknown>;
@@ -33,6 +34,11 @@ export interface ToolDefinition {
   Options?: ComponentType<ToolOptionsProps>;
   defaultOptions: ToolOptions;
   icon?: ReactNode;
+  /**
+   * Shown in the file card when its thumbnail cannot be drawn (default: the reading error, in red). Repair uses a
+   * calm hint instead, because damaged files are expected there and its own file check explains them.
+   */
+  previewFailureText?: string;
   /** Internal verification tools stay reachable by URL, but off the public grid. */
   hidden?: boolean;
 }

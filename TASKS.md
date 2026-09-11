@@ -7715,17 +7715,183 @@ corners); dragging fine-tunes.
   "CONFIDENTIAL" at 25% across / 25% down on upright and turned pages. The drag was driven by pointer events in the
   page (the review browser pane was collapsed), not the OS mouse.
 
-### Task 61 — Repair PDF  🔲 TODO → branch `tool-repair`   *(Easy · 1–2 days)*
-1. Register `repair` (single PDF). No options; a **What we did** report in the result card.
-2. `run()` in three escalating steps, stopping at the first success: (a) `PDFDocument.load(bytes, {
-   ignoreEncryption: true, updateMetadata: false })` → `save()` (rewrites xref / streams — fixes most "damaged"
-   files); (b) if pdf-lib throws: open with pdf.js (very tolerant), then rebuild page by page — for each page try
-   `copyPages` from a pdf-lib load of the same bytes with `throwOnInvalidObject: false`; (c) if that fails too:
-   render every page with pdf.js and build an image-only PDF (150 dpi JPEG) and report **"Text became images"** in
-   red. If pdf.js can't open it either → "This file is too damaged to repair."
-3. **Tests:** a sample with a truncated xref (make one in-test by chopping the trailer) → step (a) or (b) repairs it
-   and the text is intact; a random-bytes file → the final error. **Verify (user):** a PDF that Acrobat refuses.
-**Land:** `Repair PDF tool (Task 61)`.
+### Task 61 — Repair PDF  🔲 TODO → branch `tool-repair` (create from `main`)   *(Medium · 2–3 days)*
+
+**What the user gets:** `/tools/repair`. Drop **one** PDF → the panel first **checks** it and says in plain words
+what it found (healthy · damaged · password-protected · not a PDF · digitally signed) → **Repair PDF** → download
+`name-repaired.pdf` or **Open in editor**, with a short **"What we did"** note in the result card listing exactly
+which pages were kept, turned into images, or lost.
+
+**Use cases:** a marksheet or bill downloaded on weak mobile data that stopped near the end ("Failed to load PDF
+document"); an email attachment or USB copy cut short; files from old scanner software or government / college
+portals that some apps refuse; a PDF our own editor fails to open.
+
+**How it works — rebuild, then prove it:** a damaged PDF rarely says what is wrong, so the tool does **not** diagnose
+problems one by one. It copies whatever can still be read into a fresh, correctly built file (like copying a torn
+notebook's readable pages into a new notebook with a fresh table of contents), then **re-opens its own result and
+tries every page** before calling it a success. Three tries, strongest last, stopping at the first that passes the
+self-check. It never guesses or invents content.
+
+**Reuse:** `ToolPage` / `canRun` / `onWarning`, `loadPdfLib` / `loadPdfJs` / `savePdf` / `outputName` / `ToolError`
+/ `PDF_ERRORS` (`pdfIo.ts`), `renderPageImage` from `pdfToJpg.ts` (print intent, memory guard) for pages that must
+become images, `describePageIndices` from `pageRanges.ts` for "pages 7–9", `fileKey` from `organizePlan.ts`,
+`setPendingFiles` + `navigate` for the editor link. No new dependencies.
+
+**Steps**
+
+1. **Inspection** `src/lib/tools/repairInspect.ts` (+ test) — one function used by both the panel and the run:
+   `inspectPdf(bytes, onProgress?) → Inspection`, JSON-plain so it can live in `options`:
+   - `{ kind: 'not-pdf' }` — no `%PDF-` in the first 1024 bytes (portals sometimes save an error web page as `.pdf`).
+   - `{ kind: 'locked' }` — pdf-lib throws `EncryptedPDFError` or pdf.js throws `PasswordException`. Locked or
+     restricted is **not damage**; Repair cannot change it.
+   - `{ kind: 'healthy', pageCount, signed }` — pdf-lib opens it **strictly** (`throwOnInvalidObject: true`,
+     `updateMetadata: false`), pdf.js opens it, both agree on the page count, and pdf.js loads every page's operator
+     list without an error.
+   - `{ kind: 'damaged', pageCount?, badPages: number[], problems: string[], signed }` — anything else that is still
+     a PDF. `problems` are plain phrases for the panel: "the file's index is broken", "2 pages can't be read (pages
+     7, 9)", "the page list is broken". `pageCount` is pdf.js's count when pdf.js can open it.
+   - `signed` — a cheap byte scan for a signature dictionary (`/ByteRange` together with `/Sig`); works even when the
+     file is damaged. DigiLocker documents, e-signed Aadhaar papers and many certificates are signed — any rewrite
+     makes the signature invalid.
+   - `onProgress(done, total)` while loading page operator lists ("Checking page 120 of 500…"); yield with
+     `setTimeout(0)` every 10 pages.
+
+2. **Options** `src/lib/tools/repairOptions.ts` (+ test): `{ inspection?: Inspection & { fileKey: string };
+   repairAnyway: boolean; acceptSignatureLoss: boolean }`, defaults `{ repairAnyway: false, acceptSignatureLoss:
+   false }`, `parseRepairOptions`. `repairProblem(options, inputs) → reason | undefined` (used by `canRun`):
+   - no inspection, or its `fileKey` ≠ `fileKey(inputs[0])` → **"Checking your file…"**
+   - `not-pdf` → **"This isn't a PDF file. It may be a web page or another file saved with a .pdf name."**
+   - `locked` → **"This file is password-protected or restricted, not damaged. Repair can't change it."**
+   - `healthy` and not `repairAnyway` → **"This file looks healthy — no repair needed."**
+   - `signed` and (damaged or `repairAnyway`) and not `acceptSignatureLoss` → **"Tick the box to confirm the digital
+     signature will stop being valid."**
+
+3. **Framework note on results** (small, other tools untouched): `ToolOutput` gets an optional
+   `note?: { text: string; tone: 'ok' | 'warn' | 'danger' }`; `ToolPage` shows it under the file name in the result
+   card (green / amber / red text, `role="status"`). Test in `ToolPage.test.tsx`.
+
+4. **Tool** `src/lib/tools/repair.ts` (+ test)
+   - `REPAIR_INPUT_ERROR = 'Choose one PDF file to repair.'`, `TOO_DAMAGED_ERROR = 'This file is too damaged to
+     repair.'`, `SIGNATURE_WARNING = 'The digital signature is not valid in the repaired copy.'`
+   - Structure the run as a small **ladder** function with the three tries passed in —
+     `repairLadder(tries, verify, ctx)` — so tests can force every branch; the real tries are exported too.
+   - `run()`: `throwIfAborted`; one input; read bytes; **re-inspect** (never trust options alone) and apply
+     `repairProblem` → `ToolError`; if signed → `onWarning(SIGNATURE_WARNING)`; run the ladder; name
+     `outputName(file, 'repaired')`; attach the note.
+   - **Self-check** `verifyPdf(bytes) → { ok, pageCount, badPages }`: pdf-lib strict open + pdf.js open + every
+     page's operator list. A try succeeds only if `ok` and the page count matches what that try promised.
+   - **Try 1 — rewrite the index:** pdf-lib lenient open (`throwOnInvalidObject: false`, `updateMetadata: false`)
+     → `save()` → verify. Fixes most "damaged" files; nothing visible changes. Note (ok): **"Rebuilt the file's
+     index. All 16 pages kept. Nothing else changed."**
+   - **Try 2 — rebuild page by page:** pdf.js page count is the truth. pdf-lib lenient open. Copy the pages into a
+     new document with **one `copyPages` call** for all pages (the Organize lesson — one call per page re-copies
+     shared fonts and images and bloats the file). Only if that call throws, probe page by page in a **throwaway**
+     document to find the pages that cannot be copied, then do one real `copyPages` call with the good ones.
+     Assemble in the original order: a copied page as is; a page that cannot be copied but pdf.js can render → an
+     **image of that page** (`renderPageImage`, 150 dpi, JPEG 0.85, placed at the page's size as the reader sees
+     it); neither → **lost**. Save → verify; any page still failing in the output → replace it with its image and
+     verify again. Note (warn): **"Rebuilt page by page. 14 of 16 pages kept as they were. Page 5 became an image.
+     Page 9 could not be read."**
+   - **Try 3 — pictures:** every page pdf.js can render becomes an image page (150 dpi JPEG 0.85, original size as
+     the reader sees it, upright); unreadable pages are lost and listed. Note (danger): **"Text became images: every
+     page is now a picture. It opens everywhere, but text can't be selected, searched, edited or read aloud."**
+   - All tries fail (or nothing readable) → `ToolError(TOO_DAMAGED_ERROR)`.
+   - Progress: "Checking the file…", "Rebuilding the file's index…", "Rebuilding page 3 of 16…", "Turning page 5
+     into an image…", "Checking the repaired file…"; `throwIfAborted` between pages; yield every 10 pages.
+   - `repairTool = { slug: 'repair', title: 'Repair PDF', description: 'Fix PDFs that won't open or open with
+     errors — see exactly what was kept.', accepts: 'pdf', multiple: false, defaultOptions, Options: RepairOptions,
+     icon: '✚', canRun: (options, inputs) => repairProblem(options, inputs), run }`.
+
+5. **Option panel** `src/components/tools/RepairOptions.tsx` (+ test): when `inputs[0]` changes, run `inspectPdf`
+   (cancel on file change) and write the result with its `fileKey` into options via `onChange` (from the effect,
+   never during render). Show a status card:
+   - checking → "Checking your file… (page 12 of 80)";
+   - healthy → green "This file looks healthy." + checkbox **"Repair anyway — rewrites the file. Use this if another
+     app still refuses it."** (some apps, e.g. Acrobat, are stricter than our checks);
+   - damaged → amber "This file is damaged:" + the `problems` list + "Repair will rebuild it.";
+   - locked / not a PDF → the reason text, red;
+   - signed (when a repair would run) → amber box "This file has a digital signature. Any repair makes the signature
+     invalid." + checkbox **"I understand"**.
+
+6. **"Try Repair PDF" link in the editor:** find where the editor shows its "couldn't open this PDF" error for a
+   chosen or dropped file (the document open path in `App.tsx` / `documentStore`), and add a **Try Repair PDF**
+   button there — only for load / parse failures of that file, not for other errors. Click → `setPendingFiles([the
+   same file])` + `navigate('/tools/repair')`; the Repair page picks it up on mount (`takePendingFiles`) and starts
+   checking. RTL test for the button.
+
+7. **Register** in `ToolsApp.tsx` after `watermark`; `ToolsApp.test.tsx` → 10 cards; the Repair page shows the
+   drop zone and a disabled Repair PDF button until a file is checked.
+
+8. **Tests** (build every fixture in the test; do **not** add damaged files to `public/samples` — that folder ships
+   to users):
+   - `repairInspect.test.ts`: healthy pdf-lib fixture → `healthy`; HTML bytes named `.pdf` → `not-pdf`; a fixture
+     whose trailer is hand-edited to add an `/Encrypt` entry → `locked`; a fixture with the tail chopped off (drop
+     the `xref … startxref … %%EOF` end) → `damaged` with "the file's index is broken"; a fixture with a signature
+     dictionary (`/FT /Sig` with `/V << /Type /Sig /ByteRange [...] /Contents <...> >>`) → `signed: true`.
+   - `repair.test.ts`: the chopped fixture → try 1 repairs it, the text is intact, the note says "All N pages kept";
+     `repairLadder` with injected tries → try 2 note wording (kept / became image / lost, pages listed with
+     `describePageIndices`), try 3 danger note, all failing → `TOO_DAMAGED_ERROR`; random bytes behind a `%PDF-`
+     header → `TOO_DAMAGED_ERROR`; the output of try 2 on a fixture whose pages share one image keeps **one** image
+     object (no bloat); healthy + not `repairAnyway` → the healthy `ToolError`; signed + damaged + accepted →
+     `onWarning(SIGNATURE_WARNING)`; two files → `REPAIR_INPUT_ERROR`; already-aborted signal → rejects early.
+   - `repairOptions.test.ts`: every `repairProblem` reason, including a stale `fileKey`.
+   - `RepairOptions.test.tsx` (mock `inspectPdf`): each status card; the Repair anyway and I understand checkboxes
+     write their options; a new file re-checks.
+   - `noNetwork` needs nothing.
+
+9. **Guardrails:** never rewrite a healthy file unless the user ticks Repair anyway; never invent content; images
+   only for pages that cannot be copied (try 2) or in try 3, and always said in the note; a try counts only after
+   `verifyPdf` passes; one `copyPages` call per source; rendering with `intent: 'print'`; every user-facing message
+   is a `ToolError`, a `canRun` reason or the result note; no `fetch`.
+
+**Verify (user):** Claude prepares damaged test files during the review (GOA with its end cut off, GOA with one
+page's content scrambled, a web page saved as `.pdf`, random bytes). Healthy GOA → "This file looks healthy",
+button disabled; tick Repair anyway → works, opens in another viewer. Cut GOA → damaged card → Repair → note lists
+the pages kept / lost → opens everywhere. Scrambled page → that page is an image or listed as lost. Web page →
+"This isn't a PDF file". Random bytes → "too damaged". Open the cut file in the **editor** → error shows **Try
+Repair PDF** → click → Repair page opens with the file already checking.
+
+**Known limits:** it cannot bring back parts that are not in the file (a cut download's missing end is gone); a
+scrambled picture or font inside a page cannot be restored — the page keeps what is readable; locked files are out
+of scope (an Unlock tool would be separate); repairing a signed file always voids the signature.
+
+**Land:** merge `tool-repair` → `main`. Commit: `Repair PDF tool (Task 61)`.
+
+**Review of the Task 61 build (2026-09-11):** ✅ accepted with Rev 1 — typecheck / lint / build green, 831 tests. Test
+files made by Claude in `tmp/repair-tests/` (gitignored, never shipped): healthy GOA, GOA with its index cut, GOA cut
+at 60% / 90% (stopped download), a web page named `.pdf`, `%PDF-` + random bytes, a locked file (real `/Encrypt`
+dictionary — a dangling `/Encrypt` ref is *not* locked for pdf-lib or pdf.js), a signed file, a signed file with its
+index cut. All inspect as expected; index-cut GOA → try 1, all 16 pages, text intact; signed flow needs "I
+understand" and warns; the editor's **Try Repair PDF** button hands the file over; other tools' "could not be read"
+error now also suggests Repair. User tested files 1–5 by hand. **Gap found:** GOA keeps its catalog and page list at
+99.4% of the file while its pages start at 6%, so *any* stopped download — even cut at 99.5% — came back "too
+damaged". User also flagged the red "This file could not be read. Try Repair PDF." in the file card on the Repair
+page itself.
+
+#### Task 61 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself") — rescue pages when the page list is gone
+
+- **Rescue** `src/lib/tools/repairRescue.ts` → `rescuePageList(bytes)`: cut after the last complete `endobj` (drops a
+  half-written object at the cut), read every complete object with pdf-lib's low-level `PDFParser` (object streams
+  included), skip files that still have a working catalog + page list (left to the other tries — avoids resurrecting
+  deleted pages), collect `/Type /Page` objects in object-number order, give pages without a `MediaBox` the most
+  common size among the found pages (else A4), build a fresh `/Pages` + `/Catalog`, serialise with `PDFWriter`.
+  Pages whose content or resources point at objects that are gone are reported as "missing some parts".
+- **New try 3** `tryRescuePages` in `repair.ts` (pictures is now try 4): rescue → clean rewrite + self-check → else
+  page-by-page rebuild → else pictures, all on the rescued file. Note (warn): "The file's page list was missing, so
+  we searched the file and found 8 pages. All 8 were rebuilt. If the file was cut short, the pages after these are
+  missing." (+ "Pages … are missing some parts." when relevant).
+- **Calm file card on Repair:** `ToolDefinition.previewFailureText` (optional) replaces the red reading error in the
+  file card; Repair sets "No preview. See the file check below." Other tools keep the red error.
+- **Tests (7 new):** page list rebuilt in reading order, a page with its content gone flagged, a half-written final
+  object dropped, working-page-list files and noise left alone, the full Repair run note; ToolPage calm text vs red
+  error. 838 tests / typecheck / lint / build green.
+- **Live (GOA):** cut at 60% → 8 of 16 pages rescued, cut at 90% → 14 of 16, both in the original order (first words
+  of every page match the original); the Repair page shows the grey card line and the warn note.
+- **Known limits:** page order is a best guess from object numbers (right for GOA); pages packed into a compressed
+  block that was itself cut off cannot come back; a file whose *beginning* is damaged is reported "not a PDF" (rescue
+  could cover it later); pure noise (test file 5) can never be repaired — the content is not in the file.
+- **Not done (suggested, not approved):** add "Try downloading it again, or ask the sender for a new copy." to the
+  "too damaged" message.
 
 ### Task 62 — Sign PDF  🔲 TODO → branch `tool-sign`   *(Medium · 3–4 days)*
 **Goal:** a signature the user draws, types, or uploads, placed on one page (or every page) — and the same

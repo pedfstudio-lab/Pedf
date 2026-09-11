@@ -48,12 +48,12 @@ function boundedViewport(page: PDFPageProxy, dpi: number): { viewport: PageViewp
   return { viewport, scaledDown: true };
 }
 
-async function encodeCanvas(canvas: HTMLCanvasElement, format: 'jpg' | 'png'): Promise<Uint8Array> {
+async function encodeCanvas(canvas: HTMLCanvasElement, format: 'jpg' | 'png', jpegQuality = 0.9): Promise<Uint8Array> {
   const mime = format === 'jpg' ? 'image/jpeg' : 'image/png';
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
     (result) => result ? resolve(result) : reject(new ToolError(IMAGE_ENCODE_ERROR)),
     mime,
-    format === 'jpg' ? 0.9 : undefined,
+    format === 'jpg' ? jpegQuality : undefined,
   ));
   return new Uint8Array(await blob.arrayBuffer());
 }
@@ -63,6 +63,7 @@ export async function renderPageImage(
   dpi: number,
   format: 'jpg' | 'png',
   signal: AbortSignal,
+  jpegQuality = 0.9,
 ): Promise<RenderedPageImage> {
   signal.throwIfAborted();
   const { viewport, scaledDown } = boundedViewport(page, dpi);
@@ -89,7 +90,7 @@ export async function renderPageImage(
       signal.removeEventListener('abort', cancel);
     }
     signal.throwIfAborted();
-    const bytes = await encodeCanvas(canvas, format);
+    const bytes = await encodeCanvas(canvas, format, jpegQuality);
     signal.throwIfAborted();
     return { bytes, width: canvas.width, height: canvas.height, scaledDown };
   } finally {

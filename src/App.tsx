@@ -21,6 +21,8 @@ import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
 import { PrefsStoreProvider } from './state/prefsStore';
 import { takePendingFile } from './lib/site/pendingFile';
+import { setPendingFiles } from './lib/site/pendingFiles';
+import { navigate } from './lib/site/navigate';
 import { isPdf } from './lib/site/pdfFile';
 
 function pageId(): string {
@@ -103,6 +105,7 @@ function EditorApp() {
   const { edits, pagePlan, resetDocument } = useEdits();
   useEditHistoryShortcuts();
   const [error, setError] = useState<string | null>(null);
+  const [repairFile, setRepairFile] = useState<File | null>(null);
   const [draggingOverEmpty, setDraggingOverEmpty] = useState(false);
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLElement>(null);
@@ -170,6 +173,7 @@ function EditorApp() {
 
   const open = useCallback(async (source: File | ArrayBuffer, name: string) => {
     setError(null);
+    setRepairFile(null);
     try {
       const loaded = await loadDocument(source);
       setDocument({ loaded, fileName: name });
@@ -180,6 +184,7 @@ function EditorApp() {
       setChatOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      if (source instanceof File) setRepairFile(source);
     }
   }, [resetDocument, setDocument]);
 
@@ -319,7 +324,14 @@ function EditorApp() {
       />
       <main ref={scrollRef} className="flex-1 overflow-auto">
         {error && (
-          <div className="m-4 rounded bg-red-100 p-3 text-sm text-red-800">{error}</div>
+          <div className="m-4 flex flex-wrap items-center gap-3 rounded bg-red-100 p-3 text-sm text-red-800">
+            <span>{error}</span>
+            {repairFile && <button type="button" className="rounded border border-red-300 bg-white px-3 py-2 font-semibold text-red-800"
+              onClick={() => {
+                setPendingFiles([repairFile]);
+                navigate('/tools/repair');
+              }}>Try Repair PDF</button>}
+          </div>
         )}
         {document ? (
           <PdfViewer

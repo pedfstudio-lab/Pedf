@@ -6,6 +6,7 @@ import { navigate } from '@/lib/site/navigate';
 import { setPendingFiles, takePendingFiles } from '@/lib/site/pendingFiles';
 import { downloadBytes, zipOutputs } from '@/lib/tools/download';
 import { ToolError } from '@/lib/tools/errors';
+import { previewPdf } from '@/lib/tools/preview';
 import { getTool, registerTool } from '@/lib/tools/registry';
 import type { ToolContext, ToolDefinition, ToolOutput } from '@/lib/tools/types';
 import { ToolPage } from './ToolPage';
@@ -32,10 +33,29 @@ beforeEach(() => {
   takePendingFiles();
   vi.clearAllMocks();
   run.mockReset().mockResolvedValue([result]);
+  vi.mocked(previewPdf).mockResolvedValue({ pages: 2, thumbnail: 'data:image/png;base64,AA==' });
 });
 afterEach(() => { cleanup(); takePendingFiles(); });
 
 describe('ToolPage', () => {
+  it('shows a tool\'s calm preview-failure text instead of the red reading error', async () => {
+    vi.mocked(previewPdf).mockRejectedValue(new ToolError('This file could not be read. Try Repair PDF.'));
+    const calm = { ...dummy, slug: 'calm', previewFailureText: 'No preview. See the file check below.' };
+    show(calm);
+    pick(file('damaged.pdf'));
+    const note = await screen.findByText('No preview. See the file check below.');
+    expect(note.className).not.toContain('tool-file-error');
+    expect(screen.queryByText('This file could not be read. Try Repair PDF.')).toBeNull();
+  });
+
+  it('keeps the red reading error for tools without preview-failure text', async () => {
+    vi.mocked(previewPdf).mockRejectedValue(new ToolError('This file could not be read. Try Repair PDF.'));
+    show();
+    pick(file('damaged.pdf'));
+    const error = await screen.findByText('This file could not be read. Try Repair PDF.');
+    expect(error.className).toContain('tool-file-error');
+  });
+
   it('uses canRun to explain a disabled action and enables it when the reason clears', () => {
     const canRun = vi.fn((options: Record<string, unknown>) => options.label === 'Ready' ? undefined : 'Choose an option first.');
     show({ ...dummy, canRun });
@@ -76,6 +96,15 @@ describe('ToolPage', () => {
     expect(screen.getAllByText('Form fields from more than one file may clash')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
     expect(screen.queryByText('Form fields from more than one file may clash')).toBeNull();
+  });
+
+  it('shows a tool result note with its tone under the output name', async () => {
+    run.mockResolvedValueOnce([{ ...result, note: { text: 'All 2 pages kept. Nothing else changed.', tone: 'ok' } }]);
+    show(); pick(file('repair.pdf'));
+    fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+    const note = await screen.findByText('All 2 pages kept. Nothing else changed.');
+    expect(note.textContent).toBe('All 2 pages kept. Nothing else changed.');
+    expect(note.classList.contains('tool-result-note-ok')).toBe(true);
   });
 
   it('renders a registered tool and sets/restores page metadata', () => {

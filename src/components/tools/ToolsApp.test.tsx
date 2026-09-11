@@ -20,7 +20,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Rotate PDF/ }).getAttribute('href')).toBe('/tools/rotate');
     expect(screen.getByRole('link', { name: /Organize PDF/ }).getAttribute('href')).toBe('/tools/organize');
     expect(screen.getByRole('link', { name: /Watermark PDF/ }).getAttribute('href')).toBe('/tools/watermark');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(9);
+    expect(screen.getByRole('link', { name: /Repair PDF/ }).getAttribute('href')).toBe('/tools/repair');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(10);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -93,5 +94,12 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByLabelText('Watermark text')).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Watermark position' })).toBeTruthy();
     expect(screen.getByText('Choose a PDF to preview the watermark.')).toBeTruthy();
+  });
+
+  it('opens Repair PDF with one-file checking and a disabled action', () => {
+    render(<ToolsApp slug="repair" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Repair PDF');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Repair PDF' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

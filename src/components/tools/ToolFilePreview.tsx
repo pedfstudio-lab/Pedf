@@ -3,7 +3,7 @@ import { isPdf } from '@/lib/site/pdfFile';
 import { friendlyError } from '@/lib/tools/pdfIo';
 import { previewPdf } from '@/lib/tools/preview';
 
-export function ToolFilePreview({ file }: { file: File }) {
+export function ToolFilePreview({ file, failureText }: { file: File; failureText?: string }) {
   const [preview, setPreview] = useState<{ thumbnail: string; pages?: number } | null>(null);
   const [error, setError] = useState('');
 
@@ -26,8 +26,10 @@ export function ToolFilePreview({ file }: { file: File }) {
 
   return <div className="tool-file-preview">
     {preview ? <img src={preview.thumbnail} alt={`Preview of ${file.name}`} /> : <span className="tool-file-placeholder" aria-hidden="true">PDF</span>}
-    <span className={error ? 'tool-file-error' : ''}>
-      {error || (preview ? (preview.pages !== undefined ? `${preview.pages} ${preview.pages === 1 ? 'page' : 'pages'}` : 'Image') : 'Reading PDF…')}
+    <span className={error && !failureText ? 'tool-file-error' : ''}>
+      {error ? (failureText ?? error)
+        : preview ? (preview.pages !== undefined ? `${preview.pages} ${preview.pages === 1 ? 'page' : 'pages'}` : 'Image')
+          : 'Reading PDF…'}
     </span>
   </div>;
 }

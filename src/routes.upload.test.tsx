@@ -84,6 +84,22 @@ describe('landing PDF handoff to the editor', () => {
     expect(fetchSample).not.toHaveBeenCalled();
   });
 
+  it('offers a failed editor file directly to Repair PDF', async () => {
+    window.history.replaceState({}, '', '/app');
+    loadDocument.mockRejectedValueOnce(new Error('Failed to load PDF document.'));
+    render(<StrictMode><Root /></StrictMode>);
+    const input = await screen.findByLabelText('Drag & drop your PDF here');
+    const broken = new File(['%PDF-1.7 broken'], 'broken.pdf', { type: 'application/pdf' });
+
+    fireEvent.change(input, { target: { files: [broken] } });
+    expect(await screen.findByText('Failed to load PDF document.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Try Repair PDF' }));
+
+    expect(window.location.pathname).toBe('/tools/repair');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Repair PDF' }, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByText('broken.pdf')).toBeTruthy();
+  });
+
   it('opens the exact PDF chosen in the empty editor upload box without fetching a sample', async () => {
     window.history.replaceState({}, '', '/app');
     render(<StrictMode><Root /></StrictMode>);
