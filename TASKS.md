@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark → 61 Repair → 62 Sign → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair → 62 Sign → 63 Compress →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -7497,7 +7497,7 @@ page 1 landscape and the blank in matching landscape size.
    **Verify (user):** bottom-centre `Page 1 of 16` on GOA; a rotated page still shows it at the bottom.
 **Land:** `Page numbers tool (Task 59)`.
 
-### Task 60 — Watermark  🔲 TODO → branch `tool-watermark` (create from `main`)   *(Easy–Medium · 2–3 days)*
+### Task 60 — Watermark  ✅ MERGED to `main` (`6a8678c`, 2026-09-11; includes Rev 1; branch `tool-watermark` deleted)   *(Easy–Medium · 2–3 days)*
 
 **What the user gets:** `/tools/watermark`. Drop **one** PDF → choose **Text** or **Image** → set the look →
 **Watermark PDF** → download `name-watermarked.pdf` or **Open in editor**. A preview of the first chosen page shows
@@ -7688,7 +7688,7 @@ on every page (+5 KB); a logo at top-right, 20% width, lands on the margin on up
 5 KB logo on 16 pages → embedded once). Not seen by eye (screenshots timed out): the preview picture and PNG
 transparency — user to check.
 
-#### Task 60 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself") — drag the watermark anywhere
+#### Task 60 — Revision 1  ✅ DONE by Claude (2026-09-11, user: "do it yourself"), merged in `6a8678c` — drag the watermark anywhere
 
 **Why (user request):** "instead of giving arrows for placing watermarks, can we give user custom movement of wherever
 they want to place the watermark?" The 3 × 3 grid is kept as small **Quick spots** shortcuts (one click for centre /
