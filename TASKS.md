@@ -6703,7 +6703,7 @@ greps those folders for `fetch(` / `XMLHttpRequest` / `navigator.sendBeacon` and
 
 **Order (one branch + one task each, land each before starting the next) — revised 2026-09-09:**
 51 Tools framework ✅ → 52 Merge ✅ → 53 Split ✅ → 54 JPG to PDF ✅ → 55 PDF to JPG ✅ → 56 Resize / move images
-(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair ✅ → 62 Sign ✅ → 63 Compress →
+(editor) ✅ → 57 Rotate ✅ → 58 Organize ✅ → 59 Page numbers (PARKED) → 60 Watermark ✅ → 61 Repair ✅ → 62 Sign ✅ → 63 Compress ✅ →
 **then the front door (Task 51A) last**. *(Renumbered 2026-09-10 when Task 56 was inserted.)*
 Each tool branches from `main`. While the tools are being built, the **landing page is deliberately left as it
 is**; tools are reachable from the **Tools** nav link and each tool's own `/tools/<slug>` page, and every merged
@@ -8157,7 +8157,7 @@ counted, whole stretches of a line stopped being found, and they stayed.
 - **Known limit:** a **red-pen** signature with a perfectly straight stroke running across more than half the photo
   is removed like a margin (normal curvy strokes are fine; untick **Remove notebook lines** if it happens).
 
-### Task 63 — Compress PDF  🔲 TODO → branch `tool-compress` (create from `main`)   *(Medium–Large · 5–6 days)*
+### Task 63 — Compress PDF  ✅ MERGED to `main` (`ced6526`, 2026-09-13; includes Rev 1–5; branch `tool-compress` deleted)   *(Medium–Large · 5–6 days)*
 
 **What the user gets:** `/tools/compress`. Drop **one** PDF → the panel first **reads the file** and says what makes
 it big ("12 photos take 2.9 MB of this 3.4 MB file") → choose **Light · Medium · Strong** (each card shows the size
@@ -8350,7 +8350,7 @@ photo-heavy page, average brightness off by 1%; Smallest 1.5% and 11%. **Problem
   ICCBased / Indexed array instead of returning undefined. Compress catches it and falls back to pdf.js, so nothing
   breaks here; worth a separate small fix for the editor.
 
-#### Task 63 — Revision 1  ✅ DONE by Codex, reviewed — honest sizes, drop what nothing uses, Smallest card, background speed   *(Medium · 1–1.5 days)*
+#### Task 63 — Revision 1  ✅ DONE by Codex, reviewed and merged in `ced6526` — honest sizes, drop what nothing uses, Smallest card, background speed   *(Medium · 1–1.5 days)*
 
 Do Part A, then B, C, D, E. Run the touched test files after each part.
 
@@ -8472,7 +8472,7 @@ at a level that also changes nothing; `duplicateTotals` counts duplicate `SMask`
 never merges; when the whole-file saving is under 5% the original is returned although the panel already promised
 removals; and the old Task 56 `flatePixels` line still *throws* on an ICCBased / Indexed `ColorSpace` array.
 
-#### Task 63 — Revision 2  ✅ DONE by Codex, reviewed — read each page's own drawing instructions instead of matching rectangles   *(Medium · half a day)*
+#### Task 63 — Revision 2  ✅ DONE by Codex, reviewed and merged in `ced6526` — read each page's own drawing instructions instead of matching rectangles   *(Medium · half a day)*
 
 Parts A → E in order. Run the touched test files after each part.
 
@@ -8583,7 +8583,7 @@ it** because it averaged whole pages — the signature covers ~0.1% of an A4 pag
 worst-small-region measure. (iLovePDF's own 470 → 142 KB came from font and stream optimisation, which we
 deliberately do not do; not in scope.)
 
-#### Task 63 — Revision 3  ✅ DONE by Codex, reviewed — never wreck line art: signatures, logos, stamps   *(Easy–Medium · half a day)*
+#### Task 63 — Revision 3  ✅ DONE by Codex, reviewed and merged in `ced6526` — never wreck line art: signatures, logos, stamps   *(Easy–Medium · half a day)*
 
 Parts A → E in order. Run the touched test files after each part.
 
@@ -8668,7 +8668,7 @@ Healing, 5 / 110 KB in Ladakh — logos, icons, a 2 KB flat panel) and no photo;
 - Noted, harmless: a 0 KB image on Ladakh page 15 (#861) throws "Requesting object that isn't resolved yet" in the
   pdf.js decode fallback and is correctly left untouched.
 
-#### Task 63 — Revision 4  ✅ DONE by Codex, reviewed — cheapest safe mask, honest mask estimates, recognise document scans   *(Easy–Medium · half a day)*
+#### Task 63 — Revision 4  ✅ DONE by Codex, reviewed and merged in `ced6526` — cheapest safe mask, honest mask estimates, recognise document scans   *(Easy–Medium · half a day)*
 
 Parts A → E in order. Run the touched test files after each part.
 
@@ -8741,7 +8741,7 @@ review screenshots and text strips to 80 dpi; Rev 4 is right to refuse, so its s
 Smallest (was 0.40 / 0.20 / 0.11). Its 6 photos are phone screenshots sitting on 43–86% pure white: colour averaged
 over *all* pixels fell to 14–33 (under 40) and the white counted as "paper", so every photo looked like a scan.
 
-#### Task 63 — Revision 5  ✅ DONE by Claude (2026-09-13, user: "do it yourself") — a photo on a white canvas is not a scan
+#### Task 63 — Revision 5  ✅ DONE by Claude (2026-09-13, user: "do it yourself"), merged in `ced6526` — a photo on a white canvas is not a scan
 
 - `isDocumentScan` (`src/lib/compress/lineArt.ts`) averages colour over **non-white pixels only** (skips luminance
   ≥ 245 with colour ≤ 12) and `MAX_SCAN_CHROMA` goes 40 → 45; an all-white image is left to the paper-and-ink test,
