@@ -9,6 +9,7 @@ import { organizeTool } from '@/lib/tools/organize';
 import { watermarkTool } from '@/lib/tools/watermark';
 import { repairTool } from '@/lib/tools/repair';
 import { signTool } from '@/lib/tools/sign';
+import { compressTool } from '@/lib/tools/compress';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -27,6 +28,7 @@ if (!getTool('organize')) registerTool(organizeTool);
 if (!getTool('watermark')) registerTool(watermarkTool);
 if (!getTool('repair')) registerTool(repairTool);
 if (!getTool('sign')) registerTool(signTool);
+if (!getTool('compress')) registerTool(compressTool);
 
 function ToolsIndex() {
   const tools = listTools();

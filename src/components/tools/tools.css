@@ -45,6 +45,28 @@
 .repair-status-warn { border-color: #e9cf8f; background: #fff9e8; color: #79520c; }
 .repair-status-danger { border-color: #efb4b4; background: #fff2f2; color: #a32020; }
 .repair-confirm { color: var(--site-ink); }
+.compress-options { gap: 16px; }
+.compress-analysis { display: grid; gap: 5px; padding: 16px; border: 1px solid var(--site-line); border-radius: 14px; background: #f8faff; color: var(--site-body); line-height: 1.5; }
+.compress-analysis-ready { border-color: #b9cee9; color: var(--site-ink); }
+.compress-analysis-ready > span { color: var(--site-body); font-size: .875rem; }
+.compress-findings { display: grid; gap: 5px; margin: 7px 0 0; padding: 10px 0 0 22px; border-top: 1px solid #d7e2f1; color: #255093; font-size: .875rem; }
+.compress-levels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.compress-level-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 17px; border: 1px solid var(--site-line); border-radius: 14px; background: #fff; cursor: pointer; }
+.compress-level-card:has(input:checked) { border-color: var(--site-blue); background: #f6f9ff; box-shadow: 0 0 0 1px var(--site-blue); }
+.compress-level-card input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--site-blue); }
+.compress-level-copy { display: grid; gap: 4px; line-height: 1.45; }
+.compress-level-copy small { color: var(--site-body); }
+.compress-estimate { color: var(--site-blue-dark); font-size: .875rem; font-weight: 700; white-space: nowrap; }
+.compress-fit-card { grid-column: 1 / -1; }
+.compress-fit-options { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--site-line); border-radius: 14px; background: #fbfcff; }
+.compress-limit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.compress-limit-chips button { min-height: 40px; padding: 8px 13px; border: 1px solid #c9d8ed; border-radius: 999px; background: #fff; color: var(--site-ink); font-weight: 650; cursor: pointer; }
+.compress-limit-chips button.is-selected { border-color: var(--site-blue); background: var(--site-band); color: var(--site-blue-dark); }
+.compress-custom-limit { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 180px) 90px; align-items: center; gap: 10px; }
+.compress-custom-limit > label:first-child { font-size: .875rem; font-weight: 700; }
+.compress-custom-limit input, .compress-custom-limit select { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; }
+.compress-limit-error { margin: 0; color: #a32020; font-size: .875rem; }
+.compress-recommendation { margin: 0; color: #255093; font-size: .9rem; }
 .tool-options { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
 .tool-options legend { margin-bottom: 14px; font-size: 1.25rem; font-weight: 750; }
 .tool-option-choice { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--site-line); border-radius: 14px; cursor: pointer; }
@@ -194,6 +216,12 @@
   .watermark-section, .watermark-shared { padding: 14px; }
   .sign-step { padding: 14px; }
   .sign-options-grid { grid-template-columns: 1fr; }
+  .compress-levels { grid-template-columns: 1fr; }
+  .compress-fit-card { grid-column: auto; }
+  .compress-level-card { grid-template-columns: auto minmax(0, 1fr); }
+  .compress-estimate { grid-column: 2; }
+  .compress-custom-limit { grid-template-columns: 1fr 86px; }
+  .compress-custom-limit > label:first-child { grid-column: 1 / -1; }
   .tool-result-actions { flex-direction: column; align-items: stretch; }
   .tool-result-actions button, .tool-run > button { width: 100%; }
 }

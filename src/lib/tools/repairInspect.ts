@@ -23,6 +23,10 @@ function containsAscii(bytes: Uint8Array, text: string, limit = bytes.length): b
   return false;
 }
 
+export function hasDigitalSignature(bytes: Uint8Array): boolean {
+  return containsAscii(bytes, '/ByteRange') && containsAscii(bytes, '/Sig');
+}
+
 function hasCompleteTail(bytes: Uint8Array): boolean {
   const start = Math.max(0, bytes.length - 8192);
   const tail = bytes.subarray(start);
@@ -63,7 +67,7 @@ export async function inspectPdf(
   signal?.throwIfAborted();
   if (!containsAscii(bytes.subarray(0, 1024), '%PDF-')) return { kind: 'not-pdf' };
 
-  const signed = containsAscii(bytes, '/ByteRange') && containsAscii(bytes, '/Sig');
+  const signed = hasDigitalSignature(bytes);
   let libraryCount: number | undefined;
   let libraryFailed = !hasCompleteTail(bytes);
   try {

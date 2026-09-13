@@ -8157,42 +8157,614 @@ counted, whole stretches of a line stopped being found, and they stayed.
 - **Known limit:** a **red-pen** signature with a perfectly straight stroke running across more than half the photo
   is removed like a margin (normal curvy strokes are fine; untick **Remove notebook lines** if it happens).
 
-### Task 63 — Compress PDF  🔲 TODO → branch `tool-compress`   *(Medium · 4–6 days)*
-> Reuses `src/lib/images/extractImage.ts` from Task 56 for the per-image decode where it applies.
-**Goal:** smaller files by shrinking the **images** inside the PDF. Text, fonts and vector graphics are never
-touched, so text stays sharp and selectable. Three presets; the user sees before/after sizes for each.
-1. **Analysis** `src/lib/tools/compress/analyze.ts` (pure over a pdf-lib doc + pdf.js doc): walk every page's
-   `Resources → XObject` (recurse into Form XObjects; visited-set by ref) and collect each **Image** XObject:
-   ref, width, height, `Filter` (DCTDecode / FlateDecode / JPXDecode / CCITTFaxDecode / JBIG2Decode), colour space,
-   bits, `SMask`/`Mask` presence, byte length, and how many times it's drawn. Use pdf.js's operator list per page
-   (`OPS.paintImageXObject` + the current transform, as `src/lib/pdf/images.ts` already does) to get each image's
-   **largest drawn size in points** → effective DPI = pixels / (points / 72). Unit-test with the GOA sample
-   (expect the big beach photo at > 300 dpi).
-2. **Presets** (`presets.ts`): **Light** = max 200 dpi, JPEG quality 0.85 · **Medium** = 150 dpi, 0.75 ·
-   **Strong** = 110 dpi, 0.6. Per image, the plan is: skip if bilevel (CCITT / JBIG2) or < 64 px or used as a
-   mask; else target pixel size = min(current, drawn-size × preset dpi); re-encode as **JPEG** when the image has
-   no transparency, else **PNG** (keep the SMask as-is if the PNG route is bigger than the original — then skip).
-3. **Decode & re-encode** (`recode.ts`): get decoded pixels from pdf.js (`page.objs.get(objId)` after
-   `getOperatorList()` — returns RGBA data / ImageBitmap for every filter pdf.js supports, including JPX), draw into
-   an offscreen canvas at the target size (`imageSmoothingQuality: 'high'`), `toBlob('image/jpeg', q)` or PNG.
-   Keep the new bytes only if ≥ 15% smaller than the original stream, otherwise leave that image untouched.
-4. **Replace in place** (`replace.ts`): build a new `PDFRawStream` with dict `{ Type: XObject, Subtype: Image,
-   Width, Height, ColorSpace: DeviceRGB | DeviceGray, BitsPerComponent: 8, Filter: DCTDecode }` (or FlateDecode +
-   PNG predictor-free raw RGB for the PNG route: decode the PNG to raw RGB(A) and Flate it; keep an SMask stream
-   for alpha) and `pdfDoc.context.assign(ref, newStream)` so every place that referenced the old image now gets the
-   new one. **Dedupe:** hash original streams (SHA-256 via `crypto.subtle`); identical images → one ref.
-5. **Save**: `save({ useObjectStreams: true })`. If the result is not at least 5% smaller than the input, return
-   the **original bytes** with the message "Already compact — nothing to shrink." Report: original size → new size
-   per preset (run the chosen preset only; show the other two as estimates from the analysis: sum of predicted
-   image bytes). Progress per image; abortable.
-6. **Quality guard (test):** render page 2 of the GOA sample before/after Medium with `src/harness/pixelDiff.ts`
-   at 72 dpi → mismatch < 3%; text pages byte-identical text via pdf.js `getTextContent`.
-7. **Tests:** analysis on GOA (counts, dpi); presets math; recode of a generated 2000×2000 noise JPEG shrinks; replace
-   keeps page count / text; dedupe merges two identical images; "already compact" path on `sample-basic.pdf`;
-   abort mid-run leaves no output. **Verify (user):** GOA 2026 (3.4 MB) → Medium → expect well under 1.5 MB with
-   photos still fine on screen; Corporate Governance (text-only) → "Already compact".
-8. **Editor hook (small):** Export menu gets **Export compressed (Medium)** that runs the same pipeline on the
-   exported bytes. Optional; skip if it grows the task.
-**Guardrails:** never rasterize a page; never touch fonts, text, vectors, annotations, forms; skip anything the
-analysis doesn't understand rather than guessing; the original file is untouched on disk (we only download a new
-one). **Land:** `Compress PDF tool (Task 63)`.
+### Task 63 — Compress PDF  🔲 TODO → branch `tool-compress` (create from `main`)   *(Medium–Large · 5–6 days)*
+
+**What the user gets:** `/tools/compress`. Drop **one** PDF → the panel first **reads the file** and says what makes
+it big ("12 photos take 2.9 MB of this 3.4 MB file") → choose **Light · Medium · Strong** (each card shows the size
+to expect, e.g. "about 1.1 MB") or **Fit under a size** (200 KB · 500 KB · 1 MB · 2 MB · Custom) → **Compress PDF**
+→ the result says "3.4 MB → 1.1 MB (68% smaller)" → download `name-compressed.pdf` or **Open in editor**.
+
+**Use cases:** upload portals with a size cap (college admission, job applications, government forms: "max 500
+KB"); email attachment limits; sending on WhatsApp; big phone-scanner PDFs (every page a full-size photo); saving
+space on the phone.
+
+**Example:** Priya's college portal says "Marksheet PDF, max 500 KB". Her scanned 5-page marksheet is 4.2 MB. She
+opens `/tools/compress`, picks **Fit under a size → 500 KB** and taps **Compress PDF**. The tool's estimate says
+**Strong** is the gentlest level that fits, so it runs Strong, gets 480 KB and says "480 KB, under your 500 KB limit
+(used Strong)." The marks are still easy to read. Nothing left her phone.
+
+**The idea (use the same words in code comments):** in most PDFs the weight is the **photos**, not the text. A photo
+stored at 3000 × 2000 px but drawn 4 inches wide on the page has 750 pixels per inch (dpi); a screen needs about 150,
+a printer 200–300. Compress redraws each photo at the level's dpi (never bigger than it already is), saves it as JPEG
+at the level's quality, and puts it back **in the same place** in the file. Text, fonts, lines, shapes, links, form
+fields and annotations are **never touched** — text stays sharp and selectable, and a page is never turned into a
+picture.
+
+**Levels**
+
+| Level | Max detail | JPEG quality | Card text |
+|---|---|---|---|
+| Light | 200 dpi | 0.85 | "Best quality · good for printing" |
+| **Medium** (default) | 150 dpi | 0.75 | "Good for email and screens" |
+| Strong | 110 dpi | 0.60 | "Smallest · photos a little soft up close" |
+| Smallest (no card — only Fit under a size uses it) | 80 dpi | 0.50 | — |
+
+**Privacy:** everything runs on the device — no upload, works offline (`noNetwork` stays green).
+
+**Reuse:** `ToolPage` / `canRun` / `ToolError` / `ToolOutput.note`, `loadPdfLib` / `savePdf` / `outputName` /
+`throwIfAborted`; `src/lib/pdf/images.ts` (pdf.js operator list → where and how big each image is drawn);
+`src/lib/images/extractImage.ts` (Task 56: decoding an image and matching a drawn image to its XObject ref); the
+panel's file check works like Repair's (`RepairOptions.tsx`), and reuse Repair's **digitally signed** check and "I
+understand" flow (Task 61); `src/harness/pixelDiff.ts` for the quality test. No new dependencies (SHA-256 via
+`crypto.subtle`).
+
+**Steps**
+
+1. **Analysis** `src/lib/compress/analyze.ts` → `analyzePdf(bytes, signal) → CompressAnalysis`:
+   - Walk every page's `Resources → XObject` (recurse into Form XObjects, with a visited set by ref) and collect each
+     **Image** XObject: ref, `Width`, `Height`, `Filter`, `ColorSpace`, `BitsPerComponent`, `ImageMask`, `SMask`,
+     `Mask`, stream byte length.
+   - Drawn size from pdf.js's operator list per page (`OPS.paintImageXObject` + the current transform, as
+     `images.ts` does): width in points = √(a² + b²), height = √(c² + d²). Keep the **largest** drawn size per image
+     (one image can be drawn on many pages at different sizes). Effective dpi = pixels ÷ (points ÷ 72).
+   - Mark each image **shrinkable** or **skipped, with a reason**. Skip: `ImageMask`, or used as another image's
+     `SMask` / `Mask`; 1-bit images, `CCITTFaxDecode`, `JBIG2Decode` (black-and-white scans, already tiny); under
+     64 px on a side; has a `Mask` (colour-key or stencil); colour space other than DeviceGray / DeviceRGB /
+     ICCBased with 1 or 3 components / Indexed over those (CMYK, Separation, DeviceN, Lab are print colours and
+     would shift); never drawn on any page; cannot be matched to a ref; inline images (inside page content).
+   - Totals: file size, bytes in shrinkable images, photo count, skipped count.
+   - Cache per `File` (`WeakMap<File, Promise<CompressAnalysis>>`) so the panel and `run()` share one analysis.
+
+2. **Levels + target size** `src/lib/compress/levels.ts`: the table above as `LEVELS`, plus the ladder order Light →
+   Medium → Strong → Smallest. `targetSize(image, dpi)`: scale = min(1, max(drawnWidthInches × dpi ÷ Width,
+   drawnHeightInches × dpi ÷ Height)) — keeps the pixel aspect ratio, **never enlarges**, rounds, at least 16 px a
+   side.
+
+3. **Estimates** `src/lib/compress/estimate.ts` → expected size per level = file size − bytes of shrinkable images +
+   Σ predicted new bytes. An image's predicted bytes = target pixels × bytes-per-pixel for that quality, but never
+   more than its original bytes (an image that would not get 15% smaller is kept as it is). Bytes-per-pixel is
+   **measured once** per file: encode the largest photo (scaled to at most 1 megapixel) at each quality; if that
+   fails, use 0.25 / 0.15 / 0.11 / 0.09 for qualities 0.85 / 0.75 / 0.60 / 0.50. Shown as "about 1.1 MB" — always
+   "about".
+
+4. **Recode** `src/lib/compress/recode.ts` → `recodeImage(pixels, target, quality, encode)`:
+   - Pixels come from the Task 56 decode path (`extractImage.ts`) or pdf.js's decoded image (`page.objs.get(objId)`
+     after `getOperatorList()`; ids starting with `g_` live in `commonObjs`). pdf.js pixels are final colours, so
+     the new image needs no `Decode` array.
+   - Set every alpha to 255 first (transparency comes from the kept `SMask`, step 5); draw onto a canvas at the
+     target size with `imageSmoothingQuality: 'high'`; encode JPEG at the level's quality.
+   - `encode` is passed in (the real one uses `OffscreenCanvas.convertToBlob` or `canvas.toBlob`) so tests can
+     inject a fake encoder.
+   - Keep the new bytes only if they are **at least 15% smaller** than the original stream; otherwise leave that
+     image untouched. One image at a time; free each canvas (width = height = 0) after use.
+
+5. **Replace in place** `src/lib/compress/replace.ts`: a new stream with `{ Type: /XObject, Subtype: /Image, Width,
+   Height, ColorSpace: /DeviceRGB, BitsPerComponent: 8, Filter: /DCTDecode }`; copy `/SMask`, `/OC` (layers) and
+   `/Metadata` from the old dictionary when present (a soft mask may have a different pixel size than its image);
+   `context.assign(ref, newStream)` so every page and form that uses the image gets the new one.
+   **Duplicates:** hash the original image streams (SHA-256, `crypto.subtle.digest`) together with their dictionary
+   essentials; identical images → repoint every `XObject` entry to the first copy and `context.delete()` the rest.
+
+6. **Compress run** `src/lib/compress/compressPdf.ts` → `compressPdf(bytes, level, { signal, onProgress, encode })`:
+   `loadPdfLib` → shrink each shrinkable image (progress "Shrinking photo i of n", yield and `throwIfAborted`
+   between images) → duplicates → save with object streams (`useObjectStreams: true`) → **self-check**: re-open the
+   result with pdf.js; same page count and every page loads, else `ToolError('We could not compress this file
+   safely. Nothing was changed.')`. If the result is **not at least 5% smaller**, return the **original bytes** with
+   the note "Already compact — nothing to shrink." (tone ok).
+
+7. **Fit under a size** `fitUnderSize(bytes, limitBytes, …)` in the same file. Limit in bytes = value × 1000 (KB) or
+   × 1 000 000 (MB) — the stricter count, so a portal that counts 1 KB as 1024 bytes also accepts it.
+   - Already at or under the limit → return the original, note "Already under 500 KB — nothing to change."
+   - Otherwise start at the **gentlest** ladder step whose estimate is ≤ 90% of the limit (Smallest if none fits)
+     and run it. Result ≤ limit → done. Over → run the next step down. At most 4 runs — usually 1, sometimes 2.
+     Progress "Trying Strong… photo i of n".
+   - Nothing fits → return the smallest result with a warn note: "The smallest we could make it is 1.3 MB, over
+     your 500 KB limit. Try Split PDF to send it in parts."
+   - Success note: "480 KB, under your 500 KB limit (used Strong)." When Smallest was needed, add "Check that small
+     text is still readable."
+
+8. **Options** `src/lib/tools/compressOptions.ts` (+ test): `{ level: 'light' | 'medium' | 'strong' | 'fit';
+   limitValue: number; limitUnit: 'KB' | 'MB' }`, defaults `{ level: 'medium', limitValue: 500, limitUnit: 'KB' }`
+   (plus Repair's "I understand" key for signed files). `compressProblem(options)` → with `fit` and a missing,
+   non-number or under-20 KB limit: **"Enter a size limit of at least 20 KB."**
+
+9. **Tool** `src/lib/tools/compress.ts` (+ test): `COMPRESS_INPUT_ERROR = 'Choose one PDF file to compress.'`;
+   `run()`: one input; `compressProblem` → `ToolError`; the cached analysis; `compressPdf` or `fitUnderSize`; output
+   `outputName(file, 'compressed')`; note "3.4 MB → 1.1 MB (68% smaller). 12 photos made smaller, 3 left as they
+   were." (tone ok); last progress "Compressed PDF ready". `compressTool = { slug: 'compress', title: 'Compress PDF',
+   description: 'Make a PDF smaller by shrinking the photos inside. Text stays sharp.', accepts: 'pdf', multiple:
+   false, defaultOptions, Options: CompressOptions, icon: '🗜', canRun: (options) => compressProblem(options), run }`.
+
+10. **Panel** `src/components/tools/CompressOptions.tsx` (+ test):
+    - File check: "Checking the file…", then "12 photos take 2.9 MB of this 3.4 MB file." — or, with few or no
+      photos, "This file is mostly text and fonts, so it may not get much smaller."
+    - Three level cards (a radio group): name, card text, "about 1.1 MB" ("…" while estimating). A fourth card **Fit
+      under a size**: when chosen it shows chips 200 KB · 500 KB · 1 MB · 2 MB · Custom (number field
+      `inputMode="decimal"` + KB / MB select).
+    - Digitally signed file: like Repair — "This file is digitally signed. Compressing it makes the signature
+      invalid." + **I understand**; the result note repeats the warning.
+
+11. **Register** in `ToolsApp.tsx` after `sign`; `ToolsApp.test.tsx` → 12 cards.
+
+12. **Tests**
+    - `analyze.test.ts`: GOA → photo count, the big beach photo over 300 dpi; skip reasons for a mask, a 1-bit
+      image, a CMYK image, a 40 px image, an undrawn image; one image drawn on two pages at two sizes → the larger.
+    - `levels.test.ts`: target size from dpi on both axes, never enlarges, aspect kept.
+    - `estimate.test.ts`: the sum; an image that would not shrink 15% counts at its original size.
+    - `recode.test.ts` (fake encoder): alpha forced to 255, target size passed on, kept only when ≥ 15% smaller.
+    - `replace.test.ts`: page count and text unchanged; `SMask` and `/OC` kept; two identical images → one object
+      after save.
+    - `compressPdf.test.ts`: GOA → Medium smaller than the input; `sample-basic.pdf` → the original bytes + "Already
+      compact"; a failed self-check → `ToolError`; abort mid-run rejects. Fit: the estimate picks the gentlest step
+      that fits; over the limit → the next step; nothing fits → smallest result + warn note; already under → the
+      original.
+    - **Quality guard:** GOA page 2 before / after Medium at 72 dpi with `pixelDiff` → mismatch < 3%;
+      `getTextContent` of every page identical. (If the test environment cannot encode JPEG or render, say so in
+      your summary — Claude checks it live in review.)
+    - `compressOptions.test.ts`, `CompressOptions.test.tsx` (cards, estimates appear, Fit chips + custom, the limit
+      reason, signed notice), `compress.test.ts` (one-input error, output name, note), ToolsApp → 12 cards.
+
+13. **Guardrails:** never rasterize a page; never touch fonts, text, vectors, annotations or form fields; skip
+    anything the analysis does not understand rather than guessing; one image in memory at a time; the original
+    file is never changed (we only offer a new download); every message is a `ToolError`, a `canRun` reason or a
+    note; no new dependencies; no network.
+
+**Verify (user):** GOA 2026 (3.4 MB) → **Medium** → well under 1.5 MB; photos look fine on screen, text still
+selectable, the voice reader still reads it, opens in Chrome / Edge. Try **Light** and **Strong** and compare.
+**Fit under 500 KB** on GOA → under 500 KB (or the honest "smallest we could make it" message). Corporate Governance
+(text-only) → "Already compact" or only a small drop. A phone-scanned document → a big drop, still readable. A PDF
+signed with our **Sign** tool → after Compress the signature's background is still see-through. **Open in editor**
+on the result → edit a line → Export → the file stays small.
+
+**Known limits:** only photos get smaller — text-heavy files barely change (fonts are never touched); black-and-white
+scans (CCITT / JBIG2), print-colour (CMYK) images, colour-key masked images and inline images are left as they are;
+one file per run; sizes before running are estimates; Strong and Smallest make photos soft when zoomed in; a
+digitally signed file's signature stops being valid. **Not in this task:** "Export compressed" in the editor (later,
+a small task reusing this pipeline); removing unused fonts or objects; a grayscale option.
+
+**Land:** merge `tool-compress` → `main`. Commit: `Compress PDF tool (Task 63)`.
+
+**Review of the Task 63 build (2026-09-12):** accepted with Rev 1 below. typecheck / lint / build green, 919 tests
+(33 new). The pipeline itself is right: on a 19-page Canva file all 61 photos decode (through Task 56's exact-XObject
+path, with the pdf.js fallback for the two Flate + ICCBased ones), each level takes about 5 s in the front tab, the
+self-check passes, and the shared files Codex touched (`images.ts`, `extractImage.ts`, `repairInspect.ts`) keep all
+their tests. Measured quality (page-by-page pixel compare, Healing Retreat): Light and Medium leave the photos
+**byte-identical**; Strong changes 0.1% of the pixels on a text page (0.2% at 300% zoom) and 5.5% on the most
+photo-heavy page, average brightness off by 1%; Smallest 1.5% and 11%. **Problems found on two real user files:**
+- **Healing Retreat.pdf (Canva, 5.4 MB, 19 pages, 61 photos = 4.1 MB).** Every photo is drawn at 64–200 dpi (a
+  full-page photo is ~130 dpi on an 810 × 1012 pt page) — **none above 200** — so Light resizes nothing and Medium
+  almost nothing, and re-saving a Canva JPEG at our quality comes out ~10% *bigger*, so the ≥15% rule keeps the
+  originals: Light and Medium both return "Already compact" while their cards promise "about 4.9 MB" / "about
+  4.1 MB". Real results: Strong 4.2 MB, Smallest 3.1 MB. Canva files are very common (brochures, invitations,
+  resumes), so "the tool does nothing" is the normal outcome today.
+- **Pi7_Tool_Offbeat Ladakh August.pdf (19.5 MB, 24 pages).** The real PDF ends at byte 7,916,849; after `%%EOF`
+  sit **12,551,188 zero bytes** added by the site the user ran it through (their own file is 8.1 MB). The cards say
+  "about 19.5 MB" for Light and Medium because the estimate treats every non-photo byte as fixed — but the rebuild
+  drops that padding, so the real results are **Light 7.5 MB, Medium 7.5 MB, Strong 6.2 MB**. The user trusted the
+  cards and reported the tool as broken.
+- **Photos no page shows:** 4 (0.6 MB, 11%) in Healing Retreat, 17 (1.7 MB) in the Ladakh file — listed in page
+  resources, never drawn, never removed.
+- **Background tabs crawl:** the per-photo `setTimeout(0)` is clamped to ~1 s in a hidden tab, so the same run took
+  **65 s hidden vs 5 s in front**.
+- **Minor (old, Task 56):** `flatePixels` reads `ColorSpace` with `lookupMaybe(..., PDFName)`, which *throws* for an
+  ICCBased / Indexed array instead of returning undefined. Compress catches it and falls back to pdf.js, so nothing
+  breaks here; worth a separate small fix for the editor.
+
+#### Task 63 — Revision 1  ✅ DONE by Codex, reviewed — honest sizes, drop what nothing uses, Smallest card, background speed   *(Medium · 1–1.5 days)*
+
+Do Part A, then B, C, D, E. Run the touched test files after each part.
+
+**Part A — Estimates that are measured, not guessed.** Today `estimate.ts` measures bytes-per-pixel from **one**
+photo and applies it to all of them, and it assumes every non-photo byte stays. Replace both halves.
+1. `analyze.ts`: add to `CompressAnalysis`
+   - `trailingBytes` — bytes after the file's last `%%EOF` (scan the last 2 KB backwards for the marker; 0 when the
+     file ends normally). This is padding that the rebuild drops.
+   - `unusedPhotoBytes` / `unusedPhotoCount` — the images whose only reason is `never drawn` (Part B removes them).
+   - `duplicateBytes` / `duplicateCount` — hash every image stream (SHA-256 over the bytes, `crypto.subtle`), group
+     equal hashes, and sum every copy after the first (the existing dedupe step already merges them).
+2. `estimate.ts`: `estimatePdfSize(analysis, level, samples)` =
+   `fileSize − trailingBytes − unusedPhotoBytes − duplicateBytes − shrinkablePhotoBytes + predicted photo bytes`.
+3. Predicted photo bytes come from a **sample run**, not a formula: take the shrinkable photos biggest first until
+   their bytes cover 40% of the shrinkable bytes or 6 photos are taken, whichever comes first; for each level,
+   decode + `targetSize` + `encodeJpeg` at that level's real quality, apply the same ≥ 15% rule, and record each
+   sample's real ratio (new ÷ original, or exactly 1 when the original is kept). Predicted bytes = the sampled
+   photos' real new bytes + every other photo's original bytes × the byte-weighted average ratio of the samples.
+   Cache per `File` as now; keep `FALLBACK_BYTES_PER_PIXEL` only for when browser encoding fails.
+4. A card whose estimate is **≥ 95% of the file size** shows **"No change"** instead of a size (that is exactly the
+   whole-file rule `compressPdf` applies). Keep the word "about" on every real number.
+5. Tests: with a stub encoder that returns 40% of the original, the estimate follows the samples; a file with
+   1 MB of trailing padding estimates 1 MB smaller at every level; a file whose samples do not shrink estimates
+   "no change" for that level; the weighted average is applied to the unsampled photos.
+
+**Part B — Remove what nothing uses (no quality loss at all).**
+1. New `src/lib/compress/unused.ts` → `removeUnusedImages(document, analysis)`: for every image whose only skip
+   reason is `never drawn`, delete its `XObject` entry and `context.delete(ref)` — but **only when two checks
+   agree**: pdf.js painted it nowhere (that is the analysis), **and** its resource name never appears before a `Do`
+   operator in any content stream that can reach it (the page's own content plus every Form XObject content in the
+   file, since a form without its own `Resources` inherits the page's). Never touch an image that is another
+   image's `SMask` / `Mask`, that any other page draws, or that appears in an annotation appearance stream. If the
+   name search cannot be completed, keep the image. Return `{ removed, bytes }`.
+2. Call it in `compressPdf` before the per-photo loop, at **every** level (it is lossless), and count it separately
+   from `madeSmaller` — the note wording comes from Part C.
+3. The trailing padding needs no code: the rebuild already drops it. Just make sure `trailingBytes` reaches the
+   panel (Part A step 1) for the message in Part C.
+4. Tests: an image listed in page resources and drawn nowhere is gone from the output, with page count and text
+   unchanged; an image drawn on another page stays; an image drawn from a Form XObject that inherits the page's
+   resources stays (the name search catches it); an image that is an `SMask` stays; the self-check still passes.
+
+**Part C — Tell the user what we found and what to try next.**
+1. In `CompressOptions.tsx`, under the file-check line, add each line only when it applies (skip anything under
+   100 KB):
+   - "12 MB of this file is empty padding left by another tool. We remove it."
+   - "4 photos (0.6 MB) are not shown on any page. We remove them."
+   - "3 photos are stored more than once. We store them once."
+2. Replace the bare "Already compact — nothing to shrink." in `compressPdf` with a level suggestion:
+   - a gentler level that changed nothing → "The photos in this file are already compressed, so Medium changed
+     nothing. Strong would make it about 4.2 MB (photos get a little softer)." (use the estimate for the next level
+     in the ladder);
+   - nothing left even at Smallest → "The photos in this file are already as small as we can make them."
+3. Tests: the panel shows the padding and unused-photo lines when the analysis reports them and hides them when it
+   does not; the result note names the next level and its size; the Smallest case uses the "as small as we can" text.
+
+**Part D — Smallest as a normal, visible level.**
+1. `CompressChoice` gains `'smallest'`; `PUBLIC_LEVELS` becomes Light · Medium · Strong · Smallest, with **Fit under
+   a size** below them. Card text for Smallest: "For strict upload limits · photos get soft". `LEVELS.smallest`
+   keeps 80 dpi / quality 0.5, and the Fit ladder stays as it is.
+2. A Smallest run adds "Check that small text is still readable." to the result note (Fit already does this).
+3. Tests: the card renders, runs at 80 dpi / 0.5, and the note carries the readability line.
+
+**Part E — Full speed in a background tab.** `compressPdf` awaits `setTimeout(0)` after **every** photo; browsers
+clamp that to ~1 s in a hidden tab (measured: 65 s hidden vs 5 s in front for 61 photos).
+1. Yield with a `MessageChannel` message instead (`port1.onmessage` → resolve, `port2.postMessage(0)`), which
+   browsers do not throttle, and yield only every 4th photo (`YIELD_EVERY = 4`). Keep `signal.throwIfAborted()` and
+   `onProgress` per photo so Cancel and the progress line stay exactly as responsive as now.
+2. Test: with an injected yield spy, a 9-photo run yields 2–3 times while progress is reported 9 times; abort still
+   rejects on the next photo.
+
+**Guardrails:** never rasterize a page; text, fonts, vectors, annotations and form fields stay untouched; an image
+is deleted only when both checks agree; keep the ≥ 15% per-photo and ≥ 5% whole-file rules and the page-count +
+operator-list self-check before any bytes are returned; estimates always read "about"; no new dependencies; no
+network.
+
+**Verify (user):** **Healing Retreat.pdf** → the panel says 4 photos are not shown on any page; Light and Medium
+cards read "No change", Strong about 3.6 MB, Smallest about 2.5 MB; running Light gives about 4.8 MB with no photo
+touched; Strong gives about 3.6 MB and the pages look the same on screen. **Pi7_Tool_Offbeat Ladakh August.pdf** →
+the panel says about 12 MB is empty padding; Light gives about 5.8 MB, Strong about 4.5 MB, and every page still
+shows its photos. Start a compress and switch to another browser tab for a minute → it finishes at about the same
+speed as in front. Open both results in the editor and in Chrome: text still selectable, a signature made with the
+Sign tool still has a see-through background.
+
+**Land:** same branch `tool-compress`; Claude merges the branch into `main` as one commit,
+`Compress PDF tool (Task 63)`.
+
+**Review of Rev 1 (2026-09-12):** accepted with Rev 2 below. typecheck / lint / build green, 933 tests. Measured
+live on the two real user files (front tab, 6–12 s per level):
+- **Padding removal is proven lossless** — the 19.5 MB Pi7 Ladakh file gives 7.55 MB on Light and **all 24 pages
+  render pixel-identical** (0% of pixels changed, per-page compare at screen size).
+- **Smallest card** (Part D) and its readability note work. **Part E** works: 13 `MessageChannel` yields per
+  56 photos costing 0 ms in total, `throwIfAborted` still per photo, 32–43 ms per photo encode in the front tab.
+  In an *occluded* window the browser clamps canvas encoding to ~1 s per photo — the same with
+  `OffscreenCanvas.convertToBlob`, so only moving the encode into a Web Worker would help; left alone on purpose.
+- **Sampled estimates** (Part A) are far closer than the old one-photo formula; the sampling itself costs ~2 s.
+- **`removedUnused` was 0 in all 8 runs** — Part B's removal never fires on either real file.
+- Quality: Strong changes 5 of the 24 Ladakh pages by more than 1% of pixels (worst page 10.5%, average
+  brightness off by ~1%); Healing Retreat's worst page 22% of pixels at the same ~1% brightness shift.
+
+| File · level | Card says | Real |
+|---|---|---|
+| Ladakh · Light / Medium | about 5.8 MB | 7.55 / 7.54 MB |
+| Ladakh · Strong / Smallest | about 4.2 / 2.5 MB | 6.16 / 4.63 MB |
+| Healing · Light / Medium | about 4.8 MB | no change (5.35 MB) |
+| Healing · Strong / Smallest | about 3.4 / 2.0 MB | 4.19 / 3.10 MB |
+
+**Root cause (one bug behind all of it):** `analyze.ts` credits pdf.js's painted **rectangles** to XObjects through
+`matchImageXObject`, which compares rectangles. Canva stacks several photos in one full-page frame (page 17 of
+Healing Retreat draws `/X116`, `/X117`, `/X118` at the same rect), so the first photo takes all the draws and the
+others are labelled `never drawn`. They **are** drawn — page 3's content literally contains `/X22 Do`, and none of
+them has an `/OC` (no hidden layer). Three consequences: the panel tells the user something false ("17 photos
+(1.7 MB) are not shown on any page. We remove them."); the estimate subtracts those bytes, so the cards promise
+1.74 MB (Ladakh) / 0.58 MB (Healing) more than they deliver; and — the expensive one — **those photos are never
+compressed at all**, even at Smallest. Nothing was deleted wrongly: `unused.ts`'s name audit vetoed every candidate,
+exactly as designed.
+
+**Also found:** the "changed nothing" note suggests the next level using the same too-low estimate, so it can point
+at a level that also changes nothing; `duplicateTotals` counts duplicate `SMask` streams that `deduplicateImages`
+never merges; when the whole-file saving is under 5% the original is returned although the panel already promised
+removals; and the old Task 56 `flatePixels` line still *throws* on an ICCBased / Indexed `ColorSpace` array.
+
+#### Task 63 — Revision 2  ✅ DONE by Codex, reviewed — read each page's own drawing instructions instead of matching rectangles   *(Medium · half a day)*
+
+Parts A → E in order. Run the touched test files after each part.
+
+**Part A — List every drawn photo by name.** Add to `src/lib/images/extractImage.ts`, **next to** `findImageStream`
+without changing it (Task 56's editor depends on it):
+1. `imageDrawsInContent(pdfLibDoc, pageIndex) → ContentImageDraw[] | undefined` with
+   `ContentImageDraw = { ref?: PDFRef; stream: PDFRawStream; widthPt: number; heightPt: number; rect: PdfRect }`:
+   walk the page's content streams with the tokenizer and matrix helpers already in this file — `q` / `Q` push and
+   pop, `cm` multiplies the current matrix, `/Name Do` resolves the name in the page's `XObject` resources. An
+   **Image** gives one entry with `widthPt = hypot(a, b)`, `heightPt = hypot(c, d)` of the current matrix plus
+   `transformedRect` for the rect; a **Form** recurses into its content with its `Matrix` applied and its own
+   `Resources` (the parent's when it has none), with the same cycle guard `findImageStream` uses. The same image
+   drawn several times gives several entries. Return `undefined` when any of the page's content streams cannot be
+   decoded.
+2. While here, fix the old throw: in `flatePixels` read `ColorSpace` with `dict.get(...)` plus an
+   `instanceof PDFName` check instead of `lookupMaybe(..., PDFName)`, so an ICCBased / Indexed array returns
+   `undefined` instead of throwing.
+3. Tests (`extractImage.test.ts`): two different images drawn at the **same** rectangle on one page → two entries
+   with their own refs; an image inside a form with a `Matrix` → the drawn size includes both transforms; one image
+   drawn twice at different sizes → two entries; an undecodable content stream → `undefined`; a Flate image with an
+   ICCBased colour space → `extractImageBytes` returns undefined and does not throw; every existing
+   `findImageStream` / `extractImageBytes` test unchanged.
+
+**Part B — The analysis uses names, not rectangles.** In `analyze.ts`:
+1. Per page, call `imageDrawsInContent`. With entries, credit **each** entry to its own image (largest drawn size
+   wins, as now); drop `matchImageXObject` and the rect comparison from this path. When it returns `undefined`, fall
+   back to today's pdf.js + rect path **for that page only** and set a new `namesIncomplete: true` on the analysis.
+2. Keep one pdf.js pass only for the things the content walk cannot give: the `objectId` for the decode fallback
+   (match a pdf.js draw to a content draw by rect within that page, best-effort — a missing `objectId` is fine,
+   `decodeCompressImage` then uses the direct extract path) and inline images. Drop the "cannot be matched to a ref"
+   extras this used to produce. *(Optional, only if it stays simple: build a page's operator list lazily — just for
+   pages where a direct extract failed — so the common file skips it and the file check gets faster.)*
+3. Tests: a fixture with two stacked full-page images → both get a drawn size and neither is `never drawn`; an image
+   listed in resources that no instruction draws → `never drawn`; an undecodable content stream → sizes still come
+   from the pdf.js fallback and `namesIncomplete` is set.
+
+**Part C — Delete only when nothing in the file points at the image.** In `unused.ts`:
+1. Keep the current checks (name audit, annotation appearances, masks) and add a **whole-file reference sweep**:
+   walk every indirect object (dicts, arrays and stream dicts) counting references to the candidate ref, ignoring
+   the `XObject` entries that would be deleted; any other reference → keep the image.
+2. Remove nothing when `analysis.namesIncomplete` is true.
+3. Tests: an image referenced from a pattern's resources is kept; an image nothing references is removed; a
+   `namesIncomplete` analysis removes nothing.
+
+**Part D — The numbers and messages that follow.**
+1. `duplicateTotals` counts only images `deduplicateImages` can actually merge — those bound by an `XObject` entry
+   in a page or form — so duplicate masks stop promising savings.
+2. The "changed nothing" note suggests the next level **whose estimate is below 95% of the file size**, not simply
+   the next rung; when no level would change anything keep "The photos in this file are already as small as we can
+   make them."
+3. When the whole-file saving is under 5% and the original is returned, say so plainly: "Nothing we could remove
+   made this file more than 5% smaller, so your original is unchanged."
+4. Tests: the suggestion skips a level that would also change nothing; duplicate masks are not counted; the
+   under-5% wording.
+
+**Part E — Check it on the two real files** (Claude keeps them in `tmp/compress-tests/`, gitignored; ask if you need
+them). After Parts A–D: **Healing Retreat** must report `never drawn` = 0, the panel must stop claiming unused
+photos, Light / Medium must read "No change", and Strong / Smallest must now also shrink the 4 photos that were
+skipped; the **Ladakh** file must mention only the 12 MB padding, keep Light at about 7.5 MB, and land Smallest near
+3.4 MB (about 1 MB better than Rev 1's 4.63 MB). Put the before / after size per level in your summary.
+
+**Guardrails:** do not change the behaviour of `findImageStream`, `extractImageBytes` or any other existing export —
+add beside them; keep every safety rule (≥ 15% per photo, ≥ 5% whole file, page-count + operator-list self-check,
+both checks plus the sweep before any deletion); text, fonts, vectors, annotations and form fields stay untouched;
+no new dependencies; no network.
+
+**Verify (user):** Healing Retreat → no "not shown on any page" claim, Light and Medium read "No change", Strong
+about 4 MB and Smallest about 3 MB, and each card within roughly 10% of what you actually get. Ladakh 19.5 MB → the
+panel mentions only the padding, Light still 7.5 MB with pages looking identical, Smallest about 3.4 MB. Open both
+results in the editor and in Chrome: text still selectable, photos all present.
+
+**Land:** same branch `tool-compress`; Claude merges the branch into `main` as one commit,
+`Compress PDF tool (Task 63)`.
+
+**Review of Rev 2 (2026-09-12):** accepted with Rev 3 below. typecheck / lint / build green, 949 tests. The naming
+fix works and the cards finally tell the truth:
+
+| File · level | Card | Real | Rev 1 |
+|---|---|---|---|
+| Healing · Light / Medium | No change | no change | no change |
+| Healing · Strong / Smallest | 4.16 / 2.69 MB | 4.20 / **2.86** MB | 4.19 / 3.10 |
+| Ladakh · Light / Medium | 7.55 / 7.55 MB | 7.55 / 7.54 MB | 7.55 / 7.54 |
+| Ladakh · Strong / Smallest | 5.51 / 3.31 MB | **5.51 / 3.30** MB | 6.16 / 4.63 |
+
+`never drawn` is 0 on both files (was 4 and 17), photo counts rose 61 → 65 and 56 → 73, `namesIncomplete` false,
+the false "not shown on any page" line is gone, the trailing 11.97 MB padding is still detected, Light on the Ladakh
+file still renders **all 24 pages pixel-identical**, and a level takes 5–9 s. Codex also went beyond the spec and
+resized **soft masks** with their photo (guards: a photo is skipped if its mask cannot be resized, mask byte length
+is validated, a shared mask is copied not overwritten) — measured clean on these files (0.06–0.31 mean error at 200%
+zoom on the seven masked pages) and part of why Smallest improved. Rev 1's unused-photo removal still has not fired
+on a real file (neither file has a truly unused photo), so it stays unit-test-only.
+
+**Problem found — line art is treated like a photo (found by the user, not by my metric).** A signature made with
+our own Sign tool is stored at 1296 × 473 px, drawn 249 × 91 pt = **374 dpi**, lossless Flate, 80 KB + a 13 KB
+8-bit mask. Compressing `RISHI RESUME()-signed.pdf` (470 KB, mostly fonts and text):
+
+| | Signature after | Mask | File |
+|---|---|---|---|
+| Ours · Light | 693 × 253 JPEG 18 KB | 8-bit | 403 KB |
+| Ours · Strong | 381 × 139 JPEG 4 KB | **4-bit** | 383 KB |
+| Ours · Smallest | 277 × 101 JPEG 2 KB | **4-bit** | 381 KB |
+| iLovePDF | **1296 × 473 untouched** (JPX 54 KB) | untouched | 142 KB |
+
+Three faults stack up: a 374 dpi line drawing is resized to 80–110 dpi (strokes fall below one pixel and break);
+JPEG smears sharp dark-on-transparent edges into speckles; and the 4-bit mask throws away the antialiasing that
+thin strokes live on. All of that to save 67–89 KB on a file whose images are only 80 KB. **My quality check missed
+it** because it averaged whole pages — the signature covers ~0.1% of an A4 page — so the harness needs a
+worst-small-region measure. (iLovePDF's own 470 → 142 KB came from font and stream optimisation, which we
+deliberately do not do; not in scope.)
+
+#### Task 63 — Revision 3  ✅ DONE by Codex, reviewed — never wreck line art: signatures, logos, stamps   *(Easy–Medium · half a day)*
+
+Parts A → E in order. Run the touched test files after each part.
+
+**Part A — Stop quantising masks.** In `compressPdf`, always pass 8 bits to `resizeSoftMask`, and delete the 4-bit
+packing path and its parameter from `recode.ts` so no caller can reintroduce it. Update the test that asserts 4-bit
+packing to assert 8-bit samples instead. (Cost: masks stay about twice as large as in Rev 2 — roughly 2–3% of a
+photo-heavy file at Strong / Smallest — in exchange for smooth fades.)
+
+**Part B — Recognise line art and treat it gently.** New `src/lib/compress/lineArt.ts`:
+1. `isLineArt(image: CompressImageAnalysis, pixels: DecodedImagePixels): boolean`
+   - **Fast path:** `image.hasSoftMask` (or `hasMask`) **and** the image's filters are lossless only (no
+     `DCTDecode` / `JPXDecode`) → line art. This alone covers every signature, logo and stamp our Sign tool and
+     Canva produce.
+   - **Pixel test** for everything else, on the pixels we already decoded (sample with a stride so at most ~200 000
+     pixels are looked at): quantise each channel to 5 bits and count distinct colours; line art when there are at
+     most 48 distinct colours **and** the four most common cover at least 85% of the sample, **or** when at least
+     90% of the alpha values sit within 8 of fully transparent or fully opaque (hard-edged cut-outs).
+2. Policy in `compressPdf`, decided per image after decoding:
+   - **line art with transparency → leave it completely untouched** (count it in `leftAsTheyWere`);
+   - **line art without transparency** (a scan of handwriting or print, a screenshot — often the whole page, and
+     the case compression is most useful for) → still compressed, but **never below 200 dpi and never below
+     quality 0.8**, whatever the level says. A 600 dpi scan still shrinks a lot and stays readable.
+   - photos → exactly as today.
+3. Tests (`lineArt.test.ts` + `compressPdf.test.ts`): a two-colour image with an 8-bit mask is line art and comes
+   out byte-identical at every level; a smooth photo with a mask is **not** line art and still gets resized; a
+   grey-scale scan without transparency is line art but is still compressed, at no less than 200 dpi / q 0.8; a
+   screenshot-like image with 20 flat colours is caught by the pixel test.
+
+**Part C — Don't disturb an image for a trivial gain.** In `recodeImage`, keep the new bytes only when they are both
+at least 15% smaller **and** at least **8 KB** smaller than the original (a named constant, `MIN_PHOTO_SAVING`).
+8 KB is small enough that a file made of many 30 KB photos still compresses. Test: a 20 KB image that would only
+save 5 KB is left alone; a 30 KB image that saves 21 KB is still replaced.
+
+**Part D — A quality check that sees local damage.** Add `worstBlockDiff(before, after, blockPx = 100)` to
+`src/harness/pixelDiff.ts`: compare two renders in 100 × 100 blocks and return the worst block's mean error and
+percent of changed pixels. Use it in the compress quality test — GOA page 2 before / after Medium: worst block mean
+error under 12 — and add a case with a signature-like image where the worst block must be 0 (untouched). Page
+averages alone must never again be the only measure.
+
+**Part E — Check it on the real files** (Claude keeps them in `tmp/compress-tests/`, gitignored; ask if you need
+them): `rishi-signed.pdf` → the signature is byte-identical at **every** level and the note explains that nothing
+else could be removed; `healing.pdf` → Strong about 4.25 MB and Smallest about 2.95 MB (a little above Rev 2,
+because masks keep full precision); `ladakh.pdf` → Light still 7.55 MB, Smallest about 3.4 MB; `images__3_.pdf`
+(pure photos) → unchanged from Rev 2 at 0.76 / 0.40 / 0.20 / 0.11 MB. Put the numbers in your summary.
+
+**Guardrails:** every rule here only ever skips work or keeps more precision — no new output format, nothing new
+written into the PDF; keep the ≥ 15% per-photo rule, the ≥ 5% whole-file rule, the page-count + operator-list
+self-check, and every deletion check; text, fonts, vectors, annotations and form fields stay untouched; no new
+dependencies; no network.
+
+**Verify (user):** sign a resume with our **Sign** tool, compress it at **Smallest**, then zoom to 400% on the
+signature — it must look exactly like the original, no speckles or broken strokes, and the tool should say plainly
+if it could not make the file smaller. A phone-scanned handwritten page → still compresses well and stays readable.
+The Canva brochure at Smallest → soft fades around photos stay smooth, no visible steps. A photo-only PDF → same
+sizes as before this revision.
+
+**Land:** same branch `tool-compress`; Claude merges the branch into `main` as one commit,
+`Compress PDF tool (Task 63)`.
+
+**Review of Rev 3 (2026-09-13):** accepted with Rev 4 below. typecheck / lint / build green, 964 tests.
+**What works:** on `RISHI RESUME()-signed.pdf` the signature is **byte-identical at all four levels**, the worst
+100 × 100 block at 300% zoom differs by 0, every card reads 470 KB ("No change") and Smallest says "The photos in
+this file are already as small as we can make them."; `images (3).pdf` is unchanged at 0.76 / 0.40 / 0.20 /
+0.11 MB; Ladakh Light is unchanged at 7.55 MB; `isLineArt` flags only genuine flat graphics (6 images / 39 KB in
+Healing, 5 / 110 KB in Ladakh — logos, icons, a 2 KB flat panel) and no photo; 8-bit masks, `MIN_PHOTO_SAVING` and
+`worstBlockDiff` are in as specified. Problems:
+- **A — Smallest grew 7–10%, not the predicted 2–3%.** Healing 2.86 → **3.06 MB** (photos replaced 44 → 31),
+  Ladakh 3.30 → **3.62 MB** (58 → 53). Cause, traced: Codex's (sensible) combined guard in `replaceImage` — photo
+  and mask must together save ≥ 8 KB and ≥ 15% — now fails for masked photos, because the resized **8-bit Flate**
+  mask costs more than Canva's original **JPEG-compressed** mask; `replaceImage` returns false and the whole photo
+  stays full size. Ladakh #879: photo 40 → 13 KB, mask decoded, replacement declined; #885: 43 → 15 KB, same. Total
+  mask bytes barely moved (298 → 299 KB, 492 → 492 KB) because almost no mask got replaced.
+- **B — Cards 9–12% optimistic at Smallest** (Healing 2.69 vs 3.06 MB, Ladakh 3.31 vs 3.62 MB): the estimate sample
+  does not apply that same photo + mask decision.
+- **C — Document scans are not recognised (spec flaw).** A synthetic phone scan — 2480 × 3508 px (300 dpi A4),
+  paper gradient, 70 lines of dark text, JPEG q 0.8, 1.4 MB — is classified as a photo: the 48-colour test cannot
+  see it through paper shading and JPEG noise. Smallest takes it to 661 × 936 px (80 dpi), 110 KB, worst block mean
+  error **21** — visibly degraded text. Medium (150 dpi) is fine; only Strong / Smallest hurt scans.
+- **D — Undeclared test dependency:** `compressQuality.test.ts` imports `@napi-rs/canvas`, which exists here only
+  as pdfjs-dist's *optional* dependency (not in `package.json`); an install without optional packages would fail
+  the whole test file.
+- Noted, harmless: a 0 KB image on Ladakh page 15 (#861) throws "Requesting object that isn't resolved yet" in the
+  pdf.js decode fallback and is correctly left untouched.
+
+#### Task 63 — Revision 4  ✅ DONE by Codex, reviewed — cheapest safe mask, honest mask estimates, recognise document scans   *(Easy–Medium · half a day)*
+
+Parts A → E in order. Run the touched test files after each part.
+
+**Part A — Pick the cheapest safe mask for each photo.** In `compressPdf.ts` and `replace.ts`:
+1. When a photo that has a soft mask is resized, build the resized 8-bit mask as today, then compare it with the
+   **original mask stream's bytes**. If the original is smaller or equal (the usual case — Canva stores masks as
+   JPEG), **keep the original mask reference untouched** and replace only the photo. Otherwise use the resized mask,
+   with the existing copy-if-shared rule. The PDF format maps a soft mask onto the same unit square as its image, so
+   its pixel size may differ from the photo's; pdf.js, Chrome and Acrobat scale it (Rev 1 shipped exactly this and
+   its page compares were clean).
+2. Apply the combined guard to the **chosen** pair: new photo + chosen mask against old photo + old mask, still
+   ≥ 8 KB and ≥ 15% smaller. Keeping the original mask adds 0 bytes to that sum.
+3. If `decodeSoftMask` returns nothing, keep the original mask and still replace the photo, instead of skipping the
+   photo. Remove the "mask could not be resized safely" throw for this keep-the-original path.
+4. Tests: a photo with a small JPEG mask → photo replaced and `SMask` still points at the untouched original stream;
+   a photo with a large Flate mask whose resized mask is smaller → resized mask used; a mask shared by two photos
+   stays shared when kept; a pdf.js render of a photo whose mask has a different pixel size → its transparent area
+   stays transparent (worst block against the original under 12).
+
+**Part B — Estimates apply the same mask decision.** In `samplePhotoEstimates`, for a sampled photo with a soft mask,
+count the new bytes as the JPEG plus the chosen mask's bytes minus the original mask's bytes, and run the same
+combined guard; a declined pair counts as kept (ratio 1). Test: a sampled masked photo whose pair fails the guard is
+estimated at its original size; one that passes is estimated at JPEG + original mask.
+
+**Part C — Recognise document scans.** Add `isDocumentScan(pixels): boolean` to `lineArt.ts`, on the same ≤ 200 000
+sampled pixels:
+- **little colour:** the average of (max − min of R, G, B) over the sample is under 40;
+- **paper and ink, few mid-tones:** with the sample's darkest and brightest luminance as the range, at least 85% of
+  pixels sit in its brightest 30% (paper) or darkest 30% (ink).
+
+In `compressPdf` (and the estimate sample), an image **without transparency** that is line art **or** a document
+scan gets the gentle floor: never below 200 dpi and never below quality 0.8. Photos stay exactly as now.
+Tests: a generated scan-like page (paper gradient, dark text lines, JPEG-encoded) → `isDocumentScan` true; a colour
+photo → false; a smooth black-and-white portrait (many mid-tones) → false; Smallest on the scan-like page keeps at
+least 200 dpi and its worst block mean error stays under 12.
+
+**Part D — No undeclared test dependency.** In `compressQuality.test.ts`, load `@napi-rs/canvas` with a top-level
+`await import(...)` wrapped in `catch`, and skip the suite with a clear reason when it is missing
+(`describe.skipIf`). Do **not** add it to `package.json`.
+
+**Part E — Check it on the real files** (Claude keeps them in `tmp/compress-tests/`, gitignored; ask if you need
+them): `healing.pdf` → Smallest **at or below 2.86 MB** and Strong at or below 4.20 MB; `ladakh.pdf` → Smallest
+**at or below 3.30 MB** and Strong at or below 5.51 MB; every card within 5% of the real result; `rishi-signed.pdf`
+→ signature still byte-identical at every level; `images__3_.pdf` → unchanged. Put the numbers in your summary.
+
+**Guardrails:** the mask choice can only keep the original mask or use a smaller new one — never a bigger one; keep
+the ≥ 15% / ≥ 8 KB photo rules, the combined guard, the ≥ 5% whole-file rule, the self-check and every deletion
+check; no new output format; text, fonts, vectors, annotations and form fields untouched; no new dependencies; no
+network.
+
+**Verify (user):** Healing Retreat and the Ladakh file at **Smallest** → sizes back at or below Rev 2's (2.86 MB /
+3.30 MB), the size cards match what you get, and soft fades around photos stay smooth. Open the results in Chrome or
+Edge and in our editor: every transparent image still see-through, no white boxes. The signed resume → signature
+still perfect at every level. A phone-scanned page of printed text at **Smallest** → text still readable.
+
+**Land:** same branch `tool-compress`; Claude merges the branch into `main` as one commit,
+`Compress PDF tool (Task 63)`.
+
+**Review of Rev 4 (2026-09-13):** accepted, with the Rev 5 fix below. typecheck / lint / build green, 974 tests.
+**Works:** Part A — the masked photos stuck in Rev 3 are now replaced (Ladakh #879 40 → 13 KB, #885 43 → 15 KB);
+Part B — every card within 3% of the real result (−3.0% to +0.7%); Part C — the synthetic scan stays 1653 × 2339 px
+(200 dpi) with a worst block of 7.1 (Rev 3: 21.2), and it also protects 6 **customer-review screenshots** in the
+Ladakh file (#795, 842, 845, 848, 851, 854 — star ratings and small paragraphs) and 5 text strips in Healing (#689,
+692, 695, 698, 985), whose text would be unreadable at 80 dpi; Part D — the quality suite skips cleanly without
+`@napi-rs/canvas`; the signed resume's signature is byte-identical at every level.
+**Part E targets missed — the targets were wrong (Claude's spec):** Healing Smallest 3.08 MB (target ≤ 2.86), Strong
+4.27 (≤ 4.20); Ladakh Smallest 3.68 (≤ 3.30), Strong 5.68 (≤ 5.51). Rev 2 only reached those sizes by squeezing the
+review screenshots and text strips to 80 dpi; Rev 4 is right to refuse, so its sizes are the honest targets.
+**Found:** a false positive — `images (3).pdf` (a pure photo collage) stopped at **0.65 MB** on Medium, Strong and
+Smallest (was 0.40 / 0.20 / 0.11). Its 6 photos are phone screenshots sitting on 43–86% pure white: colour averaged
+over *all* pixels fell to 14–33 (under 40) and the white counted as "paper", so every photo looked like a scan.
+
+#### Task 63 — Revision 5  ✅ DONE by Claude (2026-09-13, user: "do it yourself") — a photo on a white canvas is not a scan
+
+- `isDocumentScan` (`src/lib/compress/lineArt.ts`) averages colour over **non-white pixels only** (skips luminance
+  ≥ 245 with colour ≤ 12) and `MAX_SCAN_CHROMA` goes 40 → 45; an all-white image is left to the paper-and-ink test,
+  so a nearly blank scanned page with a few lines keeps its protection. Measured with white excluded: collage photos
+  61–82, real Canva photos 25–61 (already ruled out by the brightness test), review screenshots 6–37, text strips
+  7–13, synthetic scan 13.
+- **Tests (2 new):** a colourful photo on a white canvas is not a scan (the old detector calls it one — confirmed);
+  a text screenshot on white is still a scan. 976 tests / typecheck / lint / build green.
+- **Live:** the collage is back to 0.76 / 0.40 / 0.20 / 0.11 MB with 0 images treated as scans; the same 6 review
+  screenshots and 5 text strips stay protected; the synthetic scan stays at 200 dpi. **Transparency:** Healing at
+  Smallest replaces 4 masked photos while keeping their original (differently sized) masks — on all 7 pages with
+  transparent images, 0% of pixels are off by more than 64 and the worst block is 5.0 at 150% zoom.
+- **Final sizes (the honest targets):**
+
+| File | Light | Medium | Strong | Smallest |
+|---|---|---|---|---|
+| Healing Retreat (5.35 MB, Canva) | No change | No change | 4.27 MB | 3.08 MB |
+| Pi7 Ladakh (19.52 MB, 11.97 MB padding) | 7.55 MB | 7.54 MB | 5.68 MB | 3.68 MB |
+| images (3) collage (8.75 MB, raw photos) | 0.76 MB | 0.40 MB | 0.20 MB | 0.11 MB |
+| RISHI RESUME()-signed (470 KB) | unchanged — signature untouched at every level | | | |
+
+- **Known limits:** Canva photos already below a level's dpi cannot be shrunk by re-saving with the browser's JPEG
+  encoder (a mozjpeg WebAssembly encoder is the candidate Task 63A); text-heavy files barely change (fonts are never
+  touched); the 0 KB image #861 on Ladakh page 15 hits pdf.js "object isn't resolved yet" and is left untouched;
+  Rev 1's unused-photo removal has still not met a truly unused photo in a real file (unit-tested only); the file
+  check takes 5–6 s on a 19-page file.

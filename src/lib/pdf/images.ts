@@ -22,6 +22,14 @@ export interface ImageRegionTextSignals {
   readonly paragraph: boolean;
 }
 
+export interface DrawnImage {
+  readonly region: ImageRegion;
+  readonly widthPt: number;
+  readonly heightPt: number;
+  readonly objectId?: string;
+  readonly kind: 'image' | 'inline' | 'mask';
+}
+
 export interface OperatorListLike {
   readonly fnArray: readonly number[];
   readonly argsArray: readonly unknown[];
@@ -150,22 +158,39 @@ export function imageRegionsFromOperatorList(
   viewport: PageViewport,
   pageIndex: number,
 ): ImageRegion[] {
+  const regions: ImageRegion[] = [];
+  for (const draw of imageDrawsFromOperatorList(operatorList, viewport, pageIndex)) {
+    if (!regions.some((region) => sameRect(region.rect, draw.region.rect))) regions.push(draw.region);
+  }
+  return regions;
+}
+
+/** The same graphics-state walk as image detection, retaining object ids and true drawn axis lengths. */
+export function imageDrawsFromOperatorList(
+  operatorList: OperatorListLike,
+  viewport: PageViewport,
+  pageIndex: number,
+): DrawnImage[] {
   const viewportMatrix = matrix(viewport.transform);
   if (!viewportMatrix) throw new Error('PDF viewport has an invalid transform');
   let current = viewportMatrix;
   const stack: Matrix[] = [];
-  const regions: ImageRegion[] = [];
+  const draws: DrawnImage[] = [];
 
-  const add = (transform: Matrix) => {
+  const add = (transform: Matrix, kind: DrawnImage['kind'], objectId?: unknown) => {
     const rect = imageRect(transform, viewport);
     if (rect.w <= 0.1 || rect.h <= 0.1) return;
-    if (!regions.some((region) => sameRect(region.rect, rect))) {
-      regions.push({ pageIndex, rect });
-    }
+    draws.push({
+      region: { pageIndex, rect },
+      widthPt: Math.hypot(transform[0], transform[1]),
+      heightPt: Math.hypot(transform[2], transform[3]),
+      ...(typeof objectId === 'string' ? { objectId } : {}),
+      kind,
+    });
   };
-  const addNested = (nested: unknown) => {
+  const addNested = (nested: unknown, kind: DrawnImage['kind'], objectId?: unknown) => {
     const nestedMatrix = matrix(nested);
-    if (nestedMatrix) add(multiply(current, nestedMatrix));
+    if (nestedMatrix) add(multiply(current, nestedMatrix), kind, objectId);
   };
 
   for (let index = 0; index < operatorList.fnArray.length; index += 1) {
@@ -185,19 +210,19 @@ export function imageRegionsFromOperatorList(
       if (formMatrix) current = multiply(current, formMatrix);
     } else if (operation === OPS.paintFormXObjectEnd) {
       current = stack.pop() ?? current;
-    } else if (
-      operation === OPS.paintImageXObject ||
-      operation === OPS.paintInlineImageXObject ||
-      operation === OPS.paintImageMaskXObject
-    ) {
-      add(current);
+    } else if (operation === OPS.paintImageXObject) {
+      add(current, 'image', args[0]);
+    } else if (operation === OPS.paintInlineImageXObject) {
+      add(current, 'inline');
+    } else if (operation === OPS.paintImageMaskXObject) {
+      add(current, 'mask', args[0]);
     } else if (operation === OPS.paintImageXObjectRepeat) {
       const scaleX = Number(args[1]);
       const scaleY = Number(args[2]);
       const values = numberValues(args[3]);
       if (Number.isFinite(scaleX) && Number.isFinite(scaleY) && values) {
         for (let offset = 0; offset + 1 < values.length; offset += 2) {
-          addNested([scaleX, 0, 0, scaleY, values[offset] ?? 0, values[offset + 1] ?? 0]);
+          addNested([scaleX, 0, 0, scaleY, values[offset] ?? 0, values[offset + 1] ?? 0], 'image', args[0]);
         }
       }
     } else if (operation === OPS.paintImageMaskXObjectRepeat) {
@@ -215,18 +240,18 @@ export function imageRegionsFromOperatorList(
             scaleY,
             values[offset] ?? 0,
             values[offset + 1] ?? 0,
-          ]);
+          ], 'mask', args[0]);
         }
       }
     } else if (operation === OPS.paintInlineImageXObjectGroup) {
       const entries = Array.isArray(args[1]) ? args[1] : [];
-      for (const entry of entries) addNested((entry as { transform?: unknown }).transform);
+      for (const entry of entries) addNested((entry as { transform?: unknown }).transform, 'inline');
     } else if (operation === OPS.paintImageMaskXObjectGroup) {
       const entries = Array.isArray(args[0]) ? args[0] : [];
-      for (const entry of entries) addNested((entry as { transform?: unknown }).transform);
+      for (const entry of entries) addNested((entry as { transform?: unknown }).transform, 'mask');
     }
   }
-  return regions;
+  return draws;
 }
 
 export async function detectImages(page: PDFPageProxy, pageIndex: number): Promise<ImageRegion[]> {

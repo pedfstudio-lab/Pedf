@@ -1,10 +1,12 @@
 import {
   PDFArray,
+  PDFContentStream,
   PDFDict,
   PDFDocument,
   PDFName,
   PDFNumber,
   PDFRawStream,
+  PDFRef,
   PDFStream,
   decodePDFRawStream,
 } from 'pdf-lib';
@@ -21,6 +23,19 @@ type ContentToken = number | { readonly name: string } | { readonly operator: st
 
 const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 const RECT_TOLERANCE_PT = 0.5;
+
+export interface MatchedImageXObject {
+  readonly stream: PDFRawStream;
+  readonly ref?: PDFRef;
+}
+
+export interface ContentImageDraw {
+  readonly stream: PDFRawStream;
+  readonly ref?: PDFRef;
+  readonly widthPt: number;
+  readonly heightPt: number;
+  readonly rect: PdfRect;
+}
 
 function multiply(left: Matrix, right: Matrix): Matrix {
   return [
@@ -153,12 +168,33 @@ function contentTokens(bytes: Uint8Array): ContentToken[] {
 }
 
 function decodedStreamBytes(stream: PDFStream): Uint8Array | undefined {
-  if (!(stream instanceof PDFRawStream)) return stream.getContents();
+  if (stream instanceof PDFContentStream) return stream.getUnencodedContents();
+  if (!(stream instanceof PDFRawStream) || !stream.dict.get(PDFName.of('Filter'))) return stream.getContents();
   try {
     return decodePDFRawStream(stream).decode();
   } catch {
     return undefined;
   }
+}
+
+/** Read the XObject names used by Do operators, or return undefined when the content cannot be decoded safely. */
+export function xObjectNamesInContent(stream: PDFStream): string[] | undefined {
+  const bytes = decodedStreamBytes(stream);
+  if (!bytes) return undefined;
+  const names: string[] = [];
+  let operands: ContentToken[] = [];
+  for (const token of contentTokens(bytes)) {
+    if (typeof token === 'number' || 'name' in token) {
+      operands.push(token);
+      continue;
+    }
+    if (token.operator === 'Do') {
+      const operand = operands.at(-1);
+      if (operand && typeof operand !== 'number' && 'name' in operand) names.push(operand.name);
+    }
+    operands = [];
+  }
+  return names;
 }
 
 function contentStreams(contents: PDFStream | PDFArray | undefined): PDFStream[] {
@@ -178,7 +214,7 @@ function findImageStream(
   target: PdfRect,
   initial: Matrix,
   activeForms: Set<PDFStream>,
-): PDFRawStream | undefined {
+): MatchedImageXObject | undefined {
   if (!resources) return undefined;
   const xObjects = resources.lookupMaybe(PDFName.of('XObject'), PDFDict);
   if (!xObjects) return undefined;
@@ -205,10 +241,12 @@ function findImageStream(
       } else if (operation === 'Do') {
         const name = operands.at(-1);
         if (name && typeof name !== 'number' && 'name' in name) {
-          const xObject = xObjects.lookupMaybe(PDFName.of(name.name), PDFStream);
+          const resourceName = PDFName.of(name.name);
+          const raw = xObjects.get(resourceName);
+          const xObject = xObjects.lookupMaybe(resourceName, PDFStream);
           const subtype = xObject?.dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
           if (xObject instanceof PDFRawStream && subtype === 'Image' && sameRect(transformedRect(current), target)) {
-            return xObject;
+            return { stream: xObject, ...(raw instanceof PDFRef ? { ref: raw } : {}) };
           }
           if (xObject && subtype === 'Form' && !activeForms.has(xObject)) {
             activeForms.add(xObject);
@@ -230,6 +268,103 @@ function findImageStream(
     }
   }
   return undefined;
+}
+
+/** Match a reader-detected image rectangle back to the exact pdf-lib XObject and reference. */
+export function matchImageXObject(
+  pdfLibDoc: PDFDocument,
+  pageIndex: number,
+  rect: PdfRect,
+): MatchedImageXObject | undefined {
+  if (pageIndex < 0 || pageIndex >= pdfLibDoc.getPageCount()) return undefined;
+  const page = pdfLibDoc.getPage(pageIndex);
+  return findImageStream(
+    contentStreams(page.node.Contents()),
+    page.node.Resources(),
+    rect,
+    IDENTITY,
+    new Set(),
+  );
+}
+
+function collectImageDraws(
+  streams: readonly PDFStream[],
+  resources: PDFDict | undefined,
+  initial: Matrix,
+  activeForms: Set<PDFStream>,
+): ContentImageDraw[] | undefined {
+  const draws: ContentImageDraw[] = [];
+  const xObjects = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
+  let current = initial;
+  const stack: Matrix[] = [];
+  let operands: ContentToken[] = [];
+
+  for (const stream of streams) {
+    const bytes = decodedStreamBytes(stream);
+    if (!bytes) return undefined;
+    for (const token of contentTokens(bytes)) {
+      if (typeof token === 'number' || 'name' in token) {
+        operands.push(token);
+        continue;
+      }
+      const operation = token.operator;
+      if (operation === 'q') stack.push(current);
+      else if (operation === 'Q') current = stack.pop() ?? current;
+      else if (operation === 'cm') {
+        const values = operands.slice(-6);
+        if (values.length === 6 && values.every((value) => typeof value === 'number')) {
+          current = multiply(current, values as unknown as Matrix);
+        }
+      } else if (operation === 'Do') {
+        const name = operands.at(-1);
+        if (name && typeof name !== 'number' && 'name' in name && xObjects) {
+          const resourceName = PDFName.of(name.name);
+          const raw = xObjects.get(resourceName);
+          const xObject = xObjects.lookupMaybe(resourceName, PDFStream);
+          const subtype = xObject?.dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
+          if (xObject instanceof PDFRawStream && subtype === 'Image') {
+            draws.push({
+              stream: xObject,
+              ...(raw instanceof PDFRef ? { ref: raw } : {}),
+              widthPt: Math.hypot(current[0], current[1]),
+              heightPt: Math.hypot(current[2], current[3]),
+              rect: transformedRect(current),
+            });
+          } else if (xObject && subtype === 'Form' && !activeForms.has(xObject)) {
+            activeForms.add(xObject);
+            const formResources = xObject.dict.lookupMaybe(PDFName.of('Resources'), PDFDict) ?? resources;
+            const formMatrix = matrixFromArray(xObject.dict.lookupMaybe(PDFName.of('Matrix'), PDFArray));
+            const nested = collectImageDraws(
+              [xObject],
+              formResources,
+              multiply(current, formMatrix),
+              activeForms,
+            );
+            activeForms.delete(xObject);
+            if (!nested) return undefined;
+            draws.push(...nested);
+          }
+        }
+      }
+      operands = [];
+    }
+  }
+  return draws;
+}
+
+/** List every named image draw in a page's content, including images reached through Form XObjects. */
+export function imageDrawsInContent(
+  pdfLibDoc: PDFDocument,
+  pageIndex: number,
+): ContentImageDraw[] | undefined {
+  if (pageIndex < 0 || pageIndex >= pdfLibDoc.getPageCount()) return undefined;
+  const page = pdfLibDoc.getPage(pageIndex);
+  return collectImageDraws(
+    contentStreams(page.node.Contents()),
+    page.node.Resources(),
+    IDENTITY,
+    new Set(),
+  );
 }
 
 function filterNames(stream: PDFRawStream): string[] | undefined {
@@ -327,7 +462,8 @@ function flatePixels(stream: PDFRawStream, width: number, height: number): { pix
     return undefined;
   }
   if (numberEntry(stream.dict, 'BitsPerComponent') !== 8) return undefined;
-  const colorSpace = stream.dict.lookupMaybe(PDFName.of('ColorSpace'), PDFName)?.decodeText();
+  const colorSpaceObject = stream.dict.get(PDFName.of('ColorSpace'));
+  const colorSpace = colorSpaceObject instanceof PDFName ? colorSpaceObject.decodeText() : undefined;
   const channels = colorSpace === 'DeviceRGB' ? 3 : colorSpace === 'DeviceGray' ? 1 : undefined;
   if (!channels) return undefined;
   const pixels = decodeFlatePrefix(stream.contents, filters);
@@ -371,14 +507,15 @@ export function extractImageBytes(
   pageIndex: number,
   rect: PdfRect,
 ): ExtractedImage | undefined {
-  if (pageIndex < 0 || pageIndex >= pdfLibDoc.getPageCount()) return undefined;
-  const page = pdfLibDoc.getPage(pageIndex);
-  const stream = findImageStream(
-    contentStreams(page.node.Contents()),
-    page.node.Resources(),
-    rect,
-    IDENTITY,
-    new Set(),
-  );
-  return stream ? extractStream(stream) : undefined;
+  const match = matchImageXObject(pdfLibDoc, pageIndex, rect);
+  return match ? extractStream(match.stream) : undefined;
+}
+
+/** Extract one exact image reference without relying on its drawn rectangle. */
+export function extractImageBytesByRef(
+  pdfLibDoc: PDFDocument,
+  ref: PDFRef,
+): ExtractedImage | undefined {
+  const stream = pdfLibDoc.context.lookup(ref);
+  return stream instanceof PDFRawStream ? extractStream(stream) : undefined;
 }

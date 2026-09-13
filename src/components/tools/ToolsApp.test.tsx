@@ -22,7 +22,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Watermark PDF/ }).getAttribute('href')).toBe('/tools/watermark');
     expect(screen.getByRole('link', { name: /Repair PDF/ }).getAttribute('href')).toBe('/tools/repair');
     expect(screen.getByRole('link', { name: /Sign PDF/ }).getAttribute('href')).toBe('/tools/sign');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(11);
+    expect(screen.getByRole('link', { name: /Compress PDF/ }).getAttribute('href')).toBe('/tools/compress');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(12);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -112,5 +113,14 @@ describe('ToolsApp index and lookup', () => {
     const sign = screen.getByRole('button', { name: 'Sign PDF' }) as HTMLButtonElement;
     expect(sign.disabled).toBe(true);
     expect(screen.getAllByText('Make or pick a signature first.').length).toBeGreaterThan(0);
+  });
+
+  it('opens Compress PDF with level cards and a disabled action', () => {
+    render(<ToolsApp slug="compress" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Compress PDF');
+    expect(screen.getByRole('button', { name: /Drop a PDF file here/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Medium/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Fit under a size/ })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Compress PDF' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
