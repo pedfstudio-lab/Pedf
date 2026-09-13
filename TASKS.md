@@ -8769,7 +8769,7 @@ over *all* pixels fell to 14–33 (under 40) and the white counted as "paper", s
   Rev 1's unused-photo removal has still not met a truly unused photo in a real file (unit-tested only); the file
   check takes 5–6 s on a 19-page file.
 
-### Task 64 — Fix: moved text jumps on Done and re-opens in the wrong place  🔲 TODO → branch `steady-text-box` (create from `main`)   *(Easy–Medium · 1 day)*
+### Task 64 — Fix: moved text jumps on Done and re-opens in the wrong place  ✅ MERGED to `main` (`c34de88`, 2026-09-14; includes Rev 1; branch `steady-text-box` deleted)   *(Easy–Medium · 1 day)*
 
 **What the user gets:** move any text — a name, a heading, a paragraph, a bullet list — press **Done**, and it stays
 exactly where it was left. Open it again and the edit box sits exactly on the text. Today it "jumps here and there",
@@ -8875,7 +8875,7 @@ first line (Wanderon list: dots at x 59.7, y 304.7 / 276.2 / 247.6 / 219.1; item
 bounding box as 0 × 0, so a check based on it finds nothing. Other versions of the same résumé
 (`Rahul Resume.pdf (1).pdf`, the sample) use 3 × 3 pt image dots and work.
 
-#### Task 64 — Revision 1  ✅ DONE by Codex, reviewed — bullet dots drawn as shapes are recognised, so they move with their list   *(Easy–Medium · half a day)*
+#### Task 64 — Revision 1  ✅ DONE by Codex, reviewed and merged in `c34de88` — bullet dots drawn as shapes are recognised, so they move with their list   *(Easy–Medium · half a day)*
 
 Parts A → D in order. Run the touched test files after each part.
 
