@@ -509,6 +509,88 @@ function line(index: number, text: string): TextLine {
   };
 }
 
+function syntheticListBlock(): TextBlock {
+  const lines = [line(0, 'First item'), line(1, 'Second item'), line(2, 'Third item')];
+  return {
+    pageIndex: 0,
+    text: lines.map((entry) => entry.text).join('\n'),
+    rect: { x: 30, y: 76, w: 100, h: 33 },
+    topBaselineY: 100,
+    lineHeightPt: 12,
+    style: lines[0]?.style ?? {
+      fontName: 'Helvetica',
+      fontSizePt: 9,
+      bold: false,
+      italic: false,
+      color: { r: 0, g: 0, b: 0 },
+    },
+    lines,
+  };
+}
+
+it('builds a list from drawn-shape regions and preserves their measured dot size', () => {
+  const block = syntheticListBlock();
+  const shapes = [100, 88, 76].map((baselineY) => ({
+    pageIndex: 0,
+    rect: { x: 20, y: baselineY + 1, w: 4, h: 4 },
+  }));
+  const list = detectBulletListFromRegions(block, [], shapes);
+
+  expect(list?.items).toHaveLength(3);
+  expect(list?.bulletX).toBe(20);
+  expect(list?.bulletSizePt).toBe(4);
+  expect(list?.coverRect.x).toBe(20);
+});
+
+it('keeps image-marker precedence when image and shape lists both match', () => {
+  const block = syntheticListBlock();
+  const images = [100, 88, 76].map((baselineY) => ({
+    pageIndex: 0,
+    rect: { x: 21, y: baselineY + 1.5, w: 3, h: 3 },
+  }));
+  const shapes = [100, 88, 76].map((baselineY) => ({
+    pageIndex: 0,
+    rect: { x: 18, y: baselineY + 1, w: 4, h: 4 },
+  }));
+  const list = detectBulletListFromRegions(block, images, shapes);
+
+  expect(list?.bulletX).toBe(21);
+  expect(list?.bulletSizePt).toBe(3);
+});
+
+it('moves a shape-marker list by stamping bullets at the new x and covering the original dots', () => {
+  const block = syntheticListBlock();
+  const shapes = [100, 88, 76].map((baselineY) => ({
+    pageIndex: 0,
+    rect: { x: 20, y: baselineY + 1, w: 4, h: 4 },
+  }));
+  const list = detectBulletListFromRegions(block, [], shapes);
+  if (!list) throw new Error('Shape-marker list was not detected');
+  const layouts = list.items.map((item) => ({ text: item.text, lines: [item.text] }));
+  const built = buildBulletListEdits(
+    list,
+    {
+      text: formatBulletEditorText(layouts.map((item) => item.text)),
+      style: block.style,
+      width: list.coverRect.w,
+      height: list.coverRect.h,
+      dx: 7,
+      dy: 3,
+    },
+    layouts,
+    1,
+    200,
+  );
+
+  expect(built.overflow).toBe(false);
+  expect(built.texts.filter((edit) => edit.text === '•')).toHaveLength(3);
+  expect(built.texts.filter((edit) => edit.text === '•').every((edit) => edit.rect.x === 27)).toBe(true);
+  expect(built.covers).toHaveLength(1);
+  const cover = built.covers[0]?.rect;
+  expect(cover?.x).toBeLessThan(20);
+  expect((cover?.x ?? 0) + (cover?.w ?? 0)).toBeGreaterThan(24);
+});
+
 it('models each marker-start through the line before the next marker as one item', () => {
   const lines = [line(0, 'First item'), line(1, 'continues'), line(2, 'Second item')];
   const block: TextBlock = {

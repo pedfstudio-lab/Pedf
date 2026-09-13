@@ -1,8 +1,8 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PdfRect, TextSpan } from '@/lib/export/types';
 import { normalizeTextSpans, textFromSpans } from '@/lib/edit/richText';
-import { detectImages } from './images';
 import type { ImageRegion } from './images';
+import { detectPageGraphicRegions } from './shapeMarkers';
 import type { TextBlock, TextLine, TextRun } from './textContent';
 
 const MIN_MARKER_SIZE_PT = 1;
@@ -454,21 +454,27 @@ export function buildBulletList(
   };
 }
 
-/** Prefer image markers; fall back to recognized text-symbol markers only if needed. */
+/** Prefer image markers, then drawn shapes, then recognized text-symbol markers. */
 export function detectBulletListFromRegions(
   block: TextBlock,
   imageRegions: readonly ImageRegion[],
+  shapeMarkerRegions: readonly ImageRegion[] = [],
 ): BulletList | null {
   const imageList = buildBulletList(block, detectBulletMarkers(block, imageRegions));
   if (imageList) return imageList;
+  const shapeList = buildBulletList(block, detectBulletMarkers(block, shapeMarkerRegions));
+  if (shapeList) return shapeList;
   return buildBulletList(block, detectTextBulletMarkers(block));
 }
 
-/** Detect a bullet list from painted image markers, then text symbols as a fallback. */
+/** Detect a bullet list from one shared image-and-shape operator-list fetch. */
 export async function detectBulletList(
   block: TextBlock,
   page: PDFPageProxy,
 ): Promise<BulletList | null> {
-  const imageRegions = await detectImages(page, block.pageIndex);
-  return detectBulletListFromRegions(block, imageRegions);
+  const { imageRegions, shapeMarkerRegions } = await detectPageGraphicRegions(
+    page,
+    block.pageIndex,
+  );
+  return detectBulletListFromRegions(block, imageRegions, shapeMarkerRegions);
 }

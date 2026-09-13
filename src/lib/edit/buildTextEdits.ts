@@ -153,7 +153,10 @@ export function buildFreeTextEdits(
   z: number,
   boxId = id(),
 ): readonly TextEdit[] {
-  const firstBaseline = rect.y + rect.h + next.dy;
+  // The box's top is the top of the first font-size line box, not its PDF
+  // baseline. Keeping that invariant makes Add Text agree before Done, after
+  // Done, and after any number of re-opens.
+  const firstBaseline = rect.y + rect.h - next.style.fontSizePt + next.dy;
   const baselines = baselinesForLines(
     wrappedLines,
     firstBaseline,

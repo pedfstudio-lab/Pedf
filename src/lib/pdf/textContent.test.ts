@@ -211,7 +211,7 @@ describe('extractTextRuns', () => {
         width: heading.rect.w,
         height: heading.rect.h,
         dx: 0,
-        dy: 0,
+        dy: -10,
       },
       [replacement],
       1,
@@ -239,6 +239,7 @@ describe('extractTextRuns', () => {
     const reopenedPage = await reopened.getPage(1);
     const reopenedRuns = await extractTextRuns(reopenedPage, 0);
     const replacementRun = reopenedRuns.find((run) => run.text === replacement);
+    expect(replacementRun?.rect.y).toBeCloseTo(heading.topBaselineY - 10, 5);
     expect(replacementRun?.style.bold).toBe(true);
     expect(replacementRun?.style.fontName).toBe('sans-serif');
     expect(replacementRun?.style.fontRef).toBeDefined();

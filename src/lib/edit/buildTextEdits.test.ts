@@ -38,8 +38,8 @@ describe('buildTextEdits', () => {
     expect(edits).toHaveLength(2);
     expect(edits.map((edit) => edit.kind)).toEqual(['text', 'text']);
     expect(edits.map((edit) => edit.rect)).toEqual([
-      { x: 105, y: 238, w: 150, h: 14 },
-      { x: 105, y: 221.2, w: 150, h: 14 },
+      { x: 105, y: 224, w: 150, h: 14 },
+      { x: 105, y: 207.2, w: 150, h: 14 },
     ]);
     expect(edits.map((edit) => edit.z)).toEqual([20, 21]);
     expect(edits.every((edit) => edit.origin === 'free' && edit.boxId === 'free-box-1')).toBe(true);

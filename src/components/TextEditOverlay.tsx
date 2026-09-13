@@ -14,6 +14,7 @@ import {
   finishTextEdit,
 } from '@/lib/edit/textEditSession';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import { editorFirstLineOffsetPx } from '@/lib/edit/editorPosition';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
 import {
@@ -128,6 +129,8 @@ interface TextEditOverlayProps {
   readonly block: TextBlock;
   readonly existing?: readonly TextEdit[];
   readonly screenRect: ScreenRect;
+  /** Box-only source-ink adjustment; content cancels it to retain the PDF baseline. */
+  readonly topCorrectionPx?: number;
   readonly zoom: number;
   readonly pageWidthPt: number;
   /** Page box in CSS pixels; floating bars are kept inside it because the page clips overflow. */
@@ -149,6 +152,7 @@ export function TextEditOverlay({
   block,
   existing,
   screenRect,
+  topCorrectionPx = 0,
   zoom,
   pageWidthPt,
   pageSizePx,
@@ -348,6 +352,7 @@ export function TextEditOverlay({
     top: editorFrame.height + 8,
   };
   const lineHeight = textBlockLineHeight(block, style);
+  const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
   const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
@@ -570,6 +575,7 @@ export function TextEditOverlay({
         style={{
           ...textStyleToCss(style, zoom),
           lineHeight: lineHeight / style.fontSizePt,
+          top: firstLineOffsetPx,
           textAlign: initialAlign,
         }}
       />

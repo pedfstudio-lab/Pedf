@@ -25,6 +25,7 @@ import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { coversOriginalRect } from '@/lib/edit/coverMatch';
+import { editorTopCorrection, freeTextBoxRect } from '@/lib/edit/editorPosition';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import {
   buildLineDelete,
@@ -44,8 +45,8 @@ import {
   parseBulletEditorItems,
 } from '@/lib/pdf/bulletList';
 import type { BulletList } from '@/lib/pdf/bulletList';
-import { detectImages } from '@/lib/pdf/images';
 import type { ImageRegion } from '@/lib/pdf/images';
+import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import type { RuleLine } from '@/lib/pdf/ruleLines';
 import { filterCoveredSpans } from '@/lib/smart/coveredSpans';
@@ -208,24 +209,12 @@ function sourceText(texts: readonly TextEdit[]): string {
   return texts[0]?.boxText ?? texts.map((edit) => edit.text).join('\n');
 }
 
-function freeTextBoxRect(texts: readonly TextEdit[]): PdfRect {
-  const first = texts[0];
-  if (!first) return { x: 0, y: 0, w: 0, h: 0 };
-  const height = first.boxHeight ?? freeTextLineHeight(first.style);
-  return {
-    x: first.rect.x,
-    y: first.rect.y - height,
-    w: first.rect.w,
-    h: height,
-  };
-}
-
 function freeTextBlock(pageIndex: number, rect: PdfRect, style = DEFAULT_TEXT_STYLE): TextBlock {
   return {
     pageIndex,
     text: '',
     rect,
-    topBaselineY: rect.y + rect.h,
+    topBaselineY: rect.y + rect.h - style.fontSizePt,
     lineHeightPt: freeTextLineHeight(style),
     style,
     lines: [],
@@ -341,6 +330,7 @@ export function OverlayLayer({
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [imageRegions, setImageRegions] = useState<ImageRegion[]>([]);
+  const [shapeMarkerRegions, setShapeMarkerRegions] = useState<ImageRegion[]>([]);
   const [ruleLines, setRuleLines] = useState<RuleLine[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
   const [activeBulletList, setActiveBulletList] = useState<BulletList | null>(null);
@@ -362,19 +352,21 @@ export function OverlayLayer({
       setRuns([]);
       setBlocks([]);
       setImageRegions([]);
+      setShapeMarkerRegions([]);
       setRuleLines([]);
       return;
     }
     let cancelled = false;
     void Promise.all([
       extractTextRuns(page, pageIndex),
-      detectImages(page, pageIndex),
+      detectPageGraphicRegions(page, pageIndex),
       detectRuleLines(page, pageIndex),
-    ]).then(([nextRuns, nextImageRegions, nextRuleLines]) => {
+    ]).then(([nextRuns, nextGraphicRegions, nextRuleLines]) => {
       if (!cancelled) {
         setRuns(nextRuns);
         setBlocks(groupRunsIntoBlocks(nextRuns));
-        setImageRegions(nextImageRegions);
+        setImageRegions([...nextGraphicRegions.imageRegions]);
+        setShapeMarkerRegions([...nextGraphicRegions.shapeMarkerRegions]);
         setRuleLines(nextRuleLines);
       }
     });
@@ -392,9 +384,9 @@ export function OverlayLayer({
   const detectedDates = useMemo(() => detectDates(runs), [runs]);
   const bulletLists = useMemo(
     () => blocks
-      .map((block) => detectBulletListFromRegions(block, imageRegions))
+      .map((block) => detectBulletListFromRegions(block, imageRegions, shapeMarkerRegions))
       .filter((list): list is BulletList => list !== null),
-    [blocks, imageRegions],
+    [blocks, imageRegions, shapeMarkerRegions],
   );
 
   const pageTextEdits = useMemo(
@@ -724,7 +716,11 @@ export function OverlayLayer({
       ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
       : alignmentEditorRect(activeBlock, existing?.texts, fallback);
     const screenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
-    return { ...screenRect, top: screenRect.top + inkTopDelta };
+    const hasSavedEdit = Boolean(existing && existing.texts.length > 0);
+    return {
+      ...screenRect,
+      top: screenRect.top + editorTopCorrection(hasSavedEdit, inkTopDelta),
+    };
   })();
   const activeSnapLeft = activeSnapScreenRect?.left;
   const activeSnapTop = activeSnapScreenRect?.top;
@@ -1125,9 +1121,11 @@ export function OverlayLayer({
           ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
           : alignmentEditorRect(activeBlock, existing?.texts, fallback);
         const sourceScreenRect = pdfRectToScreenRect(sourceRect, viewport, dpr);
+        const hasSavedEdit = Boolean(existing && existing.texts.length > 0);
+        const topCorrectionPx = editorTopCorrection(hasSavedEdit, inkTopDelta);
         const screenRect = {
           ...sourceScreenRect,
-          top: sourceScreenRect.top + inkTopDelta,
+          top: sourceScreenRect.top + topCorrectionPx,
         };
         const base = !activeBulletList && existing && existing.texts.length > 0
           ? {
@@ -1171,6 +1169,7 @@ export function OverlayLayer({
               block={activeBlock}
               existing={existing?.texts}
               screenRect={screenRect}
+              topCorrectionPx={topCorrectionPx}
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
             pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}

@@ -8768,3 +8768,187 @@ over *all* pixels fell to 14–33 (under 40) and the white counted as "paper", s
   touched); the 0 KB image #861 on Ladakh page 15 hits pdf.js "object isn't resolved yet" and is left untouched;
   Rev 1's unused-photo removal has still not met a truly unused photo in a real file (unit-tested only); the file
   check takes 5–6 s on a 19-page file.
+
+### Task 64 — Fix: moved text jumps on Done and re-opens in the wrong place  🔲 TODO → branch `steady-text-box` (create from `main`)   *(Easy–Medium · 1 day)*
+
+**What the user gets:** move any text — a name, a heading, a paragraph, a bullet list — press **Done**, and it stays
+exactly where it was left. Open it again and the edit box sits exactly on the text. Today it "jumps here and there",
+up to 1–2 cm on big text; Sejda keeps text still, and so must we.
+
+**Example:** Rahul opens his résumé, drags his name about 1 cm down and presses Done — the name jumps up. He opens it
+again: the edit box now shows the name about 15 px *below* where it really is on the page, so he drags that copy to
+where he wants it, presses Done, and it jumps up again.
+
+**What is already right — do not change it:** where text is **saved**. Every move is exactly the dragged distance
+(a paragraph moved 150 / 120 pt lands exactly 120 pt lower in the exported PDF; three re-open-and-nudge cycles of
+10 px move the saved box and the drawn text by exactly 10 px each, no drift). The bug is only that the **edit box
+shows the text in the wrong place**, so the user aims wrong.
+
+**Measured** (`RAHUL RAJPUT RESUME.pdf`, name 31.92 pt, 100% zoom, px from the top of the page; the user's Chrome
+at devicePixelRatio 1.53 and the Claude browser give the same numbers):
+
+| | Top | Bottom |
+|---|---|---|
+| Fresh page: name's clickable box / printed letters | 20.3 / 30.0 | 52.3 / 52.2 (box sits on the letters) |
+| After a move + Done: saved edit box (Claude browser) | 61.0 | 102.0 |
+| Drawn (finished) name | 54.1 | 99.2 |
+| **Re-opened edit box** | **73.1 (+12.1)** | 114.1 |
+| **Name inside the re-opened box** | **69.5 (+15.4)** | 114.6 |
+| User's Chrome: saved box → re-opened box | 11.1 → **23.2 (+12.1)** | |
+| User's Chrome: drawn name → name in re-opened box | 3.9 → **18.7 (+14.8)** | |
+
+**Two causes:**
+1. **A correction applied twice on re-open (the big one).** `src/components/OverlayLayer.tsx` shifts the edit box
+   down by `inkTopDelta` (added in Task 44, `ed90b00`: "cover & edit box hug the real top of headings") in two places
+   — the screen rect used for the toolbar / snap targets (`return { ...screenRect, top: screenRect.top + inkTopDelta }`)
+   and the rect passed to `TextEditOverlay` (`top: sourceScreenRect.top + inkTopDelta`). `inkTopDelta` is the empty
+   strip between a text block's rectangle and its printed letters, measured on the **original** block
+   (`activeCoverGeometry` → `measureInkExtent`). On a first edit that is right. But a saved edit's box already
+   includes the correction, and re-opening adds it again. Measured: re-open offset = the strip — 12.1 px for the name,
+   3.3 px for a ~20 pt paragraph (Firgun page 2); bigger text or zoom makes it bigger (≈ 30 px for an 80 pt title).
+2. **Different line spacing for the first line (the small one).** The editor's content uses
+   `lineHeight: lineHeight / style.fontSizePt` from `textBlockLineHeight` (1.2× for a single line: 38.30 px for the
+   name), while the finished preview renders the same font at a line height equal to the font size (31.92 px). CSS
+   puts half of the extra line height above the first line, so after Done the text sits `(lineHeight − fontSize) / 2`
+   higher: 3.2 px for the name at 100%, 5.2 px at 150%, 11 px for the 80 pt Firgun title, 3.3 px for body text.
+
+**Steps**
+
+**Part A — Re-open at the saved position.**
+1. Add a small pure helper (e.g. `editorTopCorrection(hasSavedEdit, inkTopDelta)` in `src/lib/edit/`) that returns
+   `inkTopDelta` only when the active text has **no saved edit**, and `0` when it has one.
+2. Use it in **both** places in `OverlayLayer.tsx` that add `inkTopDelta`, for text blocks **and** bullet lists
+   (`existing?.texts.length > 0` means "has a saved edit"), so the editor, its floating toolbar and the snap targets
+   all agree. The active text cover (`activeCoverGeometry` / `displayRect`) is unchanged.
+3. Tests: the helper (with and without a saved edit); an `OverlayLayer` test with `measureInkExtent` mocked to report
+   a 12 pt top strip — a fresh block opens with the box pushed down by the strip (Task 44 behaviour kept), an edited
+   block re-opens with `TextEditOverlay`'s `screenRect.top` equal to its saved box top.
+
+**Part B — One first-line position for the editor and the finished text.**
+1. Rule: the editor and the finished preview must place the **first line's baseline at the same screen y** — the
+   saved baseline (`edit.rect.y`, the value `topBaselineY` already uses) for a saved edit, the block's first baseline
+   for a fresh one. Line spacing *between* lines stays exactly as today (multi-line paragraphs and bullet lists keep
+   `textBlockLineHeight`); only the first line's offset changes.
+2. Implementation is your choice — for example offset the editor's content by `−(lineHeightPx − fontSizePx) / 2`, or
+   render the finished preview with the editor's line height and the matching offset — but pick the side that matches
+   the **exported PDF**, and prove it: render the exported bytes with pdf.js and compare the name's ink top with the
+   preview's baseline (Range top + `fontBoundingBoxAscent` from canvas `measureText` with the same CSS font, minus
+   `actualBoundingBoxAscent`). Both must agree within 0.5 px.
+3. Tests: a pure test for the first-line offset maths; a component test that a committed single-line heading and a
+   three-line paragraph render their first line at the same y as the open editor did (mock fonts so the numbers are
+   deterministic); the existing text-edit, alignment (Task 42), cover (Tasks 41 / 44) and export tests unchanged.
+
+**Part C — "Add text" boxes.** New text from **Add text** uses a different path. Check it for the same two effects
+(re-open offset and Done jump) and apply the same rules if either shows. Add one test for whatever you find.
+
+**Part D — Check it live** (Claude will repeat these measurements after you finish; do them too if you can run a
+browser): on the résumé and on `Ziro Festival Firgun.pdf`, at 100% and 150% zoom — open a text, move it, press Done:
+the drawn text is within **0.5 px** of where it was in the editor; re-open it: the edit box and the text inside it are
+within **0.5 px** of the drawn text; export: the text's baseline equals its original baseline plus the move.
+
+**Guardrails:** do not change how moves are saved (`dx` / `dy`, base positions), the exported positions, cover
+geometry, bullet-list layout, snapping (Task 10L) or the Task 44 first-open behaviour; no new dependencies.
+
+**Verify (user):** on the résumé, drag the name 1 cm down → Done → it stays; open it again → the box sits exactly on
+the name; drag again → Done → it stays. Repeat on a paragraph, a bullet list, the big "ZIRO FESTIVAL" title of the
+Firgun PDF at 150% zoom, and a box made with Add text. Export → every text is where it was on screen.
+
+**Known limits / not in this task:** in the Claude test browser some texts also open 8–10 px to the left of where
+they are printed (Firgun page 2 paragraph, the résumé name) and export there; the user's Chrome did not show it
+(0.7 px), so it looks specific to that browser's font measuring — note it, don't fix it here.
+
+**Land:** merge `steady-text-box` → `main`. Commit: `Fix: moved text stays put on Done and re-open (Task 64)`.
+
+**Review of the Task 64 build (2026-09-13):** code read — `editorTopCorrection` used in both `OverlayLayer.tsx` call
+sites (text blocks and bullet lists), `editorFirstLineOffsetPx` on the editor content, and the Add Text first-line
+fix in `buildFreeTextEdits` / `freeTextBoxRect`. The user confirmed moved text now stays where it is dropped. Bullet
+lists that the app recognises carry their dots along: on the sample résumé the HR Intern list moved 60 px right twice
+→ stamped dots 116.6 → 176.6 px, text 128.4 → 188.4 px, every dot level with its item's first line. Full checks and
+the Part D measurements are run at the final review, together with Rev 1.
+**Found (not caused by Task 64):** in the user's own résumé `Rahul Resume.pdf.pdf`, moving the HR Intern or Wanderon
+list leaves the dots behind and they stop lining up with the items. Those lists are **not recognised as bullet
+lists**, so they open as plain paragraphs. The page has no image dots and no bullet characters: **each dot is a small
+filled vector circle** — a `constructPath` of 18 segments (curves) followed by `fill`, drawn just left of each item's
+first line (Wanderon list: dots at x 59.7, y 304.7 / 276.2 / 247.6 / 219.1; item text at x 68.2, first baselines
+301.7 / 273.2 / 244.6 …). `detectBulletListFromRegions` only knows image markers (`detectBulletMarkers` over
+`detectImages` regions) and text markers (`TEXT_BULLET_CHARACTERS`). pdf.js 4.10 also reports these curves' `minMax`
+bounding box as 0 × 0, so a check based on it finds nothing. Other versions of the same résumé
+(`Rahul Resume.pdf (1).pdf`, the sample) use 3 × 3 pt image dots and work.
+
+#### Task 64 — Revision 1  ✅ DONE by Codex, reviewed — bullet dots drawn as shapes are recognised, so they move with their list   *(Easy–Medium · half a day)*
+
+Parts A → D in order. Run the touched test files after each part.
+
+**Part A — Find small drawn dots.** New `src/lib/pdf/shapeMarkers.ts` → `shapeMarkerRegionsFromOperatorList(operatorList,
+viewport, pageIndex): ImageRegion[]` (+ an async `detectShapeMarkers(page, pageIndex)` wrapper), reusing the
+graphics-state walk that `imageDrawsFromOperatorList` in `src/lib/pdf/images.ts` already does (`save` / `restore` /
+`transform` / Form XObject matrices):
+1. Look at every `constructPath` that is **filled** — the next painting operator is `fill`, `eoFill`, `fillStroke` or
+   `eoFillStroke`. Ignore stroke-only paths and clipping paths (`clip` / `eoClip` followed by `endPath`).
+2. Measure the shape from the **path's own coordinates** (every point, including curve control points), transformed
+   by the current matrix and converted to PDF points exactly like image regions. Do **not** use pdf.js's `minMax`
+   argument — it is 0 × 0 for these curves.
+3. Keep only small, roughly square shapes — the same limits `markerDistance` applies to image dots: 1–7 pt on the long
+   side, aspect ratio 0.65–1.55. Anything bigger (backgrounds, icons, rules) is not a candidate.
+4. Return them as `ImageRegion`s in the same coordinate space as `detectImages`, so `markerDistance` and
+   `detectBulletMarkers` work unchanged. Fetch the operator list once and share it with image detection — pdf.js
+   caches it, but do not add a second walk per click.
+
+**Part B — Use them for lists.**
+1. Marker precedence per block: **image dots → drawn-shape dots → text characters**. Today's
+   `detectBulletListFromRegions` tries image markers, then text markers; add the shape-marker try in between (keep
+   image lists exactly as they are when both exist).
+2. For shape markers, measure `bulletSizePt` like image markers (`Math.max(w, h)`); `bulletX`, item grouping, spacing
+   and `coverRect` (which already includes every marker rect, so the drawn dots get covered) stay as they are.
+3. Make sure `OverlayLayer.tsx` builds bullet lists from image **and** shape regions for every page, including pages
+   that render later when scrolled into view.
+
+**Part C — Tests.**
+- `shapeMarkers.test.ts`: a generated PDF with three filled circles (pdf-lib `drawCircle` / `drawEllipse` produce
+  Bézier paths) left of three text lines → three regions of the right size and position; a stroked circle, a big
+  filled rectangle and a clip rectangle → ignored; a small circle inside a Form XObject with a `Matrix` → positioned
+  correctly.
+- `bulletList.test.ts`: a block + shape regions → a list with the right items and `bulletSizePt`; when image and shape
+  markers both match, the image list wins; existing image- and text-marker tests unchanged.
+- A component or integration test: a list with drawn-circle dots shows **Bullet list actions**, and moving it produces
+  stamped `•` edits at the moved `x` plus a cover over the original dots.
+
+**Part D — Check it live** (Claude keeps the user's file at `tmp/bullets/Rahul_Resume.pdf.pdf`, gitignored; ask if you
+need it). Both lists on page 1 are recognised — HR Intern with 5 items, Wanderon with 4. Move each list about 1 cm right
+and 1 cm up → every dot follows its item's first line (within 1 pt) and no original dot stays visible; export → the
+dots are at the moved positions. The sample résumé (`public/samples/RAHUL RAJPUT RESUME.pdf`) still recognises and
+moves its image-dot lists exactly as before.
+
+**Guardrails:** do not change the image- or text-marker rules or their results on files that work today; only small
+filled shapes become candidates; do not touch Task 64's positioning; no new dependencies.
+
+**Verify (user):** open `Rahul Resume.pdf.pdf` → **Edit text** → click the Wanderon list → the whole list, dots
+included, highlights as one list → **Edit** → drag it right and up → **Done** → the dots move with their items and
+stay level with each first line. Same for the HR Intern list. Export → the PDF matches the screen.
+
+**Known limits:** markers that are dashes, arrows, checkmark icons, numbers or letters are still not recognised; the
+re-drawn dots are the standard round `•`, so an original square dot comes back round.
+
+**Land:** together with Task 64 in one commit, `Fix: moved text stays put on Done and re-open (Task 64)`.
+
+**Review of Task 64 + Rev 1 (2026-09-14):** accepted. typecheck / lint / build green, 991 tests. Code: `shapeMarkers.ts`
+finds small **filled** paths from their own points (outlines and clipping paths ignored, 1–7 pt, aspect 0.65–1.55)
+over the graphics-state walk now shared with `images.ts`, one operator-list fetch per page; list detection tries
+image dots → drawn dots → text characters, so files that worked before are unchanged. Live:
+- **Moved text stays put** (sample résumé name, keyboard move, then Done, then re-open and move again):
+
+| Zoom | Jump on Done | Re-opened box vs drawn text | Before the fix |
+|---|---|---|---|
+| 100% | −0.1 px | +0.1 px | −3.3 px / +15.4 px |
+| 150% | +0.2 px | −0.2 px | — |
+
+- **Drawn-circle bullets** (the user's `Rahul Resume.pdf.pdf`): all 3 lists are now recognised (HR Intern, Wanderon,
+  certificates; none before). HR Intern and Wanderon moved 40 px right and 40 px up → all 9 stamped dots moved exactly
+  40 px and sit within 0.2 px of their item's first line. Export: the original dots are covered (0% dark pixels at
+  their old spots) and the new dots are 40 pt to the right beside their items.
+- **Noted, not fixed (from Task 10H's list re-layout, not this task):** a moved list's items come out 27 pt apart
+  instead of the original 28.5 pt (≈5% tighter).
+- **Suggested next (not approved):** "More list styles" — (A) redraw a moved list with its **original** marker instead
+  of the hard-coded `•` in `buildTextEdits.ts` (also fixes square dots coming back round); (B) arrow and other symbol
+  characters (➢ ➤ ► → ✓ ■ ◆) as markers; (C) numbered and lettered lists (1. / 1) / a. / i.) with automatic
+  renumbering and number-width alignment; later, drawn or picture arrows copied as they are.

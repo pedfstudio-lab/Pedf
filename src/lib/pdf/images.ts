@@ -35,15 +35,21 @@ export interface OperatorListLike {
   readonly argsArray: readonly unknown[];
 }
 
-type Matrix = readonly [number, number, number, number, number, number];
+export type GraphicsMatrix = readonly [number, number, number, number, number, number];
 
-function matrix(value: unknown): Matrix | undefined {
+export type GraphicsStateVisitor = (
+  operation: number,
+  args: readonly unknown[],
+  transform: GraphicsMatrix,
+) => void;
+
+function matrix(value: unknown): GraphicsMatrix | undefined {
   if (!Array.isArray(value) && !ArrayBuffer.isView(value)) return undefined;
   const values = Array.from(value as ArrayLike<unknown>);
   if (values.length !== 6 || values.some((item) => typeof item !== 'number' || !Number.isFinite(item))) {
     return undefined;
   }
-  return values as unknown as Matrix;
+  return values as unknown as GraphicsMatrix;
 }
 
 function numberValues(value: unknown): number[] | undefined {
@@ -57,7 +63,7 @@ function numberValues(value: unknown): number[] | undefined {
 }
 
 /** PDF/canvas affine multiplication: applying `right` inside the current `left` transform. */
-function multiply(left: Matrix, right: Matrix): Matrix {
+function multiply(left: GraphicsMatrix, right: GraphicsMatrix): GraphicsMatrix {
   return [
     left[0] * right[0] + left[2] * right[1],
     left[1] * right[0] + left[3] * right[1],
@@ -68,19 +74,23 @@ function multiply(left: Matrix, right: Matrix): Matrix {
   ];
 }
 
-function point(transform: Matrix, x: number, y: number): { readonly x: number; readonly y: number } {
+export function transformGraphicsPoint(
+  transform: GraphicsMatrix,
+  x: number,
+  y: number,
+): { readonly x: number; readonly y: number } {
   return {
     x: transform[0] * x + transform[2] * y + transform[4],
     y: transform[1] * x + transform[3] * y + transform[5],
   };
 }
 
-function imageRect(transform: Matrix, viewport: PageViewport): PdfRect {
+function imageRect(transform: GraphicsMatrix, viewport: PageViewport): PdfRect {
   const corners = [
-    point(transform, 0, 0),
-    point(transform, 1, 0),
-    point(transform, 0, 1),
-    point(transform, 1, 1),
+    transformGraphicsPoint(transform, 0, 0),
+    transformGraphicsPoint(transform, 1, 0),
+    transformGraphicsPoint(transform, 0, 1),
+    transformGraphicsPoint(transform, 1, 1),
   ];
   const left = Math.min(...corners.map((corner) => corner.x));
   const top = Math.min(...corners.map((corner) => corner.y));
@@ -91,6 +101,41 @@ function imageRect(transform: Matrix, viewport: PageViewport): PdfRect {
     viewport,
     1,
   );
+}
+
+/** Walk a flattened PDF.js operator list while reproducing its graphics-state CTM. */
+export function walkOperatorListGraphicsState(
+  operatorList: OperatorListLike,
+  viewport: PageViewport,
+  visit: GraphicsStateVisitor,
+): void {
+  const viewportMatrix = matrix(viewport.transform);
+  if (!viewportMatrix) throw new Error('PDF viewport has an invalid transform');
+  let current = viewportMatrix;
+  const stack: GraphicsMatrix[] = [];
+
+  for (let index = 0; index < operatorList.fnArray.length; index += 1) {
+    const operation = operatorList.fnArray[index];
+    if (operation === undefined) continue;
+    const rawArgs = operatorList.argsArray[index];
+    const args = Array.isArray(rawArgs) ? rawArgs : [];
+    if (operation === OPS.save) {
+      stack.push(current);
+    } else if (operation === OPS.restore) {
+      current = stack.pop() ?? current;
+    } else if (operation === OPS.transform) {
+      const next = matrix(args);
+      if (next) current = multiply(current, next);
+    } else if (operation === OPS.paintFormXObjectBegin) {
+      stack.push(current);
+      const formMatrix = matrix(args[0]);
+      if (formMatrix) current = multiply(current, formMatrix);
+    } else if (operation === OPS.paintFormXObjectEnd) {
+      current = stack.pop() ?? current;
+    } else {
+      visit(operation, args, current);
+    }
+  }
 }
 
 function sameRect(left: PdfRect, right: PdfRect): boolean {
@@ -171,13 +216,9 @@ export function imageDrawsFromOperatorList(
   viewport: PageViewport,
   pageIndex: number,
 ): DrawnImage[] {
-  const viewportMatrix = matrix(viewport.transform);
-  if (!viewportMatrix) throw new Error('PDF viewport has an invalid transform');
-  let current = viewportMatrix;
-  const stack: Matrix[] = [];
   const draws: DrawnImage[] = [];
 
-  const add = (transform: Matrix, kind: DrawnImage['kind'], objectId?: unknown) => {
+  const add = (transform: GraphicsMatrix, kind: DrawnImage['kind'], objectId?: unknown) => {
     const rect = imageRect(transform, viewport);
     if (rect.w <= 0.1 || rect.h <= 0.1) return;
     draws.push({
@@ -188,29 +229,18 @@ export function imageDrawsFromOperatorList(
       kind,
     });
   };
-  const addNested = (nested: unknown, kind: DrawnImage['kind'], objectId?: unknown) => {
+  const addNested = (
+    current: GraphicsMatrix,
+    nested: unknown,
+    kind: DrawnImage['kind'],
+    objectId?: unknown,
+  ) => {
     const nestedMatrix = matrix(nested);
     if (nestedMatrix) add(multiply(current, nestedMatrix), kind, objectId);
   };
 
-  for (let index = 0; index < operatorList.fnArray.length; index += 1) {
-    const operation = operatorList.fnArray[index];
-    const rawArgs = operatorList.argsArray[index];
-    const args = Array.isArray(rawArgs) ? rawArgs : [];
-    if (operation === OPS.save) {
-      stack.push(current);
-    } else if (operation === OPS.restore) {
-      current = stack.pop() ?? current;
-    } else if (operation === OPS.transform) {
-      const next = matrix(args);
-      if (next) current = multiply(current, next);
-    } else if (operation === OPS.paintFormXObjectBegin) {
-      stack.push(current);
-      const formMatrix = matrix(args[0]);
-      if (formMatrix) current = multiply(current, formMatrix);
-    } else if (operation === OPS.paintFormXObjectEnd) {
-      current = stack.pop() ?? current;
-    } else if (operation === OPS.paintImageXObject) {
+  walkOperatorListGraphicsState(operatorList, viewport, (operation, args, current) => {
+    if (operation === OPS.paintImageXObject) {
       add(current, 'image', args[0]);
     } else if (operation === OPS.paintInlineImageXObject) {
       add(current, 'inline');
@@ -222,7 +252,12 @@ export function imageDrawsFromOperatorList(
       const values = numberValues(args[3]);
       if (Number.isFinite(scaleX) && Number.isFinite(scaleY) && values) {
         for (let offset = 0; offset + 1 < values.length; offset += 2) {
-          addNested([scaleX, 0, 0, scaleY, values[offset] ?? 0, values[offset + 1] ?? 0], 'image', args[0]);
+          addNested(
+            current,
+            [scaleX, 0, 0, scaleY, values[offset] ?? 0, values[offset + 1] ?? 0],
+            'image',
+            args[0],
+          );
         }
       }
     } else if (operation === OPS.paintImageMaskXObjectRepeat) {
@@ -233,24 +268,33 @@ export function imageDrawsFromOperatorList(
       const values = numberValues(args[5]);
       if ([scaleX, skewX, skewY, scaleY].every(Number.isFinite) && values) {
         for (let offset = 0; offset + 1 < values.length; offset += 2) {
-          addNested([
-            scaleX,
-            skewY,
-            skewX,
-            scaleY,
-            values[offset] ?? 0,
-            values[offset + 1] ?? 0,
-          ], 'mask', args[0]);
+          addNested(
+            current,
+            [
+              scaleX,
+              skewY,
+              skewX,
+              scaleY,
+              values[offset] ?? 0,
+              values[offset + 1] ?? 0,
+            ],
+            'mask',
+            args[0],
+          );
         }
       }
     } else if (operation === OPS.paintInlineImageXObjectGroup) {
       const entries = Array.isArray(args[1]) ? args[1] : [];
-      for (const entry of entries) addNested((entry as { transform?: unknown }).transform, 'inline');
+      for (const entry of entries) {
+        addNested(current, (entry as { transform?: unknown }).transform, 'inline');
+      }
     } else if (operation === OPS.paintImageMaskXObjectGroup) {
       const entries = Array.isArray(args[0]) ? args[0] : [];
-      for (const entry of entries) addNested((entry as { transform?: unknown }).transform, 'mask');
+      for (const entry of entries) {
+        addNested(current, (entry as { transform?: unknown }).transform, 'mask');
+      }
     }
-  }
+  });
   return draws;
 }
 
