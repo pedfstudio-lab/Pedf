@@ -8953,7 +8953,7 @@ image dots → drawn dots → text characters, so files that worked before are u
   characters (➢ ➤ ► → ✓ ■ ◆) as markers; (C) numbered and lettered lists (1. / 1) / a. / i.) with automatic
   renumbering and number-width alignment; later, drawn or picture arrows copied as they are.
 
-### Task 65 — Save progress on this device (autosave + "Continue editing")  ✅ DONE, reviewed → branch `save-progress` (includes Rev 1, 1a, 2)   *(Medium · 2–3 days)*
+### Task 65 — Save progress on this device (autosave + "Continue editing")  ✅ MERGED to `main` (`e7e5f50`, 2026-09-15; includes Save & close, Rev 1, 1a, 2; branch `save-progress` deleted)   *(Medium · 2–3 days)*
 
 **What the user gets:** in the editor, every change is saved **on this device** automatically, and a **Save** button
 saves right away. If the laptop shuts down, the browser crashes or the tab is closed, nothing is lost. When the user
@@ -9083,7 +9083,7 @@ this device — continue editing anytime." and the Continue card; a failed save 
 on this device" → Keep editing / Close without saving / Export PDF. **Ctrl/Cmd+S** saves without closing and briefly
 shows "All changes saved on this device". `saveNow()` returns the real outcome. Verified live on `127.0.0.1:5173`.
 
-#### Task 65 — Revision 1  ✅ DONE by Codex, reviewed 2026-09-14 (fixes in Rev 1a) — save only files that were changed, keep up to 10   *(Easy–Medium · half a day)*
+#### Task 65 — Revision 1  ✅ DONE by Codex, reviewed and merged in `e7e5f50` — save only files that were changed, keep up to 10   *(Easy–Medium · half a day)*
 
 **Starting point:** the branch already has **Save & close** (done by Claude, 2026-09-14, user: "do it yourself"): the
 toolbar button saves every change (finishing an open text box first) and closes the file to the start screen with
@@ -9203,7 +9203,7 @@ to save", Save & close "No changes to save — closed Rahul_Resume.pdf." and not
 "Saved on this device · just now" about 1 s later → Save & close → in the card → Continue → 2 pages, Undo works.
 Two problems found — Rev 1a.
 
-#### Task 65 — Revision 1a  ✅ DONE by Codex, reviewed — never close with an unsaved change; honest pages and changes on the card   *(Easy–Medium · half a day)*
+#### Task 65 — Revision 1a  ✅ DONE by Codex, reviewed and merged in `e7e5f50` — never close with an unsaved change; honest pages and changes on the card   *(Easy–Medium · half a day)*
 
 Parts A → C in order. Run the touched test files after each part.
 
@@ -9314,7 +9314,7 @@ late create from being adopted by a replacement file. `versionedHistoryReducer` 
 a change made during Save & close's own final write is not re-checked, and right after a first save one redundant
 `saveState` can follow.
 
-#### Task 65 — Revision 2  ✅ DONE by Codex, reviewed (one visual fix by Claude) — Saved files column on the start screen and while editing   *(Medium · 1 day)*
+#### Task 65 — Revision 2  ✅ DONE by Codex, reviewed and merged in `e7e5f50` (one visual fix by Claude) — Saved files column on the start screen and while editing   *(Medium · 1 day)*
 
 **What the user gets:** in the editor (`/app`) a **Saved files** column on the left lists every file saved on this
 device. Clicking a file opens it on the page where the user left it, with all its edits. The column is there on the
