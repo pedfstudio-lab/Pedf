@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import { HoldToPeek } from './HoldToPeek';
 import { ZOOM_MAX, ZOOM_MIN } from '@/lib/pdf/zoom';
 import { useEdits } from '@/state/editsStore';
+import type { SaveStatus } from '@/lib/projects/useProjectAutosave';
+import { savedAgo } from '@/lib/projects/savedTime';
 
 interface ToolbarProps {
   onOpen: (file: File) => void;
@@ -10,6 +13,11 @@ interface ToolbarProps {
   imageMode: boolean;
   hasEdits: boolean;
   exporting: boolean;
+  saveStatus: SaveStatus;
+  savedAt?: number;
+  savedFilesOpen: boolean;
+  /** Brief Ctrl/Cmd+S result shown in place of the quiet autosave status. */
+  saveNotice?: 'saved' | 'no-changes';
   zoom: number;
   zoomIn(): void;
   zoomOut(): void;
@@ -20,9 +28,17 @@ interface ToolbarProps {
   onOpenSign(): void;
   onOpenChat(): void;
   onOpenSettings(): void;
+  onToggleSavedFiles(): void;
   onPeekChange(peeking: boolean): void;
   onExport(): void;
+  /** Ctrl/Cmd+S: save now and keep the file open. */
+  onSave(): void;
+  /** The Save & close button: save every change, then close the file. */
+  onSaveAndClose(): void;
 }
+
+const SAVE_TOOLTIP = 'Saved only in this browser on this device. Clearing browser data removes it.';
+const SAVE_AND_CLOSE_TOOLTIP = 'Save every change on this device and close the file. Ctrl+S saves without closing.';
 
 export function Toolbar({
   onOpen,
@@ -32,6 +48,10 @@ export function Toolbar({
   imageMode,
   hasEdits,
   exporting,
+  saveStatus,
+  savedAt,
+  savedFilesOpen,
+  saveNotice,
   zoom,
   zoomIn,
   zoomOut,
@@ -42,10 +62,49 @@ export function Toolbar({
   onOpenSign,
   onOpenChat,
   onOpenSettings,
+  onToggleSavedFiles,
   onPeekChange,
   onExport,
+  onSave,
+  onSaveAndClose,
 }: ToolbarProps) {
   const { undo, redo, canUndo, canRedo } = useEdits();
+  const [, refreshSavedTime] = useState(0);
+
+  useEffect(() => {
+    if (saveStatus !== 'saved' || !savedAt) return;
+    const timer = window.setInterval(() => refreshSavedTime((value) => value + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, [saveStatus, savedAt]);
+
+  useEffect(() => {
+    const saveShortcut = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || event.altKey
+        || (!event.ctrlKey && !event.metaKey)
+        || event.key.toLowerCase() !== 's'
+      ) return;
+      event.preventDefault();
+      if (fileName) onSave();
+    };
+    window.addEventListener('keydown', saveShortcut);
+    return () => window.removeEventListener('keydown', saveShortcut);
+  }, [fileName, onSave]);
+
+  const statusText = saveNotice === 'saved'
+    ? 'All changes saved on this device'
+    : saveNotice === 'no-changes'
+      ? 'No changes to save'
+      : saveStatus === 'saving'
+        ? 'Saving…'
+        : saveStatus === 'saved' && savedAt
+      ? `Saved on this device · ${savedAgo(savedAt)}`
+      : saveStatus === 'full'
+        ? "Couldn't save — not enough space on this device. Export your PDF to keep your work."
+        : saveStatus === 'unavailable'
+          ? "Can't save on this device"
+          : '';
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
@@ -56,6 +115,14 @@ export function Toolbar({
         </span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={savedFilesOpen}
+          onClick={onToggleSavedFiles}
+          className="whitespace-nowrap rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+        >
+          Saved files
+        </button>
         <button
           type="button"
           onClick={undo}
@@ -162,6 +229,24 @@ export function Toolbar({
           className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
         >
           ⚙ Settings
+        </button>
+        {statusText && (
+          <span
+            role="status"
+            title={SAVE_TOOLTIP}
+            className={`max-w-56 text-right text-xs ${saveStatus === 'full' || saveStatus === 'unavailable' ? 'font-semibold text-red-700' : 'text-neutral-500'}`}
+          >
+            {statusText}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onSaveAndClose}
+          disabled={!fileName || saveStatus === 'saving'}
+          title={SAVE_AND_CLOSE_TOOLTIP}
+          className="whitespace-nowrap rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Save &amp; close
         </button>
         <button
           type="button"

@@ -5,7 +5,9 @@ import {
   EMPTY_HISTORY,
   HISTORY_LIMIT,
   historyReducer,
+  versionedHistoryReducer,
 } from './editsStore';
+import type { VersionedHistory } from './editsStore';
 
 function coverEdit(id: string, pageIndex = 0): Edit {
   return {
@@ -18,12 +20,35 @@ function coverEdit(id: string, pageIndex = 0): Edit {
   };
 }
 
+function textEdit(id: string): Edit {
+  return {
+    id,
+    kind: 'text',
+    pageIndex: 0,
+    rect: { x: 10, y: 20, w: 100, h: 20 },
+    z: 2,
+    text: 'Heading',
+    style: {
+      fontName: 'Helvetica',
+      fontSizePt: 12,
+      bold: false,
+      italic: false,
+      color: { r: 0, g: 0, b: 0 },
+    },
+  };
+}
+
 const plan: PagePlan = [
   { id: 'page-0', kind: 'source', sourceIndex: 0 },
   { id: 'page-1', kind: 'source', sourceIndex: 1 },
 ];
 
 const freshHistory = () => historyReducer(EMPTY_HISTORY, { type: 'reset-document', plan });
+
+const freshVersioned = (): VersionedHistory => versionedHistoryReducer(
+  { history: EMPTY_HISTORY, revision: 0, changeCount: 0 },
+  { type: 'reset-document', plan },
+);
 
 describe('historyReducer', () => {
   it('undoes and redoes an added edit without changing the page plan', () => {
@@ -192,6 +217,23 @@ describe('historyReducer', () => {
     });
   });
 
+  it('restores a complete saved history without adding another undo step', () => {
+    const saved = historyReducer(
+      historyReducer(freshHistory(), { type: 'add', edits: [coverEdit('saved')] }),
+      { type: 'undo' },
+    );
+    const current = historyReducer(freshHistory(), { type: 'add', edits: [coverEdit('discarded')] });
+    const restored = historyReducer(current, {
+      type: 'restore-document',
+      history: saved,
+      changeCount: 0,
+    });
+
+    expect(restored).toBe(saved);
+    expect(restored.present.edits).toEqual([]);
+    expect(restored.future[0]?.edits.map(({ id }) => id)).toEqual(['saved']);
+  });
+
   it('caps retained history snapshots at the configured limit', () => {
     let state = freshHistory();
     for (let index = 0; index < HISTORY_LIMIT + 5; index += 1) {
@@ -203,5 +245,70 @@ describe('historyReducer', () => {
       state = historyReducer(state, { type: 'undo' });
     }
     expect(state.present.edits).toHaveLength(5);
+  });
+});
+
+describe('versionedHistoryReducer changeCount', () => {
+  it('counts a compound text replacement as one user action', () => {
+    const state = versionedHistoryReducer(freshVersioned(), {
+      type: 'add',
+      edits: [coverEdit('cover'), textEdit('text')],
+    });
+
+    expect(state.changeCount).toBe(1);
+    expect(state.history.present.edits).toHaveLength(2);
+  });
+
+  it('tracks page actions, Undo, Redo, and a new branch after Undo', () => {
+    let state = freshVersioned();
+    state = versionedHistoryReducer(state, { type: 'duplicate-page', position: 0, seed: 'first' });
+    state = versionedHistoryReducer(state, { type: 'duplicate-page', position: 0, seed: 'second' });
+    expect(state.changeCount).toBe(2);
+
+    const undone = versionedHistoryReducer(state, { type: 'undo' });
+    expect(undone.changeCount).toBe(1);
+    const redone = versionedHistoryReducer(undone, { type: 'redo' });
+    expect(redone.changeCount).toBe(2);
+
+    const branched = versionedHistoryReducer(undone, {
+      type: 'insert-blank-page',
+      position: 0,
+      size: { widthPt: 300, heightPt: 400 },
+      seed: 'branch',
+    });
+    expect(branched.changeCount).toBe(2);
+    expect(branched.history.future).toEqual([]);
+  });
+
+  it('keeps the lifetime count when in-memory history is trimmed', () => {
+    let state = freshVersioned();
+    for (let index = 0; index < 120; index += 1) {
+      state = versionedHistoryReducer(state, { type: 'add', edits: [coverEdit(String(index))] });
+    }
+
+    expect(state.history.past).toHaveLength(HISTORY_LIMIT);
+    expect(state.changeCount).toBe(120);
+  });
+
+  it('restores the saved count independently of retained history and decrements on Undo', () => {
+    const saved = historyReducer(freshHistory(), { type: 'add', edits: [coverEdit('saved')] });
+    let state = versionedHistoryReducer(freshVersioned(), {
+      type: 'restore-document',
+      history: saved,
+      changeCount: 28,
+    });
+    expect(state.changeCount).toBe(28);
+
+    state = versionedHistoryReducer(state, { type: 'undo' });
+    expect(state.changeCount).toBe(27);
+  });
+
+  it('resets the count for a new document and Reset edits', () => {
+    const changed = versionedHistoryReducer(freshVersioned(), {
+      type: 'add',
+      edits: [coverEdit('changed')],
+    });
+    expect(versionedHistoryReducer(changed, { type: 'reset-document', plan }).changeCount).toBe(0);
+    expect(versionedHistoryReducer(changed, { type: 'reset-edits' }).changeCount).toBe(0);
   });
 });

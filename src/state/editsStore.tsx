@@ -51,11 +51,16 @@ export const HISTORY_LIMIT = 100;
 export const EMPTY_PRESENT: DocPresent = { edits: [], plan: [] };
 export const EMPTY_HISTORY: HistoryState = { past: [], present: EMPTY_PRESENT, future: [] };
 
-type HistoryAction = EditAction
+export type HistoryAction = EditAction
   | { readonly type: 'undo' }
   | { readonly type: 'redo' }
   | { readonly type: 'reset-edits' }
   | { readonly type: 'reset-document'; readonly plan: PagePlan }
+  | {
+      readonly type: 'restore-document';
+      readonly history: HistoryState;
+      readonly changeCount: number;
+    }
   | { readonly type: 'delete-page'; readonly position: number }
   | { readonly type: 'duplicate-page'; readonly position: number; readonly seed: string }
   | {
@@ -101,6 +106,8 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
     }
     case 'reset-document':
       return { past: [], present: { edits: [], plan: action.plan }, future: [] };
+    case 'restore-document':
+      return action.history;
     case 'reset-edits':
       return { past: [], present: { edits: [], plan: state.present.plan }, future: [] };
     case 'delete-page': {
@@ -149,12 +156,16 @@ function operationSeed(): string {
 interface EditsStoreValue {
   readonly edits: readonly Edit[];
   readonly pagePlan: PagePlan;
+  readonly history: HistoryState;
+  readonly revision: number;
+  readonly changeCount: number;
   addEdits(edits: readonly Edit[]): void;
   updateEdit(edit: Edit): void;
   removeEdit(id: string): void;
   replaceEdits(removeIds: readonly string[], edits: readonly Edit[]): void;
   resetEdits(): void;
   resetDocument(plan: PagePlan): void;
+  restoreDocument(history: HistoryState, changeCount: number): void;
   deletePage(position: number): void;
   duplicatePage(position: number): void;
   insertBlankPage(
@@ -169,8 +180,48 @@ interface EditsStoreValue {
 
 const EditsStoreContext = createContext<EditsStoreValue | null>(null);
 
+export interface VersionedHistory {
+  readonly history: HistoryState;
+  readonly revision: number;
+  readonly changeCount: number;
+}
+
+export function versionedHistoryReducer(
+  state: VersionedHistory,
+  action: HistoryAction,
+): VersionedHistory {
+  const history = historyReducer(state.history, action);
+  if (history === state.history) return state;
+  let changeCount: number;
+  switch (action.type) {
+    case 'reset-document':
+    case 'reset-edits':
+      changeCount = 0;
+      break;
+    case 'restore-document':
+      changeCount = Number.isFinite(action.changeCount) && action.changeCount >= 0
+        ? Math.floor(action.changeCount)
+        : 0;
+      break;
+    case 'undo':
+      changeCount = Math.max(0, state.changeCount - 1);
+      break;
+    case 'redo':
+      changeCount = state.changeCount + 1;
+      break;
+    default:
+      changeCount = state.changeCount + 1;
+  }
+  return { history, revision: state.revision + 1, changeCount };
+}
+
 export function EditsStoreProvider({ children }: { readonly children: ReactNode }) {
-  const [history, dispatch] = useReducer(historyReducer, EMPTY_HISTORY);
+  const [state, dispatch] = useReducer(versionedHistoryReducer, {
+    history: EMPTY_HISTORY,
+    revision: 0,
+    changeCount: 0,
+  });
+  const { history } = state;
   const addEdits = useCallback((next: readonly Edit[]) => dispatch({ type: 'add', edits: next }), []);
   const updateEdit = useCallback((edit: Edit) => dispatch({ type: 'update', edit }), []);
   const removeEdit = useCallback((id: string) => dispatch({ type: 'remove', id }), []);
@@ -182,6 +233,14 @@ export function EditsStoreProvider({ children }: { readonly children: ReactNode 
   const resetEdits = useCallback(() => dispatch({ type: 'reset-edits' }), []);
   const resetDocument = useCallback(
     (plan: PagePlan) => dispatch({ type: 'reset-document', plan }),
+    [],
+  );
+  const restoreDocument = useCallback(
+    (next: HistoryState, changeCount: number) => dispatch({
+      type: 'restore-document',
+      history: next,
+      changeCount,
+    }),
     [],
   );
   const deletePage = useCallback(
@@ -203,12 +262,16 @@ export function EditsStoreProvider({ children }: { readonly children: ReactNode 
     () => ({
       edits: history.present.edits,
       pagePlan: history.present.plan,
+      history,
+      revision: state.revision,
+      changeCount: state.changeCount,
       addEdits,
       updateEdit,
       removeEdit,
       replaceEdits,
       resetEdits,
       resetDocument,
+      restoreDocument,
       deletePage,
       duplicatePage,
       insertBlankPage,
@@ -228,6 +291,9 @@ export function EditsStoreProvider({ children }: { readonly children: ReactNode 
       replaceEdits,
       resetDocument,
       resetEdits,
+      restoreDocument,
+      state.revision,
+      state.changeCount,
       undo,
       updateEdit,
     ],

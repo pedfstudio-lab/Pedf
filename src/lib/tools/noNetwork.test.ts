@@ -11,7 +11,11 @@ function sources(folder: string): string[] {
 
 describe('local tools privacy guard', () => {
   it('keeps network APIs out of tool processing and UI source', () => {
-    const files = [...sources(resolve('src/lib/tools')), ...sources(resolve('src/components/tools'))];
+    const files = [
+      ...sources(resolve('src/lib/tools')),
+      ...sources(resolve('src/components/tools')),
+      ...sources(resolve('src/lib/projects')),
+    ];
     expect(files.length).toBeGreaterThan(0);
     const forbidden = /\bfetch\s*\(|\bXMLHttpRequest\b|\bnavigator\s*\.\s*sendBeacon\b/;
     const violations = files.filter((file) => forbidden.test(readFileSync(file, 'utf8')));

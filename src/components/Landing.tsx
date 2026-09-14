@@ -1,7 +1,9 @@
-import { setPendingFile } from '@/lib/site/pendingFile';
+import { setPendingFile, setPendingProject } from '@/lib/site/pendingFile';
 import { navigate } from '@/lib/site/navigate';
 import { siteHref } from '@/lib/site/config';
+import type { ProjectStore } from '@/lib/projects/projectStore';
 import { SiteFooter, SiteHeader } from './SiteChrome';
+import { ContinueEditingCard } from './ContinueEditingCard';
 import { PdfDropZone } from './PdfDropZone';
 import './landing.css';
 
@@ -17,14 +19,19 @@ const faqs = [
   ['Do I need an account?', 'No. Open the page and start with a PDF.'],
   ['Does it work offline?', 'Editing works offline once the page is open. Voice and chat need an internet connection.'],
   ['Which languages are supported?', 'English, Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, and Punjabi.'],
-  ['Where is my file stored?', 'Nowhere. It stays in your browser, and you download the edited copy when you are ready.'],
+  ['Where is my file stored?', 'Your PDF and saved edits stay only in this browser on this device. You download the edited copy when you are ready.'],
   ['What does voice need?', 'A Sarvam API key in Settings until our managed proxy goes live.'],
 ] as const;
 
-export function Landing() {
+export function Landing({ projectStore }: { readonly projectStore?: ProjectStore } = {}) {
   const openFile = (file: File) => {
     setPendingFile(file);
     navigate('/app');
+  };
+  const continueProject = (id: string) => {
+    setPendingProject(id);
+    navigate('/app');
+    return true;
   };
 
   return (
@@ -36,6 +43,7 @@ export function Landing() {
             <p className="site-eyebrow">Your PDF, finally editable</p>
             <h1 id="hero-title"><span>Read it. </span><span className="hero__blue">Ask it. </span><span>Edit it.</span></h1>
             <p className="hero__lede">Type or talk to understand any PDF, then edit the text and images. Runs on your computer.</p>
+            <ContinueEditingCard store={projectStore} onContinue={continueProject} />
             <PdfDropZone onFile={openFile} />
           </div>
 

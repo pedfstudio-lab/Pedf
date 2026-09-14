@@ -8952,3 +8952,509 @@ image dots → drawn dots → text characters, so files that worked before are u
   of the hard-coded `•` in `buildTextEdits.ts` (also fixes square dots coming back round); (B) arrow and other symbol
   characters (➢ ➤ ► → ✓ ■ ◆) as markers; (C) numbered and lettered lists (1. / 1) / a. / i.) with automatic
   renumbering and number-width alignment; later, drawn or picture arrows copied as they are.
+
+### Task 65 — Save progress on this device (autosave + "Continue editing")  ✅ DONE, reviewed → branch `save-progress` (includes Rev 1, 1a, 2)   *(Medium · 2–3 days)*
+
+**What the user gets:** in the editor, every change is saved **on this device** automatically, and a **Save** button
+saves right away. If the laptop shuts down, the browser crashes or the tab is closed, nothing is lost. When the user
+comes back to the site they see:
+
+> **Continue editing *Contract.pdf*?**
+> Saved 12 minutes ago · page 13 of 100 · 27 changes
+> **[ Continue editing ]**   — or drag a new PDF here —   *Delete saved file*
+
+**Continue editing** opens the same PDF with every edit in place, on the page they were on, at the same zoom, with
+Undo still working. Dropping a new PDF opens that file instead — the saved work stays and can be continued later.
+
+**Example (the user's brother's case):** he opens a 100-page contract and edits pages 1–13. Next to the Save button
+it says "Saved on this device · just now". His laptop's battery dies. Next morning he opens the site, taps **Continue
+editing**, lands on page 13 with all 13 pages of edits, finishes and exports. A week later the saved work is still
+there until he deletes it.
+
+**Privacy — nothing leaves the device:** the PDF and the edits are stored only in this browser's storage (IndexedDB)
+on this device. No server, no upload, works offline. Saves are per device and per browser — work saved on a laptop
+does not appear on a phone. One line under the status says so: "Saved only on this device."
+
+**Steps**
+
+1. **Storage** `src/lib/projects/projectStore.ts` (+ test) — an interface with two implementations: IndexedDB for the
+   app, in-memory for tests. Database `pedf-projects`, three stores:
+   - `projects` — `id`, `fileName`, `fileSize`, `sha256` of the original bytes, `pageCount`, `lastPage`, `zoom`,
+     `changeCount`, `createdAt`, `updatedAt`, `formatVersion: 1`;
+   - `originals` — the original PDF bytes as a `Blob`, written **once** when the project is created, never on
+     autosave;
+   - `states` — the saved editor state (step 2), overwritten on each save.
+   Operations: `create`, `saveState`, `load`, `list` (newest first), `delete`, `deleteAll`. Keep at most **5**
+   projects; when a 6th is created, remove the oldest and show "Older saved file *X.pdf* was removed to make room."
+   On the first save call `navigator.storage.persist()` and ignore the answer. Every call is wrapped in `try/catch`
+   and returns a typed result (`ok` / `full` on `QuotaExceededError` / `unavailable`) — private windows or blocked
+   storage must never break the editor.
+
+2. **What is saved** `src/lib/projects/projectState.ts` (+ test) — pure `serializeProject` / `deserializeProject`:
+   - the editor history from `editsStore` — `present` (`edits` + `plan`) plus up to the last **30** `past` steps and
+     all `future` steps (all plain data; image bytes stay `Uint8Array`, IndexedDB stores them directly);
+   - `lastPage` and `zoom`;
+   - a `formatVersion`. Unknown versions or broken data return a clear error value, never a throw.
+   **Not saved:** the voice / Ask conversation, the edit-mode toggles, open popovers.
+
+3. **Autosave** — save **1 s after the last change** (debounced); save immediately on `visibilitychange` → hidden and
+   on `pagehide` (best effort); never while a text box is open mid-typing (save when it is committed); skip when
+   nothing changed since the last save. The original bytes are written once, so autosave on a 100-page PDF only
+   writes the state.
+
+4. **Save button + status** — **Save** saves now; a quiet status beside it: "Saving…" · "Saved on this device · just
+   now / 2 min ago" · danger "Couldn't save — not enough space on this device. Export your PDF to keep your work." ·
+   "Can't save on this device" (storage unavailable). Tooltip: "Saved only in this browser on this device. Clearing
+   browser data removes it."
+
+5. **"Continue editing" card** — on the landing page and on `/app` when no file is open, when `list()` has projects:
+   - a card for the **newest**: file name, "Saved X ago", "page N of M", "K changes", **Continue editing** (primary),
+     **Delete saved file** (asks "Delete the saved edits for X.pdf? This can't be undone.");
+   - "Other saved files" below it when there are more: name, saved time, Continue, Delete;
+   - the existing drag-and-drop / Upload area stays exactly where it is, so dropping a new file needs no extra click.
+   If a saved project can't be loaded (unknown format, missing original): "This saved file can't be opened." +
+   **Delete saved file**.
+
+6. **Dropping a PDF that already has a save** — when the dropped file's SHA-256 matches a saved project, ask once:
+   "You have saved edits for *X.pdf* — **Continue from them** or **Start fresh**?". Start fresh creates a new project;
+   the old save stays until it is deleted or ages out. The same check applies to files handed over from a tool's
+   **Open in editor**.
+
+7. **Export** never deletes a save. **Settings** gets "Delete all saved files on this device" (with a confirm).
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/state/editsStore.tsx` | Add one history action, `restore-document`, carrying a saved `HistoryState` (present + capped past + future), exposed from `useEdits()` as `restoreDocument(history)`. It replaces the whole history in one step and is **not** itself undoable. Also expose a cheap signal for autosave — e.g. a `revision` number that increases on every history change. Do not change any existing action. |
+| `src/state/pagePlan.ts` | No logic change. If a saved plan references a source page index the loaded PDF doesn't have, `deserializeProject` rejects the save (the SHA-256 match makes this a corrupt-data guard). |
+| `src/App.tsx` | (a) `open()` gains an optional restored project: after `loadDocument`, call `restoreDocument(saved.history)` instead of `resetDocument(createPagePlan(...))`, then set `zoom` and scroll to `lastPage` once pages are laid out. (b) After a fresh open, compute the SHA-256 of the bytes and run step 6 before creating a project. (c) Host the autosave hook (step 3), the Save handler and the status state. (d) Track the **page in view** — the page whose box covers the middle of the scroll area, updated on scroll (throttled) — for `lastPage`; nothing tracks it today. (e) The empty state (where `PdfDropZone` shows when no document is open) also shows the Continue card. `handleExport` is not changed. |
+| `src/components/PdfViewer.tsx` | Only if needed for (d): expose page positions or a "page in view" callback, and a `scrollToPage(index)` used on restore. No rendering change. |
+| `src/components/Toolbar.tsx` | Add **Save** and the status (step 4) next to Export; `Ctrl+S` / `Cmd+S` triggers Save and prevents the browser's "Save page". Keep every existing button and its position. Update `Toolbar.test.tsx`. |
+| `src/components/Landing.tsx` | Show the Continue card above the existing `PdfDropZone`. **Continue editing** hands the project id to the editor and navigates to `/app`, using a new one-shot hand-off next to the file hand-off (below), read in `App.tsx` next to `takePendingFile()`. Update `Landing.test.tsx`. |
+| `src/lib/site/pendingFile.ts` | Add `setPendingProject(id)` / `takePendingProject()` with the same one-shot pattern as the file functions, which stay unchanged. |
+| `src/components/SettingsPanel.tsx` | Add "Delete all saved files on this device" with a confirm, plus how many files are saved and roughly how much space they use (`navigator.storage.estimate()` when available). |
+| `src/components/tools/ToolPage.tsx` | No change: **Open in editor** already uses the pending-file hand-off, and step 6's SHA-256 check in `App.tsx` covers it. Prove it with a test. |
+| `src/routes.upload.test.tsx`, `src/components/Landing.test.tsx`, `src/components/Toolbar.test.tsx`, `src/state/editsStore.test.ts` | Update for the new card, button and action; every existing expectation must still pass. |
+| `src/lib/tools/noNetwork.test.ts` | Must stay green — saving makes no network calls. If it scans by folder, add `src/lib/projects`. |
+
+**Files that must not change:** export (`src/lib/export/**`), edit building (`src/lib/edit/**`), the overlays
+(`OverlayLayer.tsx`, `TextEditOverlay.tsx`, `ImageOverlay.tsx`), text extraction and bullet detection
+(`src/lib/pdf/**`), voice and chat (`PdfChat.tsx`, `src/lib/speech/**`, `src/lib/providers/**`) and the tools.
+
+8. **Tests**
+   - `projectState.test.ts`: round-trip text, cover, image (with bytes), line and bullet-list edits and a plan with
+     inserted / duplicated / deleted pages; a document exported before saving and after restoring has the same page
+     count, the same text (pdf.js `getTextContent`) and the same edit positions; Undo and Redo work after restore;
+     unknown `formatVersion`, corrupt data and a plan pointing past the PDF's pages → clear errors.
+   - `projectStore.test.ts` (in-memory): the original is written once; `saveState` never rewrites it; newest-first
+     list; the 5-project limit and its note; `delete` / `deleteAll`; storage errors → `full` / `unavailable`, never a
+     throw.
+   - Autosave: several quick changes → one save; flush on `pagehide`; no save while a text box is open.
+   - UI: the Continue card (name / time / page / changes); Continue opens on the saved page with its edits; dropping a
+     new file keeps the save; Delete removes it; the matching-file prompt (also through a tool's Open in editor);
+     `Ctrl+S`; the `full` and `unavailable` statuses; Settings → Delete all.
+   - A dev-only `fake-indexeddb` is allowed for one IndexedDB adapter test; **no new runtime dependencies**.
+
+9. **Guardrails:** nothing is uploaded; the editor keeps working when storage is blocked; the original PDF is stored
+   once per project; the voice / Ask conversation is not stored; no change to how edits are built, drawn or exported.
+
+**Verify (user):** open a large PDF (e.g. GOA 2026), make edits on pages 1–13 → the status shows "Saved on this
+device". Close the tab (or restart the laptop) → open the site → the **Continue editing** card shows the file, time,
+"page 13" and the change count → **Continue editing** → page 13 with every edit, and **Undo** works → **Export**
+works → come back again → the save is still there. Drop a different PDF → it opens and the old save is still listed.
+**Delete saved file** → gone. Re-drop the first PDF → "Continue from them or Start fresh?". Press **Ctrl+S** →
+"Saved". In a private window editing still works even if saving can't.
+
+**Known limits:** saves exist only in this browser on this device (no laptop ↔ phone sync — that needs a server and
+is a separate, optional "Save to my account" task); clearing browser data or closing a private window removes them;
+very large PDFs may not fit in iPhone Safari's smaller storage (the "not enough space" status says so); the voice /
+Ask conversation is not restored. In a future native app the same rule holds: saves go to the app's private storage
+on the phone, excluded from Android / iCloud automatic backups.
+
+**Land:** merge `save-progress` → `main`. Commit: `Save progress on this device + Continue editing (Task 65)`.
+
+**Review of the Task 65 build (2026-09-14):** accepted, with a Save-button fix by Claude and Rev 1 below. Autosave,
+Continue editing (page, zoom, edits, Undo), the matching-file prompt and Settings → Delete all worked live. The user
+found **Save** did nothing visible (autosave had already saved, a failed save still reported `saved`, an open text
+box made it silently return). Fixed by Claude (user: "do it yourself"): the toolbar button became **Save & close** —
+finishes an open text box (`data-text-edit-done` on Done), saves, closes to the start screen with "Saved *X.pdf* on
+this device — continue editing anytime." and the Continue card; a failed save keeps the file open with "Couldn't save
+on this device" → Keep editing / Close without saving / Export PDF. **Ctrl/Cmd+S** saves without closing and briefly
+shows "All changes saved on this device". `saveNow()` returns the real outcome. Verified live on `127.0.0.1:5173`.
+
+#### Task 65 — Revision 1  ✅ DONE by Codex, reviewed 2026-09-14 (fixes in Rev 1a) — save only files that were changed, keep up to 10   *(Easy–Medium · half a day)*
+
+**Starting point:** the branch already has **Save & close** (done by Claude, 2026-09-14, user: "do it yourself"): the
+toolbar button saves every change (finishing an open text box first) and closes the file to the start screen with
+"Saved *X.pdf* on this device — continue editing anytime." and the Continue card; if saving fails the file stays open
+with "Couldn't save on this device" → Keep editing / Close without saving / Export PDF. **Ctrl/Cmd+S** saves without
+closing and briefly shows "All changes saved on this device". `saveNow()` returns an outcome
+(`saved` / `draft` / `full` / `unavailable` / `no-project`). Keep all of this working.
+
+**The problem (seen by the user):** every PDF that is opened is saved straight away, even when nothing is edited — the
+Continue card showed "Verbal Wednesday … · 0 changes". With a small limit, a user who opens a few PDFs just to read
+them silently pushes out a real save (e.g. "UTKARSH TANEJA CV" with 28 changes).
+
+**What the user gets:**
+- Opening a PDF saves nothing. The file is saved **only after its first change**; from then on autosave works as today.
+- Up to **10** saved files on this device (was 5). When an 11th file gets its first change, the oldest save is removed
+  and the existing note shows: "Older saved file *X.pdf* was removed to make room."
+
+**Example:** the user opens *Verbal Wednesday.pdf*, reads it, presses **Save & close** → it closes with "No changes to
+save — closed Verbal Wednesday.pdf." and it is **not** in the Continue card. Then they open *Contract.pdf*, fix one
+word, press **Done** → about 1 s later the status shows "Saved on this device · just now", and Contract.pdf appears
+in the card after closing.
+
+**What counts as a change:** the document is different from how it was opened — at least one edit (text edit, added
+text, image, signature, cover, bullet list) **or** the pages changed (deleted, inserted, duplicated, moved). **Not** a
+change: zoom, scrolling, opening Ask / voice, Hold to peek, opening a text box and cancelling it. If the user edits and
+then undoes everything **before** the first save happens, nothing is saved. Once a file has a save it keeps it, even if
+later undone back to zero changes (the user can still Delete it) — never delete a save automatically.
+
+**Steps**
+
+1. **Limit** — `src/lib/projects/projectStore.ts`: `MAX_SAVED_PROJECTS = 10`. Eviction logic unchanged (oldest by
+   `updatedAt`, never the project being created).
+
+2. **"Has changes" helper** — pure `hasDocumentChanges(present, openingPlan): boolean` (e.g. in
+   `src/lib/projects/projectState.ts`, + test): `true` when `present.edits.length > 0` or the page plan differs from
+   the plan created at open (length, and every field of each item, in order). Compare values, not object
+   references.
+
+3. **Don't create on open** — `src/App.tsx` → `activateFreshDocument` no longer calls `projectStore.create`. It keeps
+   `currentSha256` and the opening plan (a ref), with `currentProject = null` and no storage status. The same applies
+   to **Start fresh** in the matching-file prompt and to files handed over from a tool's **Open in editor**. The
+   SHA-256 matching prompt itself is unchanged (it only matters for files that have a save).
+
+4. **Create on the first change** — `src/lib/projects/useProjectAutosave.ts` gains two options, so the debounce,
+   `pagehide` / `visibilitychange` flush and "not while a text box is open" rules are shared with normal autosave:
+   - `hasChanges: boolean` — from step 2;
+   - `createProject(): Promise<SaveOutcome>` — `App.tsx` passes the existing create path (today inside
+     `saveProjectNow`: original bytes + serialized state, eviction note, `setCurrentProject`).
+   When there is **no** `projectId`, `hasChanges` is true and a SHA-256 is known → call `createProject()` 1 s after the
+   last change (same debounce), or at once on flush. Guard against creating twice (one create in flight; after it
+   succeeds, normal `saveState` autosave takes over with the new id). On `full` / `unavailable` show the status as
+   today and try again on the next change or on Save & close. If the SHA-256 could not be computed, show "Can't save on
+   this device" only once there is a change.
+   `saveNow()` with no project: `hasChanges` → create; no changes → a new outcome `'no-changes'`.
+
+5. **Save & close / Ctrl+S with no changes** — in `App.tsx`:
+   - **Save & close**, no project and no changes → close the file exactly like a successful save, but the note on the
+     start screen is "No changes to save — closed *X.pdf*." Nothing is written to storage.
+   - **Ctrl/Cmd+S**, no project and no changes → nothing is written; the toolbar briefly shows "No changes to save"
+     (same 2.5 s as "All changes saved on this device").
+   - A file continued from a save (it has a project) behaves as today, even at 0 changes.
+
+6. **Status text** — `src/components/Toolbar.tsx`: before the first change there is **no** save status next to the
+   button (today's `idle`). Replace the `justSaved` boolean with `saveNotice?: 'saved' | 'no-changes'` →
+   "All changes saved on this device" / "No changes to save". Button, tooltip and Ctrl+S wiring unchanged.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/projects/projectStore.ts` + `projectStore.test.ts` | Limit 5 → 10. Update the limit test to create 11 projects: the oldest is evicted and reported, the 10 newest stay. |
+| `src/lib/projects/projectState.ts` + `projectState.test.ts` | Add `hasDocumentChanges` (step 2) with tests: fresh plan + no edits → false; one edit → true; a deleted / inserted / duplicated / moved page → true; an equal plan built as a new array → false. |
+| `src/lib/projects/useProjectAutosave.ts` + `useProjectAutosave.test.tsx` | Options `hasChanges` and `createProject` (step 4), outcome `'no-changes'`. Existing tests keep passing; add the new ones below. |
+| `src/App.tsx` | Steps 3–5: remove the create from `activateFreshDocument`; keep the opening plan in a ref; pass `hasChanges` / `createProject` to the hook; `saveProjectNow` / `handleSave` / `handleSaveAndClose` handle `'no-changes'`; `closeDocument` takes the note text it shows. |
+| `src/components/Toolbar.tsx` + `Toolbar.test.tsx` | `saveNotice` replaces `justSaved` (step 6); update the "All changes saved" test and add "No changes to save". |
+| `src/App.projects.test.tsx` | Update: "opens a different dropped PDF" and the tool hand-off "Start fresh" now expect **no** `create` until a change; "Save & close saves every change…" must make a change first (e.g. let the mocked `SignatureModal` or a mocked control add an edit). Add the tests below. |
+| `src/components/SettingsPanel.tsx`, `src/components/ContinueEditingCard.tsx`, `src/components/Landing.tsx` | No logic change. If any text or test mentions **5** saved files, change it to 10. |
+| `src/components/TextEditOverlay.tsx` | No change (keep `data-text-edit-done` on Done — Save & close uses it). |
+| `src/state/editsStore.tsx`, `src/lib/site/pendingFile.ts`, `src/lib/tools/noNetwork.test.ts` | No change; must stay green. |
+
+**Files that must not change:** export (`src/lib/export/**`), edit building (`src/lib/edit/**`), text extraction and
+bullet detection (`src/lib/pdf/**`), the overlays' behaviour, voice and chat, the tools.
+
+**Tests**
+- Autosave hook: no project + `hasChanges` false → `createProject` never called, even after `pagehide`; becomes true
+  → one `createProject` after 1 s (several quick changes → still one); `pagehide` right after the first change →
+  created at once; not while a text box is open; a failed create is retried on the next change; after a successful
+  create the next change uses `saveState`, not `create`.
+- App: open a PDF and do nothing → `create` never called; **Save & close** → start screen with "No changes to save —
+  closed X.pdf." and no card entry for it; **Ctrl+S** → "No changes to save". Make one change → exactly one `create`
+  after the debounce → **Save & close** → "Saved X.pdf on this device…". Change then Undo before the debounce →
+  no `create`. Continue a saved file, Undo to zero, Save & close → `saveState` (the save is kept, not deleted).
+  **Start fresh** on a matching file and a tool's Open in editor → no `create` until a change.
+- Store: 11 creates → 10 kept, oldest evicted and reported.
+
+**Guardrails:** never delete an existing save automatically (only the 10-file limit and the user's Delete); no network
+calls; the original PDF is still written once per project (now at the first change); Save & close, the failure dialog
+and the matching-file prompt keep working; no new dependencies.
+
+**Verify (user):** clear saved files in **Settings → Delete all saved files on this device**. Open a PDF, only scroll
+and zoom → **Save & close** → "No changes to save — closed …" and no Continue card. Open it again, change one word →
+**Done** → "Saved on this device · just now" → **Save & close** → the card shows it with "1 change" or more. Open and
+change 11 different PDFs one by one → after the 11th, the note says the oldest was removed and the card lists 10 files.
+
+**Known limits:** a file saves about 1 s after its first change; if the tab is closed within that second the save is
+best effort (the `pagehide` flush tries, but the browser may stop it for a large PDF). Task 65 is not merged yet, so
+zero-change saves only exist on test machines — no clean-up of old saves is needed; delete them by hand.
+
+**Land:** together with Task 65 in one commit, `Save progress on this device + Continue editing (Task 65)`.
+
+**Review of Rev 1 (2026-09-14):** accepted with Rev 1a below. typecheck / lint / build green, 1033 tests. Code:
+`MAX_SAVED_PROJECTS = 10` with eviction in both stores; `hasDocumentChanges` compares plans by value; nothing is
+created on open, Start fresh or a tool hand-off; the hook creates the project 1 s after the first change (flush on
+`pagehide`, waits for an open text box, retries a failed create only after another change); `'no-changes'` and
+`saveNotice` wired through Save & close and Ctrl+S. Live on `127.0.0.1:5173`: an unchanged PDF → Ctrl+S "No changes
+to save", Save & close "No changes to save — closed Rahul_Resume.pdf." and nothing in IndexedDB; Duplicate Page →
+"Saved on this device · just now" about 1 s later → Save & close → in the card → Continue → 2 pages, Undo works.
+Two problems found — Rev 1a.
+
+#### Task 65 — Revision 1a  ✅ DONE by Codex, reviewed — never close with an unsaved change; honest pages and changes on the card   *(Easy–Medium · half a day)*
+
+Parts A → C in order. Run the touched test files after each part.
+
+**Part A — A change made while the first save is being written is lost on Save & close.**
+
+*The problem:* the first save of a file writes the whole PDF, which takes a moment (longer for big files). If the user
+makes another change during that moment and presses **Save & close**, `saveNow()` returns the in-flight create's
+`'saved'` (`if (createInFlight.current) return createInFlight.current;`), the file closes with "Saved …", and the
+newer change was never written. The same happens in the short gap after the create finished but before the new
+`projectId` reaches the hook (`if (createdWithoutProject.current) return 'saved';`). Confirmed in review with a hook
+test: first change → create starts → second change → `saveNow()` → `'saved'`, `saveState` never called.
+*Example:* open a 30 MB PDF, fix a word, wait a second, delete a page and press Save & close at once → Continue →
+the word is fixed but the deleted page is back.
+
+1. **`saveNow()` resolves `'saved'` only when the state current at that moment is stored.** In
+   `src/lib/projects/useProjectAutosave.ts`:
+   - `createProject()` returns the new project's id with the outcome, e.g.
+     `Promise<{ outcome: SaveOutcome; projectId?: string }>`. The hook keeps it in a ref and uses
+     `projectIdRef.current ?? createdProjectIdRef.current` as the id for every save, so the normal `saveState` path
+     works straight after a create, before the re-render brings `projectId`.
+   - When `save()` finds a create in flight, it **waits** for it and then runs the save again: if the snapshot changed
+     since the create started (key ≠ the create's key), it writes the newer state with `saveState` to the new id and
+     only then returns. A failed create returns its `full` / `unavailable` as today.
+   - The same rule applies to the debounce, Ctrl+S and the `pagehide` / `visibilitychange` flush.
+2. **A create that finishes after its file was closed or replaced must not be adopted by the next file.** In
+   `App.tsx`, `createProject` remembers which document it started for; if a different document (or none) is open when
+   `projectStore.create` returns, it does not call `setCurrentProject` and the hook does not keep that id. The save it
+   wrote stays in the list — it holds that earlier file's changes. Clear the created-id ref whenever the open document
+   changes.
+
+**Part B — The card shows the original page count and doesn't count page changes.**
+
+*The problem:* the Continue card reads "Saved … · page {lastPage + 1} of {pageCount} · {changeCount} changes".
+`pageCount` is the page count of the original PDF (set once at create) and `changeCount` is `edits.length` — only
+things drawn on pages, counted as internal pieces. *Examples (both seen live):* the user duplicates a page twice in
+the 8-page *Verbal Wednesday* PDF → the card says "page 1 of 8 · 0 changes" instead of "page 1 of 10 · 2 changes";
+one heading edit showed "3 changes" (cover + text + …) instead of "1 change".
+
+1. **Pages = the pages the file has now.** `pageCount` in the metadata means the current number of pages
+   (`history.present.plan.length`): written at create and on every `saveState` — add `pageCount` to
+   `SaveProjectProgress` in `src/lib/projects/projectStore.ts` and to the autosave snapshot. Nothing else reads it
+   (restore checks the plan against the loaded PDF's own page count, unchanged).
+2. **Changes = the actions the user took, as Undo sees them.** In `src/state/editsStore.tsx`, keep a `changeCount`
+   next to `revision` in the store state, exposed from `useEdits()`:
+   - an action that adds a step to `past` → +1 (a text edit that writes a cover and new text in one step counts
+     **once**; Duplicate / Insert / Delete / Move page → +1 each);
+   - `undo` → −1, `redo` → +1 (never below 0);
+   - `reset-document` and `reset-edits` → 0;
+   - `restore-document` → the saved count: `restoreDocument(history, changeCount)`, with `App.tsx` passing
+     `stored.metadata.changeCount`.
+   Trimming `past` (`HISTORY_LIMIT` = 100 in memory, `SAVED_HISTORY_LIMIT` = 30 when saved) must **not** lower the
+   count: 45 changes saved → Continue → still 45; Undo → 44. `App.tsx` saves this `changeCount` instead of
+   `edits.length`. Existing actions keep their behaviour; only the counter is added.
+3. `ContinueEditingCard.tsx`: no logic change — it already shows `pageCount` and `changeCount` ("1 change" /
+   "N changes").
+
+**Part C — Tests.**
+- `useProjectAutosave.test.tsx`: (a) first change → create in flight → second change → `saveNow()` → the create once,
+  then `saveState` to the new id with the second change, **before** `saveNow()` resolves `'saved'`; (b) create
+  finished but `projectId` not yet passed → change → `saveNow()` → `saveState` with the created id; (c) create in
+  flight → the document is replaced → the create finishes → no `saveState`, the id is not used for the new document;
+  (d) a failed create while waiting → `saveNow()` returns `full` / `unavailable`.
+- `App.projects.test.tsx`: a slow `create` mock; change → 1 s → create starts → another change → **Save & close** → the
+  file closes only after `saveState` stored the second change (check the state and `changeCount: 2`); a create that
+  finishes after the file was closed does not become the next opened file's project.
+- `editsStore.test.ts`: one text edit (cover + text in one step) → 1; Duplicate Page twice → 2; Undo → 1; Redo → 2; a
+  new action after Undo → counts from the current value; 120 actions (past trimmed at 100) → 120; `restoreDocument`
+  with 28 → 28, Undo → 27; `reset-document` → 0.
+- `projectStore.test.ts`: `saveState` updates `pageCount` and `changeCount`.
+- Card: an 8-page file with two duplicated pages → "page 1 of 10 · 2 changes"; one heading edit → "1 change".
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/projects/useProjectAutosave.ts` + test | Part A: `createProject` returns `{ outcome, projectId }`; created-id ref; wait for an in-flight create and save anything newer; snapshot gains `pageCount`. |
+| `src/App.tsx` | Part A: `createProject` returns the id and ignores a create that finished for a different document. Part B: `pageCount = pagePlan.length` and `changeCount` from `useEdits()` in the create input and the autosave snapshot; `restoreDocument(history, metadata.changeCount)`. Save & close, the failure dialog, Rev 1's "save only changed files" stay as they are. |
+| `src/state/editsStore.tsx` + `editsStore.test.ts` | Part B: `changeCount` in state and `useEdits()`; `restore-document` carries a count. No change to what any action does to the history. |
+| `src/lib/projects/projectStore.ts` + test | Part B: `SaveProjectProgress.pageCount`; both stores write it on `saveState`; a comment that `pageCount` is the current page count. |
+| `src/App.projects.test.tsx` | Part C tests; existing tests keep passing (update expected `changeCount` values where they used `edits.length`). |
+| `src/components/ContinueEditingCard.tsx` + test | No logic change; add the "of 10 · 2 changes" / "1 change" expectations. |
+| `src/components/Toolbar.tsx`, `Landing.tsx`, `SettingsPanel.tsx`, `TextEditOverlay.tsx`, `src/lib/site/pendingFile.ts` | No change. |
+| `src/lib/tools/noNetwork.test.ts` | Must stay green. |
+
+**Files that must not change:** export (`src/lib/export/**`), edit building (`src/lib/edit/**`), text extraction and
+bullet detection (`src/lib/pdf/**`), the overlays' behaviour, voice and chat, the tools.
+
+**Guardrails:** Save & close never reports "Saved" for a state that isn't stored; a save is never attached to the
+wrong file; Undo / Redo behave exactly as before; saved projects from before this revision still open (their old
+`changeCount` / `pageCount` are shown until the next save); no network calls; no new dependencies.
+
+**Verify (user):** open the 8-page *Verbal Wednesday* PDF → **Duplicate Page** twice → wait for "Saved on this device
+· just now" → **Save & close** → the card says "page … of 10 · 2 changes". **Continue editing** → change one heading →
+**Done** → **Save & close** → "3 changes". **Continue editing** → **Undo** → **Save & close** → "2 changes". Race check
+(timing-dependent; the tests prove it): open a big PDF (e.g. GOA 2026), fix one word → **Done** → wait about 1 s →
+delete a page and press **Save & close** straight away → **Continue editing** → the word is fixed **and** the page is
+gone.
+
+**Land:** together with Task 65 in one commit, `Save progress on this device + Continue editing (Task 65)`.
+
+**Review of Rev 1a (2026-09-14):** accepted. typecheck / lint / build green, 1046 tests. Code: `createProject` returns
+`{ outcome, projectId }`; the hook saves with `projectId ?? createdProjectId`, and `save()` loops — it waits for an
+in-flight create or save and writes anything newer before resolving; a `documentKey` (the loaded document) stops a
+late create from being adopted by a replacement file. `versionedHistoryReducer` keeps `changeCount` beside `revision`
+(+1 per history step, −1 Undo, +1 Redo, 0 on reset, the saved count on restore, unaffected by history trimming);
+`pageCount` is the current page total, written on every save. Live: 2-page résumé → Duplicate Page ×2 → Save & close
+→ "page 1 of 4 · 2 changes"; Continue → one heading edit → "3 changes"; Continue → Undo → "2 changes". Not blocking:
+a change made during Save & close's own final write is not re-checked, and right after a first save one redundant
+`saveState` can follow.
+
+#### Task 65 — Revision 2  ✅ DONE by Codex, reviewed (one visual fix by Claude) — Saved files column on the start screen and while editing   *(Medium · 1 day)*
+
+**What the user gets:** in the editor (`/app`) a **Saved files** column on the left lists every file saved on this
+device. Clicking a file opens it on the page where the user left it, with all its edits. The column is there on the
+start screen **and** while editing; while editing it can be hidden to give the PDF the full width. The Continue card
+stays above the drag-and-drop box exactly as it is today.
+
+```
+┌──────────────────────┬──────────────────────────────────────────────┐
+│ Saved files (3)    ◂ │                                              │
+│                      │   Saved Contract.pdf on this device —        │
+│ Contract.pdf       ⋯ │   continue editing anytime.                  │
+│ 2 min ago · 4 changes│                                              │
+│                      │   ┌ Continue editing Contract.pdf? ─────────┐│
+│ UTKARSH CV.pdf     ⋯ │   │ [ Continue editing ]  Delete saved file ││
+│ 2 h ago · 28 changes │   └─────────────────────────────────────────┘│
+│                      │                                              │
+│ GOA 2026.pdf       ⋯ │        ┌ Drag & drop your PDF here ┐         │
+│ 5 h ago · 13 changes │        └───────────────────────────┘         │
+│                      │                                              │
+│ Saved only on this   │                                              │
+│ device               │                                              │
+└──────────────────────┴──────────────────────────────────────────────┘
+```
+
+**Example:** the user edits *Contract.pdf*. The column shows *Contract.pdf* highlighted at the top. They click
+*UTKARSH CV.pdf* in the column → Contract.pdf's changes are saved → the CV opens on page 2 with its 28 changes →
+*UTKARSH CV.pdf* is now highlighted. They press **◂** → the column hides and the PDF uses the full width; next time
+they come back the column is still hidden until they press **Saved files** in the toolbar.
+
+**Steps**
+
+1. **One list for everyone** — `src/lib/projects/projectStore.ts`: add `subscribe(listener: () => void): () => void`
+   to the `ProjectStore` interface. Both implementations (IndexedDB and in-memory) call the listeners after every
+   **successful** `create`, `saveState`, `delete` and `deleteAll`. New hook `src/lib/projects/useSavedProjects.ts`
+   → `{ status: 'loading' | 'ok' | 'unavailable', projects: ProjectMetadata[] }`: calls `list()` on mount and again on
+   every store notification (newest first, as `list()` returns). The column **and** `ContinueEditingCard` use it, so
+   a save, a delete or Settings → Delete all updates both at once. "Saved X ago" re-renders every 30 s.
+
+2. **The column** — new `src/components/SavedFilesColumn.tsx`:
+   - Header "Saved files (N)" and a **◂** button (`aria-label="Hide saved files"`).
+   - One row per saved file, newest first: file name (one line, cut with "…", full name in the tooltip) and below it
+     "2 min ago · 4 changes" (`savedAgo` + "1 change" / "N changes"). The whole row is a button that opens the file.
+   - The open file's row is highlighted (`aria-current="true"`); clicking it does nothing.
+   - **⋯** on each row (`aria-label="More actions for X.pdf"`) → **Delete saved file** → the same confirm as the card:
+     "Delete the saved edits for *X.pdf*? This can't be undone." The open file's row has no Delete (tooltip "Close this
+     file first to delete its save").
+   - While a file is being opened, its row shows "Opening…" and the other rows are disabled.
+   - Empty: "No saved files yet. Your changes save here automatically." Storage unavailable: "Can't save on this
+     device."
+   - Footer, small: "Saved only on this device."
+
+3. **Layout** — `src/App.tsx`: below the toolbar, a row with the column (256 px, own scroll, right border) and the
+   existing `<main>` scroll area. `<main>` keeps its ref, scroll tracking, zoom anchoring and drop area unchanged; it
+   only becomes narrower. Laptop and desktop (≥ 768 px): the column is shown by default; **◂** hides it; the open /
+   hidden choice is remembered in `localStorage` key `pedf.savedFilesColumn` (`'open'` / `'hidden'`, every read and
+   write in `try/catch`, default open). Phone (< 768 px): the column is never inline; it opens as a drawer from the
+   left over the page with a dark backdrop, closes on the backdrop, **✕**, `Escape`, or after choosing a file.
+
+4. **Toolbar button** — `src/components/Toolbar.tsx`: a **Saved files** button at the start of the button group
+   (`aria-pressed` = column shown). On laptop / desktop it shows or hides the column; on a phone it opens the drawer.
+   Props: `savedFilesOpen: boolean`, `onToggleSavedFiles(): void`. Every existing button keeps its place and
+   behaviour.
+
+5. **Opening another saved file while one is open** — `App.tsx` → `switchToSavedProject(id)`, used by the column:
+   1. If a text box is open, finish it exactly like Save & close (`data-text-edit-done`); if it can't be finished,
+      show "Finish or cancel the open text box, then open the other file." and stop.
+   2. Save the current file with the same save as Save & close (`saveProjectNow`). With Rev 1, a file with no project
+      and no changes has nothing to save — skip.
+   3. If saving fails → the existing "Couldn't save on this device" dialog; its **Close without saving** button reads
+      **Open *Y.pdf* without saving** in this case and then continues with step 4. **Keep editing** stops.
+   4. `restoreSavedProject(id)`. If it can't be opened ("This saved file can't be opened."), the current file stays
+      open (its changes are already saved) and the error shows.
+   The same "save the current file first" step (1–3) runs before **Open PDF** in the toolbar and before a PDF dropped
+   onto the page while a file is open, so no change is lost when switching files any way.
+
+6. **Continue card and Settings**
+   - `ContinueEditingCard.tsx`: switch to `useSavedProjects` (step 1). What it shows and where it sits stay exactly as
+     today — above the drag-and-drop box, including "Other saved files".
+   - `SettingsPanel.tsx`: while a file is open, **Delete all saved files on this device** is disabled with "Close the
+     open file first." (new prop `fileOpen: boolean`). Otherwise unchanged.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/projects/projectStore.ts` + `projectStore.test.ts` | `subscribe` on the interface and both implementations (step 1). Test: listeners fire after each successful write, not after a failed one, and stop after unsubscribe. |
+| `src/lib/projects/useSavedProjects.ts` (new) + test | Step 1. Test: lists on mount; refreshes after create / delete / deleteAll; `unavailable` when `list()` fails; unsubscribes on unmount. |
+| `src/components/SavedFilesColumn.tsx` (new) + test | Step 2. |
+| `src/App.tsx` | Steps 3 and 5: the layout row, column open / hidden state with `localStorage`, the phone drawer, `switchToSavedProject`, "save the current file first" before Open PDF and drop, passes `fileOpen` to Settings and the new props to Toolbar. Save & close, autosave, Rev 1's "save only changed files" and the matching-file prompt stay as they are. |
+| `src/components/Toolbar.tsx` + `Toolbar.test.tsx` | Step 4. Add the new props to every test's props; test the toggle and `aria-pressed`. |
+| `src/components/ContinueEditingCard.tsx` + test | Step 6: data from `useSavedProjects`, UI unchanged. Test: the card updates when the store notifies. |
+| `src/components/SettingsPanel.tsx` + `SettingsPanel.test.tsx` | Step 6: `fileOpen` disables Delete all with the note. |
+| `src/App.projects.test.tsx`, `src/components/Landing.test.tsx` and any other test with a fake / mocked `ProjectStore` | Add `subscribe` (returning an unsubscribe function) to the fakes. |
+| `src/components/Landing.tsx` | No change — the home page keeps only the Continue card; the column is only in `/app`. |
+| `src/lib/projects/useProjectAutosave.ts`, `src/state/editsStore.tsx`, `src/components/TextEditOverlay.tsx`, `src/lib/site/pendingFile.ts` | No change. |
+| `src/lib/tools/noNetwork.test.ts` | Must stay green. |
+
+**Files that must not change:** export (`src/lib/export/**`), edit building (`src/lib/edit/**`), text extraction and
+bullet detection (`src/lib/pdf/**`), `PdfViewer.tsx` rendering, the overlays' behaviour, voice and chat, the tools.
+
+**Tests**
+- `SavedFilesColumn.test.tsx`: rows newest first with name, time and "1 change" / "N changes"; long names cut with the
+  full name in the tooltip; clicking a row calls open with its id; the open file is highlighted and has no Delete;
+  ⋯ → Delete → confirm → `delete` called → the row disappears; empty and unavailable texts.
+- App: start screen shows the column **and** the Continue card above the drop area; clicking a row opens that file on
+  its saved page; while editing a changed file, clicking another row → `saveState` / `create` for the current file
+  **before** `load` of the other; a failed save shows the dialog with **Open *Y.pdf* without saving**, and **Keep
+  editing** keeps the current file; an open text box is finished first; **Open PDF** and a drop while a changed file
+  is open save it first; **◂** hides the column and the choice survives a re-render with the same `localStorage`;
+  `localStorage` throwing → the column still works (shown); a new file's first change adds it to the top of the
+  column without a reload.
+- Phone width (mock `matchMedia` < 768 px): no inline column; **Saved files** opens the drawer; choosing a file or
+  `Escape` closes it.
+- Settings: Delete all is disabled while a file is open.
+
+**Guardrails:** nothing is uploaded; no change to how edits are saved, restored, drawn or exported; the Continue card,
+drop area and matching-file prompt keep working; switching files never loses a change; no new dependencies.
+
+**Verify (user):** open `/app` with 3 saved files → the column lists them newest first and the Continue card is above
+the drag-and-drop box. Click the second file → it opens on its saved page, highlighted in the column. Change a word →
+**Done** → click another file → it opens; go back to the first → the change is there. Press **◂** → the PDF gets the
+full width; reload → still hidden; **Saved files** in the toolbar → shown again. ⋯ → **Delete saved file** on a file
+that is not open → confirm → gone from the column and the card. Narrow the window to phone width → the column
+disappears; **Saved files** → the drawer slides in; pick a file → it opens and the drawer closes.
+
+**Known limits:** the column shows only files saved in this browser on this device; a save made in another tab of the
+same browser appears after a reload; up to 10 files (Rev 1).
+
+**Land:** together with Task 65 in one commit, `Save progress on this device + Continue editing (Task 65)`.
+
+**Review of Rev 2 (2026-09-15):** accepted. typecheck / lint / build green, 1070 tests. Code: `subscribe` on both
+stores (after successful writes only) feeds `useSavedProjects`, used by the column and the Continue card;
+`SavedFilesColumn` (rows, ⋯ → Delete with confirm, open file not deletable, "Opening…" lock, empty / unavailable);
+inline 256 px column with `pedf.savedFilesColumn` in `localStorage`, phone drawer below 768 px (backdrop, ✕, Escape,
+closes after choosing); `saveBeforeSwitch` (finish text box → save → open, or the failure dialog with "Open *Y.pdf*
+without saving") used by the column, **Open PDF** and a PDF dropped onto an open file; Settings → Delete all disabled
+while a file is open. Live: column + Continue card on the start screen; open from the column; Duplicate Page then an
+immediate switch → the first file saved ("just now · 1 change") and the page is there on return; ◂ hide survives a
+reload and **Saved files** brings it back; ⋯ → Delete removes the file from the column and the card; phone width →
+drawer, Escape closes it, choosing a file opens it. **Fixed by Claude** (user: "do it yourself"): the open file's row
+was disabled with `disabled:opacity-60`, so it looked greyed out instead of highlighted — it now keeps full strength
+(`text-blue-950` on the blue background); rows locked while another file opens still fade; test added. Not blocking:
+the ⋯ menu closes only from ⋯ (not on outside click / Escape); a failed delete shows no message.

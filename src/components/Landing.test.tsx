@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigate } from '@/lib/site/navigate';
 import * as pendingFile from '@/lib/site/pendingFile';
+import { MemoryProjectStore } from '@/lib/projects/projectStore';
+import { serializeProject } from '@/lib/projects/projectState';
+import type { HistoryState } from '@/state/editsStore';
 import { Landing } from './Landing';
 
 vi.mock('@/lib/site/navigate', () => ({ navigate: vi.fn() }));
@@ -15,6 +18,7 @@ describe('Landing', () => {
   afterEach(() => {
     cleanup();
     pendingFile.takePendingFile();
+    pendingFile.takePendingProject();
     vi.restoreAllMocks();
   });
 
@@ -67,5 +71,32 @@ describe('Landing', () => {
     expect(screen.getByRole('alert').textContent).toBe('Choose a PDF file.');
     expect(navigate).not.toHaveBeenCalled();
     expect(pendingFile.takePendingFile()).toBeUndefined();
+  });
+
+  it('hands a saved project id to the editor from the Continue card', async () => {
+    const store = new MemoryProjectStore();
+    const history: HistoryState = {
+      past: [],
+      present: { edits: [], plan: [{ id: 'page-0', kind: 'source', sourceIndex: 0 }] },
+      future: [],
+    };
+    await store.create({
+      id: 'contract-project',
+      fileName: 'Contract.pdf',
+      fileSize: 128,
+      sha256: 'contract',
+      pageCount: 1,
+      lastPage: 0,
+      zoom: 1,
+      changeCount: 0,
+      original: new Blob(['pdf']),
+      state: serializeProject(history, 0, 1),
+    });
+    render(<Landing projectStore={store} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue editing' }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/app'));
+    expect(pendingFile.takePendingProject()).toBe('contract-project');
   });
 });

@@ -97,7 +97,7 @@ describe('landing PDF handoff to the editor', () => {
 
     expect(window.location.pathname).toBe('/tools/repair');
     expect(await screen.findByRole('heading', { level: 1, name: 'Repair PDF' }, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByText('broken.pdf')).toBeTruthy();
+    expect(await screen.findByText('broken.pdf', {}, { timeout: 5000 })).toBeTruthy();
   });
 
   it('opens the exact PDF chosen in the empty editor upload box without fetching a sample', async () => {

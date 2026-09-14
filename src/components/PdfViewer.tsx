@@ -17,9 +17,19 @@ interface PdfViewerProps {
   textAddMode: boolean;
   imageMode: boolean;
   peek: boolean;
+  onLayout?(): void;
 }
 
-export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, imageMode, peek }: PdfViewerProps) {
+export function PdfViewer({
+  doc,
+  originalPages,
+  zoom,
+  editMode,
+  textAddMode,
+  imageMode,
+  peek,
+  onLayout,
+}: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
   const [locations, setLocations] = useState<DetectedLocation[]>([]);
   const { pagePlan } = useEdits();
@@ -79,6 +89,12 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
     clearPageCanvases();
   }, [clearPageCanvases, pagePlan]);
 
+  useEffect(() => {
+    if (!onLayout || pages.length === 0) return;
+    const frame = window.requestAnimationFrame(onLayout);
+    return () => window.cancelAnimationFrame(frame);
+  }, [onLayout, pagePlan, pages, zoom]);
+
   return (
     <div className="flex flex-col items-center gap-4 py-4">
       {pagePlan.map((entry, position) => {
@@ -90,7 +106,11 @@ export function PdfViewer({ doc, originalPages, zoom, editMode, textAddMode, ima
           ? { kind: 'blank' as const, widthPt: entry.widthPt, heightPt: entry.heightPt }
           : { kind: 'pdf' as const, page: page as PDFPageProxy };
         return (
-          <div key={entry.id} className="flex flex-col items-center gap-1">
+          <div
+            key={entry.id}
+            className="flex flex-col items-center gap-1"
+            data-page-index={position}
+          >
             <PageToolbar
               position={position}
               widthPt={geometry.widthPt}

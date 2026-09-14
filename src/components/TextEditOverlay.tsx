@@ -528,6 +528,7 @@ export function TextEditOverlay({
         <button type="button" onClick={onCancel} className="rounded px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100">Cancel</button>
         <button
           type="button"
+          data-text-edit-done
           onClick={commit}
           disabled={bulletOverflow}
           className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
