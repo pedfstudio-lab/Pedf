@@ -41,6 +41,7 @@ export type GraphicsStateVisitor = (
   operation: number,
   args: readonly unknown[],
   transform: GraphicsMatrix,
+  index: number,
 ) => void;
 
 function matrix(value: unknown): GraphicsMatrix | undefined {
@@ -132,9 +133,8 @@ export function walkOperatorListGraphicsState(
       if (formMatrix) current = multiply(current, formMatrix);
     } else if (operation === OPS.paintFormXObjectEnd) {
       current = stack.pop() ?? current;
-    } else {
-      visit(operation, args, current);
     }
+    visit(operation, args, current, index);
   }
 }
 

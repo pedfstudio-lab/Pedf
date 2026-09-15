@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -11,6 +11,7 @@ import {
   classifyFontStyle,
   classifyFontFamily,
   detectTextAlignment,
+  dropSameSpotCopies,
   extractTextRuns,
   fontStyleFromProgram,
   groupRunsIntoBlocks,
@@ -42,6 +43,7 @@ function makeSfnt(weight: number, macStyle = 0): Uint8Array {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(openDocuments.splice(0).map((document) => document.destroy()));
 });
 
@@ -107,6 +109,40 @@ describe('classifyFontFamily', () => {
 });
 
 describe('extractTextRuns', () => {
+  it('keeps readable text when the operator list cannot be fetched', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([612, 792]).drawText('VISIBLE', { x: 72, y: 700, size: 20 });
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const page = await document.getPage(1);
+    vi.spyOn(page, 'getOperatorList').mockRejectedValue(new Error('unavailable'));
+
+    expect((await extractTextRuns(page, 0)).map((run) => run.text)).toEqual(['VISIBLE']);
+  });
+
+  it('reads letter-by-letter stacked headings once, without removing neighboring repeated letters', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([612, 792]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    const drawLetters = (text: string, y: number) => {
+      let x = 72;
+      for (const letter of text) {
+        page.drawText(letter, { x, y, size: 24, font });
+        x += font.widthOfTextAtSize(letter, 24);
+      }
+    };
+    drawLetters('ZIRO', 700);
+    drawLetters('ZIRO', 700);
+    drawLetters('ALL', 650);
+    drawLetters('ALL', 650);
+
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(await document.getPage(1), 0));
+
+    expect(blocks.map((block) => block.text)).toEqual(['ZIRO', 'ALL']);
+  });
+
   it('extracts text, PDF-point geometry, and style from a synthetic PDF', async () => {
     const source = await PDFDocument.create();
     const page = source.addPage([612, 792]);
@@ -239,6 +275,7 @@ describe('extractTextRuns', () => {
     const reopenedPage = await reopened.getPage(1);
     const reopenedRuns = await extractTextRuns(reopenedPage, 0);
     const replacementRun = reopenedRuns.find((run) => run.text === replacement);
+    expect(reopenedRuns.some((run) => run.text === 'WORK EXPERIENCE')).toBe(false);
     expect(replacementRun?.rect.y).toBeCloseTo(heading.topBaselineY - 10, 5);
     expect(replacementRun?.style.bold).toBe(true);
     expect(replacementRun?.style.fontName).toBe('sans-serif');
@@ -248,6 +285,35 @@ describe('extractTextRuns', () => {
       : undefined;
     expect(fontObject?.name).toMatch(/Arial Black/i);
     expect(fontObject?.name).not.toMatch(/Helvetica/i);
+  });
+});
+
+describe('dropSameSpotCopies', () => {
+  const run = (text: string, x: number, y: number, size = 8): TextRun => ({
+    pageIndex: 0,
+    text,
+    rect: { x, y, w: size * 0.6, h: size },
+    style: {
+      fontName: 'Helvetica',
+      fontSizePt: size,
+      bold: false,
+      italic: false,
+      color: { r: 0, g: 0, b: 0 },
+    },
+  });
+
+  it('keeps only the later exact-position copy in original order', () => {
+    const first = run(' Z ', 50, 500);
+    const adjacent = run('I', 55, 500);
+    const later = run('Z', 50, 500);
+    expect(dropSameSpotCopies([first, adjacent, later])).toEqual([adjacent, later]);
+  });
+
+  it('preserves adjacent repeated letters, one-point offsets at 8 pt, and different sizes', () => {
+    const letters = [run('L', 50, 500), run('L', 55, 500)];
+    const offset = run('L', 50, 499);
+    const larger = run('L', 50, 500, 9);
+    expect(dropSameSpotCopies([...letters, offset, larger])).toEqual([...letters, offset, larger]);
   });
 });
 

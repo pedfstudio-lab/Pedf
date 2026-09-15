@@ -3,6 +3,7 @@ import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
+import { dropCoveredTextRuns } from './hiddenText';
 
 export interface TextRun {
   readonly pageIndex: number;
@@ -424,24 +425,42 @@ function boundingBox(points: readonly PdfPt[]): PdfRect {
   };
 }
 
+/** Keep the topmost of identical text fragments drawn at effectively the same point. */
+export function dropSameSpotCopies(runs: readonly TextRun[]): TextRun[] {
+  return runs.filter((run, index) => {
+    const text = run.text.trim();
+    if (!text) return true;
+    const tolerance = Math.max(0.5, 0.03 * run.style.fontSizePt);
+    return !runs.slice(index + 1).some((later) => (
+      later.pageIndex === run.pageIndex &&
+      later.text.trim() === text &&
+      Math.abs(later.style.fontSizePt - run.style.fontSizePt) <= 0.5 &&
+      Math.abs(later.rect.x - run.rect.x) <= tolerance &&
+      Math.abs(later.rect.y - run.rect.y) <= tolerance
+    ));
+  });
+}
+
 /** Extract the text items for one page into the PDF-point space used by edits. */
 export async function extractTextRuns(
   page: PDFPageProxy,
   pageIndex: number,
 ): Promise<TextRun[]> {
   const content = await page.getTextContent();
-  const fontRefs = new Set(
-    content.items.flatMap((item) => ('fontName' in item ? [item.fontName] : [])),
-  );
-  if ([...fontRefs].some((fontRef) => !page.commonObjs.has(fontRef))) {
-    // Text extraction does not always hydrate the public font objects. The
-    // operator list does, and is cached by pdf.js for the page render itself.
-    await page.getOperatorList();
+  // Hydrates font objects and gives us the paint order used to identify old
+  // text concealed by a later opaque rectangle. pdf.js caches this per page.
+  let operatorList: Awaited<ReturnType<typeof page.getOperatorList>> | null = null;
+  try {
+    operatorList = await page.getOperatorList();
+  } catch {
+    // A broken or unavailable operator list must not make readable text vanish.
+    // The conservative fallback still removes exact same-spot copies.
   }
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const runs: TextRun[] = [];
+  const itemIndexes: number[] = [];
 
-  for (const item of content.items) {
+  for (const [itemIndex, item] of content.items.entries()) {
     if (!('str' in item) || item.str.trim() === '' || item.width === 0) continue;
     const isWordSymbolBullet = item.str.trim() === WORD_SYMBOL_BULLET;
 
@@ -494,9 +513,12 @@ export async function extractTextRuns(
         fontRef: isWordSymbolBullet ? undefined : fontRef,
       },
     });
+    itemIndexes.push(itemIndex);
   }
 
-  return runs;
+  return dropSameSpotCopies(operatorList
+    ? dropCoveredTextRuns(runs, itemIndexes, content.items, operatorList, viewport)
+    : runs);
 }
 
 /**
