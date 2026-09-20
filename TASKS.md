@@ -9458,3 +9458,166 @@ drawer, Escape closes it, choosing a file opens it. **Fixed by Claude** (user: "
 was disabled with `disabled:opacity-60`, so it looked greyed out instead of highlighted — it now keeps full strength
 (`text-blue-950` on the blue background); rows locked while another file opens still fade; test added. Not blocking:
 the ⋯ menu closes only from ⋯ (not on outside click / Escape); a failed delete shows no message.
+
+### Task 66 — Fix: doubled text when clicking headings and re-opened edited PDFs (Fix A: same-spot copies, Fix B: hidden text)  ✅ MERGED to `main` (`5c79173`, 2026-09-20; branch `clean-text-reading` deleted)   *(Medium · 1–1.5 days)*
+
+**What the user gets:** clicking any text in the editor shows it **once**, exactly as it looks on the page. No more
+"ZZIIRROO FFEESSTTIIVVAALL" on Canva headings, and no more "Rishi KhandelwalUtkarsh Taneja" when a PDF that was
+already edited and exported is opened and edited again. Ask and read-aloud get the same clean text.
+
+**The two causes** (found in the user's files; copies in `tmp/text-doubling/`, gitignored: `ziro.pdf`, `healing.pdf`,
+`delhi-tour.pdf`, `rishi-edited.pdf`, `corporate-edited-3.pdf`, `rahul-rajput-edited.pdf`, plus `sejda-before.pdf` /
+`sejda-after.pdf` for the Fix C task; ask Claude if they are missing):
+
+1. **Same-spot copies (Canva).** Some headings are stored **twice at exactly the same position**, same size and font
+   (one copy dark, one in another colour, stacked). pdf.js returns both, `mergeRunsIntoLines` sorts the row by `x`,
+   and letter-by-letter copies interleave: `Z Z I I R R O O`. Measured: `ziro.pdf` pages 1–2 (35 copies: "ZIRO
+   FESTIVAL", "ZIRO FESTIVAL FOR US?", dates); `healing.pdf` ("RISHIKESH", "HEALING RETREAT", "FOR US");
+   `delhi-tour.pdf` ("DELHI FOR US", "18 October"); GOA 2026 ("GOA FOR US"). Whole-phrase copies give
+   "GOA FOR USGOA FOR US". Offsets are exactly 0.0.
+2. **Hidden old text under a cover (re-opened exports).** Our Export paints a cover rectangle over the old words and
+   draws the new words on top; the old words stay in the file. Re-opening reads both. Measured:
+   `rishi-edited.pdf` name line = `"Rishi Khandelwal"` (paint order 0) + `"Utkarsh Taneja"` (order 181), both at
+   (41.4, 786.9), 20.2 pt → the edit box shows "Rishi KhandelwalUtkarsh Taneja".
+   `corporate-edited-3.pdf` p.4: "Universities." (hidden) + "Universities and I'm going for the bath" →
+   "Universities. Universities and I'm going for the bath"; a re-drawn sentence reads twice.
+   `rahul-rajput-edited.pdf`: "• J Joined Firgun Travels three months ago… oined Firgun Travels…".
+
+**Example after the fix:** open `rishi-edited.pdf` → **Edit text** → click the name → the box shows **"Utkarsh
+Taneja"** only. Open `ziro.pdf` → click the cover title → **"ZIRO FESTIVAL"**. The two L's in "ALL" stay two L's.
+
+Steps 1 → 5 in order. Run the touched test files after each step.
+
+**Step 1 — Fix A: drop same-spot copies.** New pure function in `src/lib/pdf/textContent.ts` (or a new
+`src/lib/pdf/cleanRuns.ts`), applied inside `extractTextRuns` after the runs are built:
+1. Two runs on the same page are copies when: the trimmed `text` is identical, `fontSizePt` differs by ≤ 0.5 pt, and
+   both `rect.x` and `rect.y` differ by ≤ `max(0.5, 0.03 × fontSizePt)` pt.
+2. Keep the **later** run (topmost in paint order, the same rule `hitTestRun` uses) and drop the earlier one. Keep the
+   remaining runs in their original order.
+3. Letters or words that merely sit **side by side** ("LL" in "ALL", "ll" in "Khandelwal") are never copies — their
+   `x` differs by a whole letter width.
+
+**Step 2 — Fix B: drop text hidden under a later opaque box.**
+1. **Paint order of each run.** Walk the page's operator list (already fetched in `extractTextRuns` when fonts need
+   hydrating; pdf.js caches it) and give every text-showing operator (`showText`, `showSpacedText`,
+   `nextLineShowText`, `nextLineSetSpacingShowText`) an index. Map each `getTextContent` item to the operator its
+   characters come from by walking both in order and consuming characters, ignoring whitespace. If the mapping ever
+   fails for a page (characters don't line up), **skip Fix B for that page** — keep every run, never guess.
+2. **Covering boxes.** With the existing `walkOperatorListGraphicsState` in `src/lib/pdf/images.ts` (current matrix,
+   `save` / `restore`, Form XObjects), collect **filled rectangles**: a `constructPath` that is a single rectangle
+   (`re`, or four points forming an axis-aligned rectangle after the matrix) followed by `fill` / `eoFill` /
+   `fillStroke` / `eoFillStroke`. Convert to the same PDF-point space as `TextRun.rect` (like image regions). Record
+   the operator index. **Ignore** boxes that are: clipping paths (`clip` / `eoClip` → `endPath`), stroke-only, drawn
+   with fill alpha `< 1` (`setGState` `ca`), drawn with a blend mode other than Normal (`BM`, e.g. Multiply
+   highlights), or inside a soft mask.
+3. **Hidden rule.** A run is hidden when one covering box painted **after** its operator covers **≥ 95 %** of the run's
+   rect. Boxes painted **before** the text (backgrounds, table fills, coloured sidebars) never hide it. Partly covered
+   text (< 95 %) is kept.
+4. Apply Fix B first, then Fix A, inside `extractTextRuns`, so every caller gets clean runs: the editor
+   (`OverlayLayer.tsx`), Ask / read-aloud (`documentText.ts`), `locationDetect.ts`, `dateDetect.ts` (through its
+   runs) and `images.ts` (text-backed region filtering).
+
+**Step 3 — Speed check.** `extractTextRuns` may now need the operator list on every page. Measure `documentText` (the
+whole-document text Ask uses) on GOA 2026 before and after; report both. If it is more than 1.5× slower, share one
+operator-list fetch per page between text, image and shape detection instead of fetching twice.
+
+**Step 4 — Tests.**
+- Unit (pure): copies at 0.0 offset → one kept (the later); side-by-side "L","L" → both kept; same text 1 pt apart at
+  8 pt → kept (> 3 %); different size → kept.
+- Generated PDFs (pdf-lib), through `extractTextRuns` + `groupRunsIntoBlocks`:
+  - "ZIRO" drawn letter by letter twice at the same spot → block text "ZIRO"; "ALL" → "ALL".
+  - text → white rectangle over it → new text on top → only the new text;
+  - coloured rectangle **before** text (background) → text kept;
+  - rectangle after text with opacity 0.5 → kept; with Multiply blend → kept; clip rectangle → kept;
+  - rectangle covering half of a line → kept.
+- **Round trip with our own Export:** build a PDF, apply a text edit with `exportPdf` (cover + new text), load the
+  result, `extractTextRuns` → the old text is gone, the new text appears once.
+- Real files (skip with a clear message if `tmp/text-doubling/` is missing): `ziro.pdf` p.1 title block text has no
+  doubled letters ("ZIRO FESTIVAL"); `rishi-edited.pdf` name block = "Utkarsh Taneja";
+  `corporate-edited-3.pdf` p.4 contains "Universities and I'm going for the bath" and not
+  "Universities. Universities"; an untouched résumé (`tmp/bullets/RAHUL_RAJPUT_RESUME.pdf`) extracts exactly the same
+  runs as before this task.
+- `documentText` for `ziro.pdf` contains "ZIRO FESTIVAL" and not "ZZIIRROO".
+
+**Step 5 — Edit, export, re-open, edit again: every test PDF.** The user's rule: a name or line must **never** show
+twice, however many times a file is edited and re-opened. Add a local-only sweep test
+(`src/lib/pdf/reeditSweep.local.test.ts`, skipped with a clear message when `tmp/` is missing, so CI stays green) over
+**every PDF under `tmp/`** (43 today: `tmp/bullets`, `tmp/compress-tests`, `tmp/pdfs/task52-merge-qa`,
+`tmp/pdfs/task53-split-qa`, `tmp/repair-tests`, `tmp/sign-tests`, `tmp/text-doubling`). Skip files that don't open
+(the broken / random / locked repair samples) and say which were skipped.
+1. **Reading check.** For every page (cap 20 pages per file), build blocks with `extractTextRuns` +
+   `groupRunsIntoBlocks` and flag:
+   - doubled letters — a block whose letters (≥ 4) are all pairs (`ZZIIRROO`);
+   - a glued repeat — the same phrase of ≥ 8 characters twice in a row (`Rishi KhandelwalUtkarsh…` is caught by step 2;
+     `GOA FOR USGOA FOR US` here).
+2. **Re-edit round trip.** On pages 1–2, pick up to 4 blocks per page: the largest heading, one paragraph line, one
+   short line (a name, date or phone number) and, when present, one bullet-list line. For each, three generations:
+   - **Edit 1:** replace the block's text with `EDIT ONE <first word of the original>` using the **same edit-building
+     code the editor runs on Done** (`buildTextEdits` / `finishTextEdit` in `src/lib/edit/`), not hand-made edits;
+     `exportPdf`; load the result.
+   - **Edit 2:** in the exported file, find the block at the same spot → its text must be **exactly**
+     `EDIT ONE <word>` (once, nothing glued before or after it); replace it with `EDIT TWO <word>`; export; load.
+   - **Edit 3:** same check for `EDIT TWO <word>`; replace with `EDIT THREE <word>`; export; load → exactly
+     `EDIT THREE <word>`.
+   - In every generation, no run on that line may contain the original text, `EDIT ONE` or `EDIT TWO` once replaced.
+3. **Nothing visible disappears.** For each generation, every block on the page that was **not** edited has the same
+   text as in the original file (Fix B must never hide visible text).
+4. **Report.** Print one line per file: pages read, blocks flagged in step 1, round trips passed / failed, untouched
+   blocks changed (must be 0). Failures print the file, page, block text before / after. Paste the summary table into
+   the task report. **All round trips must pass and no untouched block may change**; any file where that is impossible
+   (e.g. text drawn as outlines, scans with no text) is listed with the reason.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + `textContent.test.ts` | `extractTextRuns` applies Fix B then Fix A before returning. Its signature and `TextRun` shape stay the same. Existing tests keep passing. |
+| `src/lib/pdf/hiddenText.ts` (new) + test | Fix B (step 2): paint-order mapping of text items to operators, covering-box collection, the ≥ 95 % rule. Pure functions over an operator list, plus the async page wrapper. |
+| `src/lib/pdf/images.ts` | Reuse `walkOperatorListGraphicsState` and `transformGraphicsPoint`; export anything small Fix B needs. No change to image detection results. |
+| `src/lib/pdf/documentText.ts`, `src/lib/smart/locationDetect.ts`, `src/lib/smart/dateDetect.ts`, `src/components/OverlayLayer.tsx` | No code change — they get clean runs from `extractTextRuns`. Only if step 3 needs it: share the operator-list fetch. |
+| `src/lib/pdf/bulletList.ts`, `src/lib/pdf/shapeMarkers.ts`, `src/lib/pdf/ruleLines.ts` | No change; their existing tests must stay green. |
+
+**Files that must not change:** export (`src/lib/export/**` — really removing old words on Export is the next task,
+"Fix C"), edit building (`src/lib/edit/**`), `TextEditOverlay.tsx`, the saved-projects code (`src/lib/projects/**`),
+voice and chat providers, the tools.
+
+**Guardrails:** never hide text that is visible on the page — when unsure (mapping fails, box is transparent, blended,
+clipped or only partly covering), keep the text; files without copies or covers extract exactly as before; no change
+to how edits are drawn or exported; no network calls; no new dependencies.
+
+**Claude will also check live** on `127.0.0.1:5173` with several of these files: edit → Export → open the export →
+edit the same line again, three times, before merging.
+
+**Verify (user):** open `Ziro Festival Firgun.pdf` → **Edit text** → click "ZIRO FESTIVAL" on page 1 and "ZIRO
+FESTIVAL FOR US?" on page 2 → each shows once. Open `Rishi Resume DOT (1)-signed-edited.pdf` → click the name →
+**"Utkarsh Taneja"** only → change it → **Done** → **Export** → open the export → click the name → only the newest
+name. Open a normal résumé → click a few lines and a bullet list → exactly as before. **Ask** on the Ziro PDF "What is
+this document about?" → the answer doesn't quote doubled letters.
+
+**Known limits:** copies with a visible offset (drop shadows a few points apart) are not merged; text hidden by an
+**image** or a non-rectangular shape placed over it is still read; the old words are still **inside** exported files
+(Ctrl+F in Chrome finds them) — removing them on Export is the next task (Fix C).
+
+**After merging:** Claude deletes the personal copies in `tmp/text-doubling/` (résumés, Corporate Governance,
+Sejda files) once the Fix C task no longer needs them.
+
+**Land:** merge `clean-text-reading` → `main`. Commit: `Fix: text reads once — same-spot copies and hidden old text (Task 66)`.
+
+**Review of Task 66 (2026-09-20):** accepted, no revision. typecheck / lint / build green, 1089 tests (was 1070; the
+sweep skips without `tmp/`). Code: `dropSameSpotCopies` keeps the later of identical runs within
+`max(0.5, 3 % of font size)`; new `hiddenText.ts` maps every text item to its last text-showing operator (fails closed
+— a page whose characters do not line up keeps every run), collects **single-rectangle opaque fills** (clip, stroke-
+only, `ca < 1`, non-Normal `BM` and soft masks ignored) and drops a run when a later box covers ≥ 95 % of it.
+**Beyond the spec, and needed:** our export covers hug the ink, so a box covering the full width and ≥ 70 % of the
+height also hides a run **when a later run is redrawn at the same origin** — that pair is the edit pattern and is what
+makes `rishi-edited.pdf` read correctly. `walkOperatorListGraphicsState` now also visits save / restore / transform
+(other callers ignore those operations); `extractTextRuns` always fetches the operator list — GOA 2026 whole-document
+read 429.3 → 443.5 ms (1.03×). Tests cover the safety cases: box **before** the text, half cover, `opacity 0.5`,
+Multiply blend and clipping path all keep the text.
+**Sweep, re-run by Claude** (`TASK66_SWEEP=1`, 43 files, 176 s): 235 pages, **105 / 105** three-generation
+edit → export → re-open → edit round trips passed, **0 untouched lines changed**, 4 reading flags (both Ladakh files —
+drop-shadow copies, the documented known limit), 7 files unreadable by design, `delhi-tour.pdf` had no isolated line to
+edit. Live on `127.0.0.1:5173`: Ziro title "ZIRO FESTIVAL" and date "23 September - 28 September" read once;
+`rishi-edited.pdf` name reads "Utkarsh Taneja" only; an untouched résumé still exposes all 16 blocks.
+**Carried into the Fix C task:** a built-in (not local-only) export → re-open round-trip test, and Fix A for
+drop-shadow copies if a real file needs it. Codex's run notes stay in `TASK66_REPORT.md`.
