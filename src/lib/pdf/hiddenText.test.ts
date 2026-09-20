@@ -11,7 +11,7 @@ import {
   StandardFonts,
 } from 'pdf-lib';
 import { extractTextRuns, groupRunsIntoBlocks } from './textContent';
-import { mapTextItemsToOperators } from './hiddenText';
+import { isRunCoveredByBox, mapTextItemsToOperators } from './hiddenText';
 
 const documents: PDFDocumentProxy[] = [];
 
@@ -96,4 +96,49 @@ describe('opaque later rectangles', () => {
       expect(await textWithBox(placement)).toEqual(['OLD WORDS']);
     },
   );
+});
+
+describe('ink-hugging cover geometry', () => {
+  const run = { x: 10, y: 20, w: 100, h: 20 };
+
+  it.each([0.72, 0.76])(
+    'hides a full-width cover spanning %s of the run height and its middle line',
+    (heightShare) => {
+      const height = run.h * heightShare;
+      expect(isRunCoveredByBox(run, {
+        x: run.x,
+        y: run.y + (run.h - height) / 2,
+        w: run.w,
+        h: height,
+      })).toBe(true);
+    },
+  );
+
+  it('keeps a full-width cover spanning only 55% of the run height', () => {
+    const height = run.h * 0.55;
+    expect(isRunCoveredByBox(run, {
+      x: run.x,
+      y: run.y + (run.h - height) / 2,
+      w: run.w,
+      h: height,
+    })).toBe(false);
+  });
+
+  it('keeps a tall cover that sits above the run middle line', () => {
+    expect(isRunCoveredByBox(run, {
+      x: run.x,
+      y: run.y + run.h * 0.55,
+      w: run.w,
+      h: run.h * 0.8,
+    })).toBe(false);
+  });
+
+  it('keeps a cover spanning only 90% of the run width', () => {
+    expect(isRunCoveredByBox(run, {
+      x: run.x,
+      y: run.y,
+      w: run.w * 0.9,
+      h: run.h,
+    })).toBe(false);
+  });
 });

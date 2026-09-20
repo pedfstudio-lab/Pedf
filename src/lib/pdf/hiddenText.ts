@@ -220,6 +220,17 @@ function coveredDimensions(rect: PdfRect, box: PdfRect): { width: number; height
   return { width: width / rect.w, height: height / rect.h };
 }
 
+export function isRunCoveredByBox(rect: PdfRect, box: PdfRect): boolean {
+  const coverage = coveredDimensions(rect, box);
+  if (coverage.width * coverage.height >= 0.95) return true;
+
+  const middle = rect.y + rect.h / 2;
+  return coverage.width >= 0.95 &&
+    coverage.height >= 0.6 &&
+    box.y <= middle &&
+    box.y + box.h >= middle;
+}
+
 /** If paint-order mapping fails, keep every run on the page. */
 export function dropCoveredTextRuns(
   runs: readonly TextRun[],
@@ -237,23 +248,7 @@ export function dropCoveredTextRuns(
     if (paintedAt < 0) return true;
     return !boxes.some((box) => {
       if (box.operatorIndex <= paintedAt) return false;
-      const coverage = coveredDimensions(run.rect, box.rect);
-      if (coverage.width * coverage.height >= 0.95) return true;
-
-      // Export covers can be shorter than PDF.js's font-height box yet cover
-      // the painted glyphs. Only treat that as hidden if a later redraw at the
-      // same origin corroborates it; otherwise partial covers keep the text.
-      if (coverage.width < 0.95 || coverage.height < 0.7) return false;
-      const redraw = runs.some((later, laterIndex) => {
-        if (laterIndex === index) return false;
-        const laterAt = mapped[itemIndexes[laterIndex] ?? -1] ?? -1;
-        const originTolerance = Math.max(1, run.style.fontSizePt * 0.15);
-        return laterAt > box.operatorIndex &&
-          later.pageIndex === run.pageIndex &&
-          Math.abs(later.rect.x - run.rect.x) <= originTolerance &&
-          Math.abs(later.rect.y - run.rect.y) <= originTolerance;
-      });
-      return redraw;
+      return isRunCoveredByBox(run.rect, box.rect);
     });
   });
 }

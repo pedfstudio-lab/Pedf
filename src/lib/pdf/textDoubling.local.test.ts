@@ -7,7 +7,14 @@ import { extractDocumentText } from './documentText';
 import { extractTextRuns, groupRunsIntoBlocks } from './textContent';
 
 const directory = 'tmp/text-doubling';
-const available = ['ziro.pdf', 'rishi-edited.pdf', 'corporate-edited-3.pdf', 'rahul-rajput-edited.pdf']
+const available = [
+  'ziro.pdf',
+  'rishi-edited.pdf',
+  'corporate-edited-3.pdf',
+  'rahul-rajput-edited.pdf',
+  'rahul-live-edited.pdf',
+  'utkarsh-cv-edited2.pdf',
+]
   .every((file) => existsSync(`${directory}/${file}`));
 if (!available) process.stdout.write(`Task 66 real-file checks skipped: ${directory}/ is missing samples.\n`);
 const documents: PDFDocumentProxy[] = [];
@@ -60,6 +67,23 @@ describe.skipIf(!available)('Task 66 real doubled-text samples', () => {
 
     expect(text).not.toContain('J Joined');
     expect(text).not.toContain('• J Joined');
+  });
+
+  it('reads only UTKARSH TANEJA from the ink-hugging name cover', async () => {
+    const document = await open(`${directory}/rahul-live-edited.pdf`);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+    const blocks = groupRunsIntoBlocks(runs);
+
+    expect(blocks.filter((block) => block.text === 'UTKARSH TANEJA')).toHaveLength(1);
+    expect(runs.some((run) => run.text.includes('RAHUL RAJPUT'))).toBe(false);
+  });
+
+  it('reads the edited CV contact email exactly once', async () => {
+    const document = await open(`${directory}/utkarsh-cv-edited2.pdf`);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(await document.getPage(1), 0));
+    const text = blocks.map((block) => block.text).join('\n');
+
+    expect(text.match(/eddyutkarshteddy@gmail\.com/g)).toHaveLength(1);
   });
 });
 
