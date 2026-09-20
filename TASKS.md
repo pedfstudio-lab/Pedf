@@ -9622,7 +9622,7 @@ edit. Live on `127.0.0.1:5173`: Ziro title "ZIRO FESTIVAL" and date "23 Septembe
 **Carried into the Fix C task:** a built-in (not local-only) export → re-open round-trip test, and Fix A for
 drop-shadow copies if a real file needs it. Codex's run notes stay in `TASK66_REPORT.md`.
 
-### Task 67 — Fix C: Export really removes the words it covers (no hidden old text in the file)  🔲 TODO → branch `remove-covered-text` (create from `main`)   *(Large · 3–5 days)*
+### Task 67 — Fix C: Export really removes the words it covers (no hidden old text in the file)  🟡 BUILT on branch `remove-covered-text` (`b74350f`, 2026-09-20), reviewed, **not merged to `main`** — waits for Revision 2   *(Large · 3–5 days)*
 
 **What the user gets:** after changing text and pressing **Export PDF**, the old words are **gone from the file**, not
 just hidden under a white box. Opening the exported PDF in Chrome or Acrobat and searching (Ctrl+F) for the old name,
@@ -9735,7 +9735,7 @@ clean them.
 
 **Land:** merge `remove-covered-text` → `main`. Commit: `Export removes the words it covers, not just hides them (Task 67)`.
 
-#### Task 67 — Revision 1  ✅ DONE by Claude (2026-09-20, user: Codex limits reached), on branch `remove-covered-text`, **not committed** — also clean text drawn inside Form XObjects (Canva files), and count word spacing   *(Medium · 1–2 days)*
+#### Task 67 — Revision 1  ✅ DONE by Claude (2026-09-20, user: Codex limits reached), committed `a895436` on branch `remove-covered-text`, **not merged to `main`** — also clean text drawn inside Form XObjects (Canva files), and count word spacing   *(Medium · 1–2 days)*
 
 **Why:** Task 67 removes covered words only from a page's **own** content stream. Canva draws most text inside a
 **Form XObject** ("a sticker the page stamps on"), so `planCoveredGlyphRemoval` skips those pages and the old words
@@ -9935,7 +9935,7 @@ drawn as outlines has nothing to remove; scanned pages have no text.
 
 **Land:** together with Task 67 in one commit, `Export removes the words it covers, not just hides them (Task 67)`.
 
-#### Task 66 — Revision 1  🔲 TODO → branch `covered-text-rule` (create from `main`) — the editor must hide old text under an ink-hugging cover   *(Easy · half a day)*
+#### Task 66 — Revision 1  ✅ DONE by Codex, reviewed and merged to `main` (`dfe5628`, 2026-09-20) — the editor must hide old text under an ink-hugging cover   *(Easy · half a day)*
 
 **The bug the user hit (twice, in real files):** re-opening a PDF our editor exported still shows the old words glued
 to the new ones in the edit box:
@@ -9999,3 +9999,19 @@ speed (no extra page work), or to any other reading behaviour.
 it looks on the page.
 
 **Land:** commit on `covered-text-rule`: `Fix: the editor hides old text under an ink-hugging cover (Task 66 Rev 1)`.
+
+**Review of Task 66 Revision 1 (2026-09-20):** accepted, no further revision. Codex implemented the rule exactly as
+written, in three files: `hiddenText.ts` gains the exported `isRunCoveredByBox` (area ≥ 95 %, **or** width ≥ 95 % and
+height ≥ 60 % with the box containing the run's middle line) and the "redrawn at the same origin" fallback is deleted;
+`hiddenText.test.ts` adds the four cases (0.72 and 0.76 hidden, 0.55 kept, a tall box above the middle kept, 90 % width
+kept); `textDoubling.local.test.ts` asserts `rahul-live-edited.pdf`'s name block is exactly `UTKARSH TANEJA` with no
+`RAHUL RAJPUT`, and `utkarsh-cv-edited2.pdf`'s contact line appears once.
+
+Verified: **1096 tests pass / 1 skipped across 151 files**, typecheck / lint / build green. Local sweep with
+`TASK66_SWEEP=1` over all 47 PDFs (242 pages): **121 / 121** edit-export-reopen round trips, **0 untouched lines
+changed** — no visible text disappears under the looser rule. Live at `127.0.0.1:5173` both of the user's files read
+correctly. Merged to `main` as `dfe5628` and pushed (Cloudflare deploys from `main`).
+
+Note: one full run showed 2 flaky failures that did not reproduce in three later full runs; the failing names were
+lost because the output was filtered. Capture full vitest output to a file from now on. Scope: this fixes only what
+the **editor shows** — old words remain inside exported files until Task 67 Revision 2.
