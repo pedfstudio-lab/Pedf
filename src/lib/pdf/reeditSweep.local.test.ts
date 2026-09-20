@@ -256,6 +256,38 @@ afterEach(async () => {
 });
 
 describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
+  it('removes the reported Rahul name and CV contact line from source-built exports', async () => {
+    const cases = [
+      { file: 'tmp/bullets/Rahul_Resume.pdf.pdf', target: 'RAHUL RAJPUT' },
+      { file: 'tmp/text-doubling/utkarsh-cv-edited.pdf', target: 'eddyutkarshteddy@gmail.com' },
+    ];
+
+    for (const { file, target } of cases) {
+      const originalBytes = new Uint8Array(await readFile(file));
+      const document = await open(originalBytes);
+      const lines = await pageLines(await document.getPage(1), 0);
+      const line = lines.find((candidate) => candidate.text.includes(target));
+      expect(line, `${file} should contain ${target}`).toBeDefined();
+      if (!line) continue;
+      const result: FileResult = {
+        file, pages: 1, flagged: 0, passed: 0, failed: 0, untouched: 0,
+        textLines: lines.length, removedItems: 0, skippedPages: 0, redactionFailures: 0, details: [],
+      };
+
+      await reeditLine(file, originalBytes, document, 0, line, result);
+      process.stdout.write(
+        `TASK67 TARGET ${file} | ${JSON.stringify(target)} | removed ${result.removedItems}`
+        + ` | skipped ${result.skippedPages} | round trips ${result.passed}/${result.passed + result.failed}\n`,
+      );
+      expect(result.details).toEqual([]);
+      expect(result.failed).toBe(0);
+      expect(result.redactionFailures).toBe(0);
+      expect(result.skippedPages).toBe(0);
+      expect(result.removedItems).toBeGreaterThan(0);
+      expect(result.passed).toBe(1);
+    }
+  }, 60_000);
+
   it('reads and re-edits every available tmp PDF three generations', async () => {
     const files = (await Promise.all(roots.map(pdfFiles))).flat().sort();
     const filter = process.env.TASK66_SWEEP_FILTER;

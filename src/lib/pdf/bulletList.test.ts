@@ -72,6 +72,7 @@ describe('RAHUL résumé bullet detection', () => {
     const markers = detectBulletMarkers(block, imageRegions);
 
     expect(markers).toHaveLength(6);
+    expect(markers.every((marker) => marker.markerRun === undefined)).toBe(true);
     expect(markers.map((marker) => Number(marker.line.baselineY.toFixed(2)))).toEqual([
       412.92,
       384.12,
@@ -89,6 +90,7 @@ describe('RAHUL résumé bullet detection', () => {
 
     expect(list).not.toBeNull();
     expect(list?.items).toHaveLength(5);
+    expect(list?.items.every((item) => item.markerRun === undefined)).toBe(true);
     expect(list?.items.map((item) => item.lines.length)).toEqual([2, 2, 2, 2, 2]);
     expect(list?.items.map((item) => Number(item.baselineY.toFixed(2)))).toEqual([
       205.25,
@@ -334,6 +336,7 @@ describe('Corporate Governance symbol-character bullet detection', () => {
     if (!list) return;
 
     expect(list.items).toHaveLength(18);
+    expect(list.items.every((item) => item.markerRun?.text.trim() === '•')).toBe(true);
     expect(list.items.every((item) => !/[\uF0B7☐]/u.test(item.text))).toBe(true);
     expect(list.block.text).not.toContain('\uF0B7');
     expect(list.textX).toBeCloseTo(89.76, 1);

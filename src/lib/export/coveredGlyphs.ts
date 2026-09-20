@@ -1,7 +1,7 @@
 import { OPS } from 'pdfjs-dist';
 import type { PageViewport } from 'pdfjs-dist';
 import { viewportToPdf } from './coordinates';
-import type { PdfRect } from './types';
+import type { PdfRect, ReplacedText } from './types';
 import { mapTextItemsToOperators } from '@/lib/pdf/hiddenText';
 import type { OperatorListLike } from '@/lib/pdf/images';
 import type { ContentToken, GlyphRange, TextShowOperator } from './contentStream';
@@ -54,6 +54,11 @@ export interface CoveredGlyphPlan {
   readonly reason?: string;
   readonly removedItems: number;
   readonly rewrites: readonly CoveredGlyphRewrite[];
+}
+
+export interface TextRemovalCover {
+  readonly rect: PdfRect;
+  readonly replaces?: readonly ReplacedText[];
 }
 
 interface TextItemLike {
@@ -178,8 +183,50 @@ export function coveredFraction(rect: PdfRect, cover: PdfRect): number {
   return (width * height) / (rect.w * rect.h);
 }
 
+function coveredDimensions(rect: PdfRect, cover: PdfRect): { width: number; height: number } {
+  if (rect.w <= 0 || rect.h <= 0) return { width: 0, height: 0 };
+  const width = Math.max(0, Math.min(rect.x + rect.w, cover.x + cover.w) - Math.max(rect.x, cover.x));
+  const height = Math.max(0, Math.min(rect.y + rect.h, cover.y + cover.h) - Math.max(rect.y, cover.y));
+  return { width: width / rect.w, height: height / rect.h };
+}
+
 export function itemIsCovered(rect: PdfRect, covers: readonly PdfRect[]): boolean {
-  return covers.some((cover) => coveredFraction(rect, cover) >= 0.9);
+  return covers.some((cover) => {
+    const coverage = coveredDimensions(rect, cover);
+    const middle = rect.y + rect.h / 2;
+    return coverage.width >= 0.9 && (
+      coverage.height >= 0.9 || (
+        coverage.height >= 0.6 &&
+        cover.y <= middle &&
+        cover.y + cover.h >= middle
+      )
+    );
+  });
+}
+
+function normalizedReplacementText(text: string): string {
+  return text.trim().replaceAll('\uF0B7', '\u2022');
+}
+
+function matchesReplacement(text: string, rect: PdfRect, replacement: ReplacedText): boolean {
+  if (normalizedReplacementText(text) !== normalizedReplacementText(replacement.text)) return false;
+  const distance = Math.hypot(
+    rect.x + rect.w / 2 - (replacement.rect.x + replacement.rect.w / 2),
+    rect.y + rect.h / 2 - (replacement.rect.y + replacement.rect.h / 2),
+  );
+  return distance <= Math.max(1, rect.h * 0.3);
+}
+
+export function itemMatchesCover(
+  text: string,
+  rect: PdfRect,
+  covers: readonly TextRemovalCover[],
+): boolean {
+  return covers.some((cover) => (
+    cover.replaces !== undefined
+      ? cover.replaces.some((replacement) => matchesReplacement(text, rect, replacement))
+      : itemIsCovered(rect, [cover.rect])
+  ));
 }
 
 interface GlyphBytes {
@@ -293,7 +340,7 @@ export function planCoveredGlyphRemoval(
   operatorList: OperatorListLike,
   viewport: PageViewport,
   roots: readonly ContentStreamNode[],
-  covers: readonly PdfRect[],
+  covers: readonly TextRemovalCover[],
 ): CoveredGlyphPlan {
   try {
     const contentItems = items.filter((item): item is TextItemLike => (
@@ -354,7 +401,7 @@ export function planCoveredGlyphRemoval(
         matched.push(next);
       }
       const rect = textItemRect(item as TextItemLike, viewport);
-      if (!rect || !itemIsCovered(rect, covers)) continue;
+      if (!rect || !itemMatchesCover(text, rect, covers)) continue;
       for (const { ordinal, glyphIndex } of matched) {
         const removed = removedByOrdinal.get(ordinal) ?? new Set<number>();
         removed.add(glyphIndex);

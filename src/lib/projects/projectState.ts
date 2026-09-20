@@ -1,4 +1,4 @@
-import type { Edit, PdfRect, Rgb, TextSpan, TextStyle } from '@/lib/export/types';
+import type { Edit, PdfRect, ReplacedText, Rgb, TextSpan, TextStyle } from '@/lib/export/types';
 import type { DocPresent, HistoryState } from '@/state/editsStore';
 import type { PagePlan } from '@/state/pagePlan';
 
@@ -46,6 +46,12 @@ function cloneEdit(edit: Edit): Edit {
     rect: { ...edit.rect },
     ...(edit.kind === 'line' ? { color: { ...edit.color } } : {}),
     ...(edit.kind === 'cover' && edit.color ? { color: { ...edit.color } } : {}),
+    ...(edit.kind === 'cover' && edit.replaces ? {
+      replaces: edit.replaces.map((replacement) => ({
+        text: replacement.text,
+        rect: { ...replacement.rect },
+      })),
+    } : {}),
   } as Edit;
 }
 
@@ -130,6 +136,12 @@ function isRect(value: unknown): value is PdfRect {
     && value.h >= 0;
 }
 
+function isReplacedText(value: unknown): value is ReplacedText {
+  return isRecord(value)
+    && typeof value.text === 'string'
+    && isRect(value.rect);
+}
+
 function isStyle(value: unknown): value is TextStyle {
   return isRecord(value)
     && typeof value.fontName === 'string'
@@ -164,7 +176,10 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
   if (!isRecord(value) || !hasValidBaseEdit(value, livePageCount)) return false;
   if (value.kind === 'cover') {
     return typeof value.sampleBackground === 'boolean'
-      && (value.color === undefined || isRgb(value.color));
+      && (value.color === undefined || isRgb(value.color))
+      && (value.replaces === undefined || (
+        Array.isArray(value.replaces) && value.replaces.every(isReplacedText)
+      ));
   }
   if (value.kind === 'image') return value.bytes instanceof Uint8Array;
   if (value.kind === 'line') {

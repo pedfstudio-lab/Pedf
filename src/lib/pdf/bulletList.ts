@@ -39,6 +39,7 @@ export interface BulletMarker {
   readonly centerY: number;
   /** Present only when the marker came from a text run rather than an image. */
   readonly textCharacter?: string;
+  readonly markerRun?: TextRun;
 }
 
 interface TextBulletMatch {
@@ -52,6 +53,8 @@ export interface BulletListItem {
   readonly text: string;
   readonly lines: readonly TextLine[];
   readonly markerRect: PdfRect;
+  /** Present only for a marker drawn as text; image and shape markers have no run. */
+  readonly markerRun?: TextRun;
 }
 
 export interface BulletList {
@@ -219,6 +222,7 @@ export function detectTextBulletMarkers(block: TextBlock): BulletMarker[] {
       centerX: rect.x + rect.w / 2,
       centerY: rect.y + rect.h / 2,
       textCharacter: match.markerRun.text.trim(),
+      markerRun: match.markerRun,
     }];
   });
 }
@@ -423,6 +427,7 @@ export function buildBulletList(
       text: itemText(lines),
       lines,
       markerRect: marker.rect,
+      ...(marker.markerRun ? { markerRun: marker.markerRun } : {}),
     };
   });
   const itemSpacing = items.slice(0, -1).map((item, index) => {

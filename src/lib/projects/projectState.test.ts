@@ -65,6 +65,10 @@ function allEditKinds(): Edit[] {
       rect: { x: 18, y: 270, w: 140, h: 45 },
       z: 0,
       sampleBackground: true,
+      replaces: [{
+        text: 'Original saved text',
+        rect: { x: 30, y: 280, w: 120, h: 12 },
+      }],
     },
     image,
     {
@@ -139,6 +143,37 @@ describe('project state serialization', () => {
     expect(deserializeProject(missingPage, 2)).toMatchObject({
       ok: false,
       reason: 'missing-source-page',
+    });
+  });
+
+  it('deep-clones cover replacements and accepts older saves without them', () => {
+    const source = history();
+    const serialized = serializeProject(source, 0, 1);
+    const sourceCover = source.present.edits.find((edit) => edit.kind === 'cover');
+    const serializedCover = serialized.history.present.edits.find((edit) => edit.kind === 'cover');
+
+    expect(serializedCover?.replaces).toEqual(sourceCover?.replaces);
+    expect(serializedCover?.replaces).not.toBe(sourceCover?.replaces);
+    expect(serializedCover?.replaces?.[0]?.rect).not.toBe(sourceCover?.replaces?.[0]?.rect);
+
+    const legacy = serializeProject(source, 0, 1) as unknown as {
+      history: { present: { edits: Array<Record<string, unknown>> } };
+    };
+    const legacyCover = legacy.history.present.edits.find((edit) => edit.kind === 'cover');
+    delete legacyCover?.replaces;
+    expect(deserializeProject(legacy, 3)).toMatchObject({ ok: true });
+  });
+
+  it('rejects corrupt replacement metadata', () => {
+    const corrupt = serializeProject(history(), 0, 1) as unknown as {
+      history: { present: { edits: Array<Record<string, unknown>> } };
+    };
+    const cover = corrupt.history.present.edits.find((edit) => edit.kind === 'cover');
+    if (cover) cover.replaces = [{ text: 42, rect: { x: 1, y: 2, w: 3, h: 4 } }];
+
+    expect(deserializeProject(corrupt, 3)).toMatchObject({
+      ok: false,
+      reason: 'corrupt',
     });
   });
 

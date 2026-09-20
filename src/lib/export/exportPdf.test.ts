@@ -5,7 +5,10 @@ import {
   degrees,
   endText,
   moveText,
+  PDFDict,
   PDFDocument,
+  PDFHexString,
+  PDFName,
   PDFOperator,
   PDFOperatorNames,
   PDFString,
@@ -14,8 +17,11 @@ import {
   StandardFonts,
 } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
+import { buildBulletListEdits, buildTextEdits } from '@/lib/edit/buildTextEdits';
+import { detectBulletListFromRegions, formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
-import { extractTextRuns } from '@/lib/pdf/textContent';
+import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
+import type { TextRun } from '@/lib/pdf/textContent';
 import { worstBlockDiff } from '@/harness/pixelDiff';
 import { planToGeometry } from '@/state/pagePlan';
 import type { PagePlan } from '@/state/pagePlan';
@@ -92,6 +98,134 @@ async function makeCoveredTextDocument(): Promise<EditDocument> {
       },
     ],
   };
+}
+
+async function makeEditorBuiltTextDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([320, 400]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const oldText = 'EDITOR BUILT OLD NAME';
+  const newText = 'EDITOR BUILT NEW NAME';
+  const size = 14;
+  const style = {
+    fontName: 'Helvetica',
+    fontSizePt: size,
+    bold: false,
+    italic: false,
+    color: { r: 0, g: 0, b: 0 },
+  };
+  const run: TextRun = {
+    pageIndex: 0,
+    text: oldText,
+    rect: { x: 30, y: 310, w: font.widthOfTextAtSize(oldText, size), h: size },
+    style,
+  };
+  page.drawText(oldText, { x: run.rect.x, y: run.rect.y, size, font });
+  page.drawText('UNCHANGED EDITOR LINE', { x: 30, y: 250, size, font });
+  const built = buildTextEdits(run, {
+    text: newText,
+    style,
+    width: font.widthOfTextAtSize(newText, size),
+    height: size,
+    dx: 0,
+    dy: 0,
+  }, 1);
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [built.cover, built.text],
+    sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+  };
+}
+
+async function makeWordSymbolBulletDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([360, 420]);
+  const symbol = await pdf.embedFont(StandardFonts.Symbol);
+  const body = await pdf.embedFont(StandardFonts.Helvetica);
+  await pdf.flush();
+  const symbolKey = page.node.newFontDictionary('WordSymbol', symbol.ref);
+  const symbolDict = pdf.context.lookup(symbol.ref, PDFDict);
+  const toUnicode = pdf.context.register(pdf.context.flateStream(`
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /WordSymbolBullet def
+/CMapType 2 def
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+1 beginbfchar
+<B7> <F0B7>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+`));
+  symbolDict.set(PDFName.of('ToUnicode'), toUnicode);
+
+  const drawWordBullet = (y: number) => page.pushOperators(
+    beginText(),
+    setFontAndSize(symbolKey, 12),
+    moveText(30, y),
+    PDFOperator.of(PDFOperatorNames.ShowText, [PDFHexString.of('B7')]),
+    endText(),
+  );
+  drawWordBullet(320);
+  page.drawText('OLD FIRST ITEM', { x: 47, y: 320, size: 12, font: body });
+  drawWordBullet(298);
+  page.drawText('OLD SECOND ITEM', { x: 47, y: 298, size: 12, font: body });
+  page.drawText('UNCHANGED BULLET FIXTURE LINE', { x: 30, y: 250, size: 12, font: body });
+
+  const originalBytes = await pdf.save();
+  const source = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+  try {
+    const sourcePage = await source.getPage(1);
+    const rawSource = await sourcePage.getTextContent();
+    expect(rawSource.items.some((item) => 'str' in item && item.str === '\uF0B7')).toBe(true);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(sourcePage, 0));
+    const list = blocks
+      .map((block) => detectBulletListFromRegions(block, []))
+      .find((candidate) => candidate !== null);
+    expect(list).not.toBeNull();
+    if (!list) throw new Error('The generated Word-symbol list was not detected.');
+
+    const items = [
+      { text: 'NEW FIRST ITEM', lines: ['NEW FIRST ITEM'] },
+      { text: 'NEW SECOND ITEM', lines: ['NEW SECOND ITEM'] },
+    ];
+    const built = buildBulletListEdits(list, {
+      text: formatBulletEditorText(items.map((item) => item.text)),
+      style: list.block.style,
+      width: list.coverRect.w,
+      height: list.coverRect.h,
+      dx: 0,
+      dy: 0,
+    }, items, 1, 100);
+
+    return {
+      originalBytes,
+      pages: [{
+        pageIndex: 0,
+        widthPt: 360,
+        heightPt: 420,
+        rotation: 0,
+        boxOffset: { x: 0, y: 0 },
+      }],
+      edits: [...built.covers, ...built.texts],
+      sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+    };
+  } finally {
+    await source.destroy();
+  }
 }
 
 async function makeFormXObjectDocument(): Promise<EditDocument> {
@@ -558,6 +692,53 @@ describe('exportPdf', () => {
       expect(runs.some((run) => run.text === 'UNCHANGED LINE')).toBe(true);
     } finally {
       await reopened.destroy();
+    }
+  });
+
+  it('removes editor-built source words, writes the replacement once, and preserves pixels', async () => {
+    const doc = await makeEditorBuiltTextDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+
+    expect(redacted.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(redacted.warnings).toEqual([]);
+    const raw = await pageText(redacted.bytes, 1);
+    expect(raw).not.toContain('EDITOR BUILT OLD NAME');
+    expect(raw.match(/EDITOR BUILT NEW NAME/g)).toHaveLength(1);
+    expect(raw).toContain('UNCHANGED EDITOR LINE');
+
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderFirstPage(baseline.bytes),
+        renderFirstPage(redacted.bytes),
+      ]);
+      expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
+    }
+  });
+
+  it('removes a Word Symbol bullet together with its edited list text', async () => {
+    const doc = await makeWordSymbolBulletDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+    expect(redacted.redaction.skippedPages).toBe(0);
+    const raw = await pageText(redacted.bytes, 1);
+    expect(raw).not.toContain('\uF0B7');
+    expect(raw).not.toContain('OLD FIRST ITEM');
+    expect(raw).not.toContain('OLD SECOND ITEM');
+    expect(raw.match(/NEW FIRST ITEM/g)).toHaveLength(1);
+    expect(raw.match(/NEW SECOND ITEM/g)).toHaveLength(1);
+    expect(raw).toContain('UNCHANGED BULLET FIXTURE LINE');
+
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderFirstPage(baseline.bytes),
+        renderFirstPage(redacted.bytes),
+      ]);
+      expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
     }
   });
 

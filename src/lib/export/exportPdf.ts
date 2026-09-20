@@ -6,7 +6,7 @@ import { pdfjs } from '@/lib/pdf/worker';
 import { makePageContext } from './context';
 import { HANDLERS } from './registry';
 import type { EditHandler } from './registry';
-import type { EditDocument, ExportRedactionResult, PdfRect } from './types';
+import type { EditDocument, ExportRedactionResult } from './types';
 import {
   rewriteTextShowOperator,
   serializeContentStream,
@@ -120,7 +120,7 @@ async function removeCoveredText(
       const tree = buildPageStreamTree(pdf, pageIndex);
       const originalPageIndex = sourcePageIndex(doc, pageIndex);
       const covers = (editsByPage.get(pageIndex) ?? []).flatMap((edit) => (
-        edit.kind === 'cover' ? [edit.rect as PdfRect] : []
+        edit.kind === 'cover' ? [{ rect: edit.rect, replaces: edit.replaces }] : []
       ));
       if (!tree) reason = 'the content streams could not be decoded';
       else if (originalPageIndex === null || originalPageIndex < 0 || originalPageIndex >= reader.numPages) {

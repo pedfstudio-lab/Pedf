@@ -18,17 +18,27 @@ const style = {
 } as const;
 
 function line(text: string, baselineY: number): TextLine {
+  const rect = { x: 30, y: baselineY, w: 120, h: 10 };
   return {
     pageIndex: 0,
     text,
     baselineY,
-    rect: { x: 30, y: baselineY, w: 120, h: 10 },
+    rect,
     style,
-    runs: [],
+    runs: [{ pageIndex: 0, text, rect, style }],
   };
 }
 
-function fixtureList(): BulletList {
+function markerRun(baselineY: number) {
+  return {
+    pageIndex: 0,
+    text: '•',
+    rect: { x: 20, y: baselineY, w: 3, h: 10 },
+    style,
+  };
+}
+
+function fixtureList(textMarkers = false): BulletList {
   const lines = [line('First item', 100), line('Second item', 88)];
   const block: TextBlock = {
     pageIndex: 0,
@@ -43,8 +53,22 @@ function fixtureList(): BulletList {
     sourceBlock: block,
     block,
     items: [
-      { bulletX: 20, baselineY: 100, text: 'First item', lines: [lines[0]!], markerRect: { x: 20, y: 102, w: 3, h: 3 } },
-      { bulletX: 20, baselineY: 88, text: 'Second item', lines: [lines[1]!], markerRect: { x: 20, y: 90, w: 3, h: 3 } },
+      {
+        bulletX: 20,
+        baselineY: 100,
+        text: 'First item',
+        lines: [lines[0]!],
+        markerRect: { x: 20, y: 100, w: 3, h: 10 },
+        ...(textMarkers ? { markerRun: markerRun(100) } : {}),
+      },
+      {
+        bulletX: 20,
+        baselineY: 88,
+        text: 'Second item',
+        lines: [lines[1]!],
+        markerRect: { x: 20, y: 88, w: 3, h: 10 },
+        ...(textMarkers ? { markerRun: markerRun(88) } : {}),
+      },
     ],
     bulletX: 20,
     textX: 30,
@@ -82,6 +106,10 @@ describe('buildBulletListEdits', () => {
     expect(built.covers).toHaveLength(1);
     expect(built.covers[0]?.rect).toEqual(coverRectForBulletList(list));
     expect(built.covers[0]?.rect.x).toBeLessThan(list.block.rect.x);
+    expect(built.covers[0]?.replaces).toEqual([
+      { text: 'First item', rect: list.block.lines[0]?.rect },
+      { text: 'Second item', rect: list.block.lines[1]?.rect },
+    ]);
     const bullets = built.texts.filter((edit) => edit.text === '•');
     const bodies = built.texts.filter((edit) => edit.text !== '•');
     expect(bullets).toHaveLength(2);
@@ -94,6 +122,22 @@ describe('buildBulletListEdits', () => {
       expect(edit.style.fontRef).toBeUndefined();
       expect(edit.rect.y).toBeCloseTo(bodies[index]!.rect.y, 0);
     });
+  });
+
+  it('records text markers with their bodies but does not invent runs for image markers', () => {
+    const items = [
+      { text: 'First item', lines: ['First item'] },
+      { text: 'Second item', lines: ['Second item'] },
+    ];
+    const textBuilt = buildBulletListEdits(fixtureList(true), next, items, 7, 100);
+    expect(textBuilt.covers[0]?.replaces?.map((entry) => entry.text)).toEqual([
+      '•', 'First item', '•', 'Second item',
+    ]);
+
+    const imageBuilt = buildBulletListEdits(fixtureList(), next, items, 7, 100);
+    expect(imageBuilt.covers[0]?.replaces?.map((entry) => entry.text)).toEqual([
+      'First item', 'Second item',
+    ]);
   });
 
   it('adds approximately one line height for a new one-line item', () => {
