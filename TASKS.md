@@ -9622,7 +9622,7 @@ edit. Live on `127.0.0.1:5173`: Ziro title "ZIRO FESTIVAL" and date "23 Septembe
 **Carried into the Fix C task:** a built-in (not local-only) export → re-open round-trip test, and Fix A for
 drop-shadow copies if a real file needs it. Codex's run notes stay in `TASK66_REPORT.md`.
 
-### Task 67 — Fix C: Export really removes the words it covers (no hidden old text in the file)  🟡 BUILT on branch `remove-covered-text` (`b74350f`, 2026-09-20), reviewed, **not merged to `main`** — waits for Revision 2   *(Large · 3–5 days)*
+### Task 67 — Fix C: Export really removes the words it covers (no hidden old text in the file)  ✅ MERGED to `main` (`b74350f` + `a895436` + `7e8f053`, 2026-09-21; includes Rev 1, Rev 2 and Rev 2a; branch `remove-covered-text`)   *(Large · 3–5 days)*
 
 **What the user gets:** after changing text and pressing **Export PDF**, the old words are **gone from the file**, not
 just hidden under a white box. Opening the exported PDF in Chrome or Acrobat and searching (Ctrl+F) for the old name,
@@ -9735,7 +9735,7 @@ clean them.
 
 **Land:** merge `remove-covered-text` → `main`. Commit: `Export removes the words it covers, not just hides them (Task 67)`.
 
-#### Task 67 — Revision 1  ✅ DONE by Claude (2026-09-20, user: Codex limits reached), committed `a895436` on branch `remove-covered-text`, **not merged to `main`** — also clean text drawn inside Form XObjects (Canva files), and count word spacing   *(Medium · 1–2 days)*
+#### Task 67 — Revision 1  ✅ DONE by Claude (2026-09-20, user: Codex limits reached), reviewed and merged to `main` (`a895436`, 2026-09-21) — also clean text drawn inside Form XObjects (Canva files), and count word spacing   *(Medium · 1–2 days)*
 
 **Why:** Task 67 removes covered words only from a page's **own** content stream. Canva draws most text inside a
 **Form XObject** ("a sticker the page stamps on"), so `planCoveredGlyphRemoval` skips those pages and the old words
@@ -9834,7 +9834,7 @@ Healing brochure's "RISHIKESH" are absent from the exported files.
 **The gap it did not fix — Revision 2:** the ≥ 90 % area rule never matches our ink-hugging covers on large or
 re-aligned lines (measured 0.76 and 0.72 height share on the user's two files), so those lines are still only covered.
 
-#### Task 67 — Revision 2  🔲 TODO → same branch `remove-covered-text` (after Rev 1) — remove means remove: the edit says which words it replaced, Export deletes exactly those   *(Medium · 1–1.5 days)*
+#### Task 67 — Revision 2  ✅ DONE by Codex, reviewed and merged to `main` (`7e8f053`, 2026-09-21) — remove means remove: the edit says which words it replaced, Export deletes exactly those   *(Medium · 1–1.5 days)*
 
 **The user's words: "remove means remove."** Sejda deletes the text object the user replaced, because it knows which
 one it was. Our Export does not: by the time it runs it only receives a **cover rectangle** and the **new text**, so
@@ -9934,6 +9934,111 @@ line, a brochure title (Ziro / GOA) and a paragraph. Then open each export in ou
 drawn as outlines has nothing to remove; scanned pages have no text.
 
 **Land:** together with Task 67 in one commit, `Export removes the words it covers, not just hides them (Task 67)`.
+
+#### Task 67 — Revision 2a  ✅ DONE by Codex, reviewed and merged to `main` (`7e8f053`, 2026-09-21) — an edited bullet list must remove its dots too, not only its words   *(Easy–Medium · half a day)*
+
+**Proved, not assumed.** The failing test already exists on the branch, written while starting this revision:
+`src/lib/export/exportPdf.test.ts` → `removes a Word Symbol bullet together with its edited list text`. It draws a
+real Symbol-font bullet (code `B7`, `ToUnicode` → U+F0B7), edits the list through `buildBulletListEdits`, exports,
+and asserts the exported text contains no U+F0B7. **It fails today** — the old dot is still in the file. Keep that
+test exactly as the acceptance test for this revision.
+
+**Two separate causes — both must be fixed. The first one is the important one.**
+
+1. **The dot is never recorded.** `src/lib/pdf/bulletList.ts` → `withoutTextBulletMarker` rebuilds each list line
+   keeping only the runs **after** the marker (`line.runs.slice(markerRunIndex + 1)`), which is what gives the editor
+   a clean "First item" text box. `buildBulletListEdits` then records `replaces` from those already-stripped lines, so
+   **no entry ever claims the dot** and Revision 2 leaves it alone. This affects **every text bullet**, not only
+   Word's — a plain `•` survives export the same way.
+2. **Word's dot is spelled differently in the file.** `src/lib/pdf/textContent.ts` normalizes `WORD_SYMBOL_BULLET`
+   (U+F0B7) to `STANDARD_BULLET` (U+2022) so the editor shows a dot instead of an unknown-glyph box. So even once the
+   marker is recorded, the recorded text is U+2022 while the file holds U+F0B7, and `matchesReplacement` still fails.
+
+**An earlier draft of this revision said to change only the comparison and to leave `buildTextEdits.ts` untouched.
+That was wrong** — cause 1 was missed. This version replaces it.
+
+**What the user gets:** editing a bullet list removes **everything** the cover replaced — the words and the dots —
+whatever app made the PDF.
+
+**Step 1 — Carry the marker on the list item.** `src/lib/pdf/bulletList.ts`: `BulletListItem` gains
+`readonly markerRun?: TextRun`, filled from the matched `BulletMarker`'s `markerRun` when the marker came from a
+**text** run. Markers detected as small **images** have no text and stay as they are — there is nothing to remove.
+`markerRect` and every existing field keep their current meaning; this only adds information.
+
+**Step 2 — Record it.** `src/lib/edit/buildBulletListEdits` (in `src/lib/edit/buildTextEdits.ts`): the cover's
+`replaces` gains each item's `markerRun` alongside the body runs it already records.
+
+**The trap — do not take this shortcut.** `list.sourceBlock` still holds the original, unstripped lines, so recording
+from it looks easier. **Never do that.** `sourceBlock` can include a heading line above the list that the cover does
+**not** hide (see the "own only the marker-started suffix; the heading stays pristine" rule in `bulletList.ts`).
+Because matching is by text and centre, not by the cover's rectangle, such an entry would let Export delete a line
+that is still visible on the page. Record only what the cover actually hides.
+
+**Step 3 — Compare the two spellings of the dot as one.** `src/lib/export/coveredGlyphs.ts`, inside
+`matchesReplacement` only: put both sides through one helper that trims **and** maps U+F0B7 → U+2022 before
+comparing. The centre-distance check is unchanged, and the geometric fallback for covers with no `replaces` is
+untouched. Do **not** fix this by recording the raw character instead: `TextRun.text` is what the editor
+**displays**, and U+F0B7 there would show an unknown-glyph box in the edit box.
+
+**Step 4 — Tests.**
+- `src/lib/export/exportPdf.test.ts`: the existing Word-bullet test now **passes** — no U+F0B7, no old item text, each
+  new item once, the unedited line intact, and the page renders the same at 150 dpi.
+- `src/lib/export/coveredGlyphs.test.ts`: `itemMatchesCover` is true when the recorded text is U+2022 and the item's
+  text is U+F0B7 at the same spot; still false when the text genuinely differs or the centres are far apart.
+- `src/lib/edit/buildBulletListEdits.test.ts`: the cover's `replaces` contains each item's marker **and** its body
+  runs, and a list whose markers are images records only body runs.
+- `src/lib/pdf/bulletList.test.ts`: `markerRun` is present for text markers, absent for image markers, and no
+  existing detection result changes.
+- `src/lib/pdf/reeditSweep.local.test.ts` (local, `TASK66_SWEEP=1`, 47 files): unchanged expectations —
+  **121 / 121** round trips, **0 untouched lines changed**, **0 redaction failures**, **0 skipped pages**. `removed`
+  may rise slightly; that is the point. Report it per file.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/bulletList.ts` + test | Step 1. Detection behaviour must not change; this only adds `markerRun`. |
+| `src/lib/edit/buildTextEdits.ts` + `buildBulletListEdits.test.ts` | Step 2. Cover geometry and text edits must not move. |
+| `src/lib/export/coveredGlyphs.ts` + test | Step 3, inside `matchesReplacement` only. |
+| `src/lib/export/exportPdf.test.ts` | Already written — it must go from failing to passing. |
+| `src/lib/pdf/textContent.ts` | **No change.** The reader keeps normalizing, so the editor keeps showing a dot. |
+
+**Files that must not change:** how edits are drawn, page operations, saved projects, the reading rules (Task 66 and
+its Revision 1), the tools, voice and chat.
+
+**Guardrails:** never claim text the cover does not hide; never delete a glyph no edit claims; the visible page must
+render identically (the 150 dpi check stays); a page that cannot be rewritten safely keeps the cover and warns;
+widen the match by exactly this one character pair and nothing else.
+
+**Verify (user):** open a PDF made in Word that has a bullet list → edit one of the bullet lines → **Export PDF** →
+open the export in Chrome → **Ctrl+F** the old wording → not found; then **Ctrl+A**, **Ctrl+C**, paste into Notepad →
+the old words are absent and there is no extra stray dot. The visible page still shows its bullets normally.
+
+**Known limits:** only Word's Symbol bullet is re-spelled; other producers' private-use characters are not covered.
+If more turn up they belong in the same helper. Bullets drawn as images are Revision 3's territory (pictures).
+
+**Land:** commit on `remove-covered-text`, then merge the whole branch to `main` together with Task 67, Revision 1
+and Revision 2, as the user asked.
+
+**Review of Task 67 Revisions 2 and 2a (2026-09-21):** accepted, no further revision. Rev 2 landed the five steps as
+written. Rev 2a needed the spec rewritten mid-flight: the first draft blamed only the U+F0B7 spelling and said
+`buildTextEdits.ts` must not change, but the marker run is **stripped** by `withoutTextBulletMarker`, so no entry
+ever claimed the dot — every text bullet leaked, not just Word's. Codex spotted the inconsistency before coding and
+stopped, which was the right call; the failing proof test it wrote first (`exportPdf.test.ts` →
+`removes a Word Symbol bullet together with its edited list text`) became the acceptance test. The `sourceBlock`
+shortcut was avoided as instructed, so no heading outside a cover can be claimed.
+
+Verified: **1119 tests pass / 2 skipped across 153 files**, typecheck / lint / build green. Local sweep with
+`TASK66_SWEEP=1` over all 47 PDFs (242 pages), three generations each: **121 / 121** round trips, **0 redaction
+failures**, **0 pages skipped**, **0 untouched lines changed**, **807** old items removed (801 before Rev 2a; the
+six extra are bullet markers). The two reported files are rebuilt through the editor's own code and asserted clean:
+the résumé name (3 removed) and the CV contact line (9 removed). Real-file coverage on both branches of the new
+bullet code: the Rahul résumé asserts image markers carry **no** run, the Corporate Governance document asserts every
+item's marker **is** the Symbol bullet.
+
+Open, deliberately not fixed here: bullets drawn as images or shapes still leave their picture behind (Revision 3,
+pictures); `coveredFraction` in `coveredGlyphs.ts` is now unused; a cover whose `replaces` is an empty array skips the
+geometric fallback, reachable only for a block with no lines.
 
 #### Task 66 — Revision 1  ✅ DONE by Codex, reviewed and merged to `main` (`dfe5628`, 2026-09-20) — the editor must hide old text under an ink-hugging cover   *(Easy · half a day)*
 
