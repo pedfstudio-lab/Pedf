@@ -65,6 +65,7 @@ describe('buildTextEdits', () => {
       rect: run.rect,
       z: 10,
       sampleBackground: true,
+      replaces: [{ text: run.text, rect: run.rect }],
     });
     expect(result.text).toMatchObject({
       kind: 'text',
@@ -104,13 +105,15 @@ describe('buildTextEdits', () => {
   });
 
   it('emits locally sampled line covers and selectable text edits on successive baselines', () => {
+    const firstRun = { ...run, text: 'Line one', rect: { x: 40, y: 500, w: 70, h: 12 } };
+    const secondRun = { ...run, text: 'Line two', rect: { x: 40, y: 484, w: 64, h: 12 } };
     const firstLine = {
       pageIndex: run.pageIndex,
       text: 'Line one',
       rect: { x: 40, y: 500, w: 70, h: 12 },
       baselineY: 500,
       style: run.style,
-      runs: [],
+      runs: [firstRun],
     };
     const secondLine = {
       pageIndex: run.pageIndex,
@@ -118,7 +121,7 @@ describe('buildTextEdits', () => {
       rect: { x: 40, y: 484, w: 64, h: 12 },
       baselineY: 484,
       style: run.style,
-      runs: [],
+      runs: [secondRun],
     };
     const block: TextBlock = {
       pageIndex: run.pageIndex,
@@ -139,6 +142,10 @@ describe('buildTextEdits', () => {
     expect(result.covers.map((edit) => edit.rect)).toEqual(coverRectsForTextBlock(block));
     expect(result.covers).toHaveLength(2);
     expect(result.covers.map((edit) => edit.z)).toEqual([20, 21]);
+    expect(result.covers.map((edit) => edit.replaces)).toEqual([
+      [{ text: firstRun.text, rect: firstRun.rect }],
+      [{ text: secondRun.text, rect: secondRun.rect }],
+    ]);
     expect(coverRectForTextBlock(block).w).toBeGreaterThanOrEqual(firstLine.rect.w);
     expect(result.texts.map((edit) => edit.text)).toEqual(['First', 'second', 'third']);
     expect(result.texts.map((edit) => edit.rect)).toEqual([
@@ -290,6 +297,7 @@ describe('buildTextEdits', () => {
   });
 
   it('uses a natural shared line height and emits no undeletable blank text line', () => {
+    const sourceRun = { ...run, text: '1', rect: { x: 40, y: 500, w: 12, h: 12 } };
     const block: TextBlock = {
       pageIndex: run.pageIndex,
       text: '1',
@@ -297,7 +305,14 @@ describe('buildTextEdits', () => {
       topBaselineY: 500,
       lineHeightPt: 40,
       style: run.style,
-      lines: [],
+      lines: [{
+        pageIndex: run.pageIndex,
+        text: '1',
+        rect: sourceRun.rect,
+        baselineY: 500,
+        style: run.style,
+        runs: [sourceRun],
+      }],
     };
 
     expect(textBlockLineHeight(block, run.style)).toBeCloseTo(18, 5);
@@ -308,6 +323,7 @@ describe('buildTextEdits', () => {
       30,
     );
     expect(result.covers).toHaveLength(1);
+    expect(result.covers[0]?.replaces).toEqual([{ text: '1', rect: sourceRun.rect }]);
     expect(result.texts).toEqual([]);
   });
 

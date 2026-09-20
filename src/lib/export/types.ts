@@ -77,10 +77,19 @@ export interface TextEdit extends BaseEdit {
   readonly alignWidthPt?: number;
 }
 
+export interface ReplacedText {
+  /** Exactly as `extractTextRuns` read it. */
+  readonly text: string;
+  /** The run's rect in the same PDF-point space as every other edit rect. */
+  readonly rect: PdfRect;
+}
+
 export interface CoverEdit extends BaseEdit {
   readonly kind: 'cover';
   readonly color?: Rgb;
   readonly sampleBackground: boolean;
+  /** Source text runs intentionally hidden by this cover. */
+  readonly replaces?: readonly ReplacedText[];
 }
 
 export interface ImageEdit extends BaseEdit {
@@ -110,4 +119,9 @@ export interface EditDocument {
   /** Ordered live pages. Omitted plans retain the legacy identity export path. */
   plan?: PagePlan;
   sampleBackground?: (pageIndex: number, rect: PdfRect) => Rgb;
+}
+
+export interface ExportRedactionResult {
+  readonly removedItems: number;
+  readonly skippedPages: number;
 }

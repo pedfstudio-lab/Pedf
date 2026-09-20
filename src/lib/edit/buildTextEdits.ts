@@ -22,6 +22,10 @@ function id(): string {
   return `edit-${fallbackId}`;
 }
 
+function replacedText(runs: readonly TextRun[]) {
+  return runs.map((run) => ({ text: run.text, rect: { ...run.rect } }));
+}
+
 export interface NextTextEdit {
   readonly text: string;
   readonly spans?: readonly TextSpan[];
@@ -48,6 +52,7 @@ export function buildTextEdits(
     rect: run.rect,
     z,
     sampleBackground: true,
+    replaces: replacedText([run]),
   };
   const text: TextEdit = {
     id: id(),
@@ -199,14 +204,18 @@ export function buildTextBlockEdits(
   z: number,
   base: TextBlockBase = { x: block.rect.x, topBaselineY: block.topBaselineY },
 ): { readonly covers: readonly CoverEdit[]; readonly texts: readonly TextEdit[] } {
-  const covers = coverRectsForTextBlock(block).map<CoverEdit>((rect, index) => ({
-    id: id(),
-    kind: 'cover',
-    pageIndex: block.pageIndex,
-    rect,
-    z: z + index,
-    sampleBackground: true,
-  }));
+  const covers = coverRectsForTextBlock(block).map<CoverEdit>((rect, index) => {
+    const runs = block.lines[index]?.runs ?? block.lines.flatMap((line) => line.runs);
+    return {
+      id: id(),
+      kind: 'cover',
+      pageIndex: block.pageIndex,
+      rect,
+      z: z + index,
+      sampleBackground: true,
+      replaces: replacedText(runs),
+    };
+  });
   const firstBaseline = base.topBaselineY + next.dy;
   const baselines = baselinesForLines(
     wrappedLines,
@@ -334,6 +343,10 @@ export function buildBulletListEdits(
     rect: coverRectForBulletList(list),
     z,
     sampleBackground: true,
+    replaces: replacedText(list.items.flatMap((item) => [
+      ...(item.markerRun ? [item.markerRun] : []),
+      ...item.lines.flatMap((line) => line.runs),
+    ])),
   };
   const texts: TextEdit[] = [];
   const boxText = formatBulletEditorText(items.map((item) => item.text));

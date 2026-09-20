@@ -1,11 +1,356 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+  beginText,
+  degrees,
+  endText,
+  moveText,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFOperator,
+  PDFOperatorNames,
+  PDFString,
+  setFontAndSize,
+  setWordSpacing,
+  StandardFonts,
+} from 'pdf-lib';
 import { exportPdf } from './exportPdf';
+import { buildBulletListEdits, buildTextEdits } from '@/lib/edit/buildTextEdits';
+import { detectBulletListFromRegions, formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
+import type { TextRun } from '@/lib/pdf/textContent';
+import { worstBlockDiff } from '@/harness/pixelDiff';
 import { planToGeometry } from '@/state/pagePlan';
 import type { PagePlan } from '@/state/pagePlan';
 import type { CoverEdit, EditDocument, LineEdit, PdfRect, TextEdit } from './types';
+
+const optionalCanvas = await import('@napi-rs/canvas').catch(() => undefined);
+
+async function renderFirstPage(bytes: Uint8Array): Promise<ImageData> {
+  const createCanvas = optionalCanvas?.createCanvas;
+  if (!createCanvas) throw new Error('Optional @napi-rs/canvas is unavailable.');
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const page = await document.getPage(1);
+    const viewport = page.getViewport({ scale: 150 / 72 });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const context = canvas.getContext('2d');
+    await page.render({
+      canvasContext: context as unknown as CanvasRenderingContext2D,
+      viewport,
+    }).promise;
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      data: new Uint8ClampedArray(image.data),
+      width: image.width,
+      height: image.height,
+      colorSpace: 'srgb',
+    } as ImageData;
+  } finally {
+    await document.destroy();
+  }
+}
+
+async function makeCoveredTextDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([320, 400]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const oldText = 'OLD PRIVATE NAME';
+  const oldWidth = font.widthOfTextAtSize(oldText, 14);
+  page.drawText(oldText, { x: 30, y: 310, size: 14, font });
+  page.drawText('UNCHANGED LINE', { x: 30, y: 250, size: 14, font });
+  const rect = { x: 28, y: 307, w: oldWidth + 4, h: 19 };
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [
+      {
+        id: 'cover-old-name',
+        kind: 'cover',
+        pageIndex: 0,
+        rect,
+        z: 1,
+        sampleBackground: false,
+      },
+      {
+        id: 'new-name',
+        kind: 'text',
+        pageIndex: 0,
+        rect: { ...rect, x: 30, y: 310 },
+        z: 2,
+        text: 'NEW PUBLIC NAME',
+        style: {
+          fontName: 'Helvetica',
+          fontSizePt: 14,
+          bold: false,
+          italic: false,
+          color: { r: 0, g: 0, b: 0 },
+        },
+      },
+    ],
+  };
+}
+
+async function makeEditorBuiltTextDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([320, 400]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const oldText = 'EDITOR BUILT OLD NAME';
+  const newText = 'EDITOR BUILT NEW NAME';
+  const size = 14;
+  const style = {
+    fontName: 'Helvetica',
+    fontSizePt: size,
+    bold: false,
+    italic: false,
+    color: { r: 0, g: 0, b: 0 },
+  };
+  const run: TextRun = {
+    pageIndex: 0,
+    text: oldText,
+    rect: { x: 30, y: 310, w: font.widthOfTextAtSize(oldText, size), h: size },
+    style,
+  };
+  page.drawText(oldText, { x: run.rect.x, y: run.rect.y, size, font });
+  page.drawText('UNCHANGED EDITOR LINE', { x: 30, y: 250, size, font });
+  const built = buildTextEdits(run, {
+    text: newText,
+    style,
+    width: font.widthOfTextAtSize(newText, size),
+    height: size,
+    dx: 0,
+    dy: 0,
+  }, 1);
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [built.cover, built.text],
+    sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+  };
+}
+
+async function makeWordSymbolBulletDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([360, 420]);
+  const symbol = await pdf.embedFont(StandardFonts.Symbol);
+  const body = await pdf.embedFont(StandardFonts.Helvetica);
+  await pdf.flush();
+  const symbolKey = page.node.newFontDictionary('WordSymbol', symbol.ref);
+  const symbolDict = pdf.context.lookup(symbol.ref, PDFDict);
+  const toUnicode = pdf.context.register(pdf.context.flateStream(`
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /WordSymbolBullet def
+/CMapType 2 def
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+1 beginbfchar
+<B7> <F0B7>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+`));
+  symbolDict.set(PDFName.of('ToUnicode'), toUnicode);
+
+  const drawWordBullet = (y: number) => page.pushOperators(
+    beginText(),
+    setFontAndSize(symbolKey, 12),
+    moveText(30, y),
+    PDFOperator.of(PDFOperatorNames.ShowText, [PDFHexString.of('B7')]),
+    endText(),
+  );
+  drawWordBullet(320);
+  page.drawText('OLD FIRST ITEM', { x: 47, y: 320, size: 12, font: body });
+  drawWordBullet(298);
+  page.drawText('OLD SECOND ITEM', { x: 47, y: 298, size: 12, font: body });
+  page.drawText('UNCHANGED BULLET FIXTURE LINE', { x: 30, y: 250, size: 12, font: body });
+
+  const originalBytes = await pdf.save();
+  const source = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+  try {
+    const sourcePage = await source.getPage(1);
+    const rawSource = await sourcePage.getTextContent();
+    expect(rawSource.items.some((item) => 'str' in item && item.str === '\uF0B7')).toBe(true);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(sourcePage, 0));
+    const list = blocks
+      .map((block) => detectBulletListFromRegions(block, []))
+      .find((candidate) => candidate !== null);
+    expect(list).not.toBeNull();
+    if (!list) throw new Error('The generated Word-symbol list was not detected.');
+
+    const items = [
+      { text: 'NEW FIRST ITEM', lines: ['NEW FIRST ITEM'] },
+      { text: 'NEW SECOND ITEM', lines: ['NEW SECOND ITEM'] },
+    ];
+    const built = buildBulletListEdits(list, {
+      text: formatBulletEditorText(items.map((item) => item.text)),
+      style: list.block.style,
+      width: list.coverRect.w,
+      height: list.coverRect.h,
+      dx: 0,
+      dy: 0,
+    }, items, 1, 100);
+
+    return {
+      originalBytes,
+      pages: [{
+        pageIndex: 0,
+        widthPt: 360,
+        heightPt: 420,
+        rotation: 0,
+        boxOffset: { x: 0, y: 0 },
+      }],
+      edits: [...built.covers, ...built.texts],
+      sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+    };
+  } finally {
+    await source.destroy();
+  }
+}
+
+async function makeFormXObjectDocument(): Promise<EditDocument> {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const sourcePage = source.addPage([320, 400]);
+  const sourceFont = await source.embedFont(StandardFonts.Helvetica);
+  sourcePage.drawText('FORM SECRET', { x: 30, y: 310, size: 14, font: sourceFont });
+
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const [embeddedPage] = await pdf.embedPdf(await source.save());
+  if (!embeddedPage) throw new Error('The Form XObject fixture page was not embedded.');
+  const page = pdf.addPage([320, 400]);
+  page.drawPage(embeddedPage);
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [{
+      id: 'cover-form-secret',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 307, w: 100, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
+
+/** Two pages stamping the SAME embedded form; only page 1 is covered. */
+async function makeSharedFormDocument(): Promise<EditDocument> {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const sourcePage = source.addPage([320, 400]);
+  const sourceFont = await source.embedFont(StandardFonts.Helvetica);
+  sourcePage.drawText('SHARED SECRET', { x: 30, y: 310, size: 14, font: sourceFont });
+
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const [embeddedPage] = await pdf.embedPdf(await source.save());
+  if (!embeddedPage) throw new Error('The shared form fixture page was not embedded.');
+  for (let index = 0; index < 2; index += 1) pdf.addPage([320, 400]).drawPage(embeddedPage);
+  const geometry = (pageIndex: number) => ({
+    pageIndex,
+    widthPt: 320,
+    heightPt: 400,
+    rotation: 0 as const,
+    boxOffset: { x: 0, y: 0 },
+  });
+  return {
+    originalBytes: await pdf.save(),
+    pages: [geometry(0), geometry(1)],
+    edits: [{
+      id: 'cover-shared',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 307, w: 120, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
+
+/** A justified-style line drawn with word spacing, where only the start is covered. */
+async function makeWordSpacedDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([400, 200]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontKey = page.node.newFontDictionary('Helvetica', font.ref);
+  const removed = 'OLD WORDS HERE';
+  const wordSpacing = 6;
+  const spaces = 3;
+  page.pushOperators(
+    beginText(),
+    setFontAndSize(fontKey, 14),
+    setWordSpacing(wordSpacing),
+    moveText(30, 120),
+    PDFOperator.of(PDFOperatorNames.ShowText, [PDFString.of(`${removed} KEEP`)]),
+    endText(),
+  );
+  const removedWidth = font.widthOfTextAtSize(`${removed} `, 14) + wordSpacing * spaces;
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 400,
+      heightPt: 200,
+      rotation: 0 as const,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [{
+      id: 'cover-word-spaced',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 117, w: removedWidth, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
+
+async function firstItemPosition(bytes: Uint8Array, needle: string): Promise<number | null> {
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const content = await (await document.getPage(1)).getTextContent();
+    for (const item of content.items) {
+      if ('str' in item && item.str.includes(needle)) return item.transform[4] ?? null;
+    }
+    return null;
+  } finally {
+    await document.destroy();
+  }
+}
+
+async function pageText(bytes: Uint8Array, pageNumber: number): Promise<string> {
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const content = await (await document.getPage(pageNumber)).getTextContent();
+    return content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
+  } finally {
+    await document.destroy();
+  }
+}
 
 async function makeTwoPageDocument(): Promise<EditDocument> {
   const pdf = await PDFDocument.create({ updateMetadata: false });
@@ -325,5 +670,121 @@ describe('exportPdf', () => {
     }];
 
     await expect(exportPdf(doc)).rejects.toThrow(/Not implemented yet: Indic text export/);
+  });
+
+  it('removes covered old words from raw extraction while keeping the new and untouched text', async () => {
+    const result = await exportPdf(await makeCoveredTextDocument());
+    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.warnings).toEqual([]);
+
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const page = await reopened.getPage(1);
+      const content = await page.getTextContent();
+      const raw = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
+      expect(raw).not.toContain('OLD PRIVATE NAME');
+      expect(raw).toContain('NEW PUBLIC NAME');
+      expect(raw).toContain('UNCHANGED LINE');
+
+      const runs = await extractTextRuns(page, 0);
+      expect(runs.filter((run) => run.text === 'NEW PUBLIC NAME')).toHaveLength(1);
+      expect(runs.some((run) => run.text === 'OLD PRIVATE NAME')).toBe(false);
+      expect(runs.some((run) => run.text === 'UNCHANGED LINE')).toBe(true);
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('removes editor-built source words, writes the replacement once, and preserves pixels', async () => {
+    const doc = await makeEditorBuiltTextDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+
+    expect(redacted.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(redacted.warnings).toEqual([]);
+    const raw = await pageText(redacted.bytes, 1);
+    expect(raw).not.toContain('EDITOR BUILT OLD NAME');
+    expect(raw.match(/EDITOR BUILT NEW NAME/g)).toHaveLength(1);
+    expect(raw).toContain('UNCHANGED EDITOR LINE');
+
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderFirstPage(baseline.bytes),
+        renderFirstPage(redacted.bytes),
+      ]);
+      expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
+    }
+  });
+
+  it('removes a Word Symbol bullet together with its edited list text', async () => {
+    const doc = await makeWordSymbolBulletDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+    expect(redacted.redaction.skippedPages).toBe(0);
+    const raw = await pageText(redacted.bytes, 1);
+    expect(raw).not.toContain('\uF0B7');
+    expect(raw).not.toContain('OLD FIRST ITEM');
+    expect(raw).not.toContain('OLD SECOND ITEM');
+    expect(raw.match(/NEW FIRST ITEM/g)).toHaveLength(1);
+    expect(raw.match(/NEW SECOND ITEM/g)).toHaveLength(1);
+    expect(raw).toContain('UNCHANGED BULLET FIXTURE LINE');
+
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderFirstPage(baseline.bytes),
+        renderFirstPage(redacted.bytes),
+      ]);
+      expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
+    }
+  });
+
+  it('removes covered words painted inside a Form XObject', async () => {
+    const result = await exportPdf(await makeFormXObjectDocument());
+
+    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.warnings).toEqual([]);
+    expect(await pageText(result.bytes, 1)).not.toContain('FORM SECRET');
+  });
+
+  it('copies a shared form so the other page keeps its text', async () => {
+    const result = await exportPdf(await makeSharedFormDocument());
+
+    expect(result.redaction.removedItems).toBe(1);
+    expect(await pageText(result.bytes, 1)).not.toContain('SHARED SECRET');
+    expect(await pageText(result.bytes, 2)).toContain('SHARED SECRET');
+  });
+
+  it('keeps word-spaced text in place when the start of the line is removed', async () => {
+    const doc = await makeWordSpacedDocument();
+    const result = await exportPdf(doc);
+
+    expect(result.redaction.skippedPages).toBe(0);
+    expect(result.redaction.removedItems).toBeGreaterThan(0);
+    expect(await pageText(result.bytes, 1)).not.toContain('OLD WORDS HERE');
+    // Word spacing counted: the kept word sits exactly where it was drawn.
+    const [before, after] = await Promise.all([
+      firstItemPosition(doc.originalBytes, 'KEEP'),
+      firstItemPosition(result.bytes, 'KEEP'),
+    ]);
+    expect(before).not.toBeNull();
+    expect(after).toBeCloseTo(before as number, 2);
+  });
+
+  it.skipIf(!optionalCanvas)('renders identically to the cover-only fallback at 150 dpi', async () => {
+    const doc = await makeCoveredTextDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+    const [before, after] = await Promise.all([
+      renderFirstPage(baseline.bytes),
+      renderFirstPage(redacted.bytes),
+    ]);
+
+    expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
   });
 });
