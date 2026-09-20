@@ -177,6 +177,13 @@ export function tokenizeContentStream(source: Uint8Array): ContentToken[] {
   return tokens;
 }
 
+/** Decode a `/Name` token, resolving `#hh` escapes, without the leading slash. */
+export function nameValue(token: ContentToken): string | null {
+  if (token.kind !== 'name') return null;
+  const raw = decoder.decode(token.raw).slice(1);
+  return raw.replace(/#([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 export function serializeContentStream(tokens: readonly ContentToken[]): Uint8Array {
   const length = tokens.reduce((sum, token) => sum + token.raw.length, 0);
   const output = new Uint8Array(length);

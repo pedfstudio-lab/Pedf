@@ -9621,3 +9621,381 @@ edit. Live on `127.0.0.1:5173`: Ziro title "ZIRO FESTIVAL" and date "23 Septembe
 `rishi-edited.pdf` name reads "Utkarsh Taneja" only; an untouched résumé still exposes all 16 blocks.
 **Carried into the Fix C task:** a built-in (not local-only) export → re-open round-trip test, and Fix A for
 drop-shadow copies if a real file needs it. Codex's run notes stay in `TASK66_REPORT.md`.
+
+### Task 67 — Fix C: Export really removes the words it covers (no hidden old text in the file)  🔲 TODO → branch `remove-covered-text` (create from `main`)   *(Large · 3–5 days)*
+
+**What the user gets:** after changing text and pressing **Export PDF**, the old words are **gone from the file**, not
+just hidden under a white box. Opening the exported PDF in Chrome or Acrobat and searching (Ctrl+F) for the old name,
+salary or price finds **nothing**, and copying the line pastes only the new text. Sejda behaves exactly this way
+(verified: `tmp/text-doubling/sejda-before.pdf` → `sejda-after.pdf` swapped the name with **no** leftover; item count
+stayed 67 and "UTKARSH"/"TANEJA" appear nowhere in the edited file).
+
+**Why (measured today):** `tmp/text-doubling/rishi-edited.pdf`, exported by our editor, still contains
+`"Rishi Khandelwal"` at (41.4, 786.9) under the cover, with `"Utkarsh Taneja"` drawn on top. Anyone who receives that
+résumé can search or copy the old name. Task 66 stopped **our** editor from reading hidden text; it cannot clean the
+files users send to other people. This task does.
+
+**The rule:** a **cover** edit means "the user hid what is under here". So on export, for every cover, the glyphs that
+lie **fully inside** that cover are deleted from the page's drawing instructions, and the rest of the page is left
+byte-for-byte alone. The cover rectangle is still drawn (safety net and background colour).
+
+**Example:** name line replaced → the exported page draws only `Utkarsh Taneja`; `Rishi Khandelwal` is not in the file;
+the rest of the line, the page and every other page are untouched; the page looks pixel-identical to today's export.
+
+Steps 1 → 6 in order. Run the touched test files after each step.
+
+**Step 1 — Read and rewrite a content stream** — new `src/lib/export/contentStream.ts` (+ test):
+1. A minimal PDF content-stream tokenizer: numbers, names, strings (`(...)` with escapes and `<hex>`), arrays,
+   dictionaries, operators, and **inline images** (`BI … ID …raw… EI`, skipped as opaque bytes). It must be
+   **loss-free**: tokenizing and re-serializing an untouched stream returns the **same bytes**.
+2. `textShowOperators(tokens)` → the positions of every `Tj`, `'`, `"` and `TJ`, in order, with the glyph string(s)
+   each one draws.
+3. `rewriteTextShowOperator(token, keepRanges, advanceThousandths)` → replace the removed glyphs with a **TJ spacing
+   number** that keeps the text position **exactly** where it was (`[(kept) -1234 (kept)] TJ`), so nothing after it
+   shifts. Never use render mode 3 (invisible text) — invisible text is still extractable and would not fix anything.
+
+**Step 2 — Decide which glyphs to remove** — new `src/lib/export/coveredGlyphs.ts` (+ test):
+1. With pdf.js on the **original** bytes: `getTextContent()` + `getOperatorList()`, and **reuse
+   `mapTextItemsToOperators` from `src/lib/pdf/hiddenText.ts`** (Task 66) to attach each text item to the
+   text-showing operator that drew it. Glyph widths come from the operator list's glyph objects.
+2. An item is removed when **≥ 90 %** of its rect (width × height) lies inside a cover rect for that page. Anything
+   less is kept, so a word that is still partly visible is never deleted.
+3. Output per page: for each text-show operator, which character ranges to delete and how much advance to preserve.
+4. **Fail closed — skip the page and keep the cover only — when any of these is true:** the page's operator list
+   contains a Form XObject (`paintFormXObjectBegin`), the number of text-show operators found by the tokenizer does
+   not equal the number pdf.js reports, `mapTextItemsToOperators` returns no mapping, the page has no text, or the
+   document is encrypted. Skipping must never throw.
+
+**Step 3 — Wire it into Export** — `src/lib/export/exportPdf.ts`:
+1. After the page list is built and **before** the handlers draw, for every page that has at least one `cover` edit:
+   remove the covered glyphs from that page's own content streams (all streams of `/Contents`), then let the handlers
+   run unchanged. Covers, text, images and lines keep their current behaviour and z-order.
+2. **Round-trip guard:** re-tokenize the rewritten stream; if it does not parse, or the text-show count changed
+   unexpectedly, restore the original stream for that page.
+3. `ExportResult` gains `redaction: { removedItems: number; skippedPages: number }` for tests and reporting. Add a
+   `warnings` entry when a page was skipped, e.g. "Old text on page 3 could not be removed; it stays hidden under the
+   cover." Do not block or slow the export with a full re-parse of the finished document.
+4. Keep the old behaviour available behind a single internal flag so a regression can be isolated quickly.
+
+**Step 4 — Tests (must run in CI, no personal files needed).**
+- `contentStream.test.ts`: byte-identical round trip on hand-written streams (strings with escapes and parentheses,
+  hex strings, arrays, dictionaries, inline images); `TJ` rewriting keeps the following text at the same position.
+- `coveredGlyphs.test.ts`: item 100 % inside a cover → removed; 50 % inside → kept; 89 % → kept, 91 % → removed;
+  Form XObject page → skipped; operator-count mismatch → skipped.
+- **Generated round trip** (the gap left by Task 66): build a PDF with pdf-lib, apply a text edit through `exportPdf`,
+  then on the exported bytes assert (a) `extractTextRuns` returns the new text once, (b) the **raw extracted text of
+  the page does not contain the old words**, (c) every other line on the page is unchanged.
+- **Looks identical:** render the page before and after with `@napi-rs/canvas` at 150 dpi (as the compress tests do)
+  and compare pixels; the visible result must be the same within a small tolerance, because the old words were already
+  hidden by the cover.
+- Existing `exportPdf.test.ts`, `acceptance.test.ts`, the handler tests, `bulletList.test.ts` and the Task 66 tests
+  must all stay green.
+
+**Step 5 — The all-PDF sweep, extended** — `src/lib/pdf/reeditSweep.local.test.ts` (local-only, `TASK66_SWEEP=1`,
+43 files today): after **every** export generation, additionally assert that the replaced text is **absent from the
+exported document's text** (pdf.js over the exported bytes), not only absent from the editor's reading. Keep the
+existing checks: three generations, no glued text, **0 untouched lines changed**. Report per file: items removed,
+pages skipped, and any file where removal was not possible, with the reason.
+
+**Step 6 — Check it live** (Claude repeats this before merging). On `127.0.0.1:5173`:
+`rishi-edited.pdf` → change the name → **Export PDF** → open the exported file in Chrome → **Ctrl+F "Rishi"** finds
+nothing, and copying the name line pastes only the new name. The page looks the same as before. Repeat with a
+paragraph in `corporate-edited-3.pdf` and a bullet line in `rahul-rajput-edited.pdf`.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/exportPdf.ts` | Step 3: the removal pass before handlers, the round-trip guard, `redaction` counts and the skip warning. Page building, handler dispatch and z-order stay exactly as they are. |
+| `src/lib/export/types.ts` | `ExportResult` gains `redaction`; edit types are unchanged. |
+| `src/lib/export/contentStream.ts`, `src/lib/export/coveredGlyphs.ts` (both new) + tests | Steps 1–2. |
+| `src/lib/pdf/hiddenText.ts` | Export `mapTextItemsToOperators` for reuse (it already is) and nothing else; Task 66 behaviour must not change. |
+| `src/lib/export/handlers/cover.ts` | No change — the cover is still drawn, as the safety net and for the background colour. |
+| `src/lib/export/handlers/text.ts`, `image.ts`, `line.ts`, `src/lib/export/context.ts`, `src/lib/edit/**` | No change. |
+| `src/App.tsx` | Only if a warning needs showing: reuse the existing export-warnings box; no new UI. |
+| `src/lib/pdf/reeditSweep.local.test.ts` | Step 5. |
+| `src/lib/tools/**` | No change. The tools (merge, split, compress, repair, sign, watermark) have their own export paths and are out of scope. |
+
+**Files that must not change:** the editor's reading path (`src/lib/pdf/textContent.ts`, `hiddenText.ts` logic), the
+overlays, saved projects (`src/lib/projects/**`), voice and chat, the tools.
+
+**Guardrails:** never delete a glyph that is not fully under a cover; never change the visible result; when anything is
+uncertain (Form XObject, mismatch, unparsable stream, encryption), keep the old behaviour for that page and say so in
+a warning; exports must not become noticeably slower (measure GOA 2026 and the 19-page Ziro file before and after,
+report both); no new runtime dependencies.
+
+**Verify (user):** open your résumé → change the name → **Export PDF** → open the exported file in Chrome →
+**Ctrl+F** the old name → not found. Select the name line and paste it somewhere → only the new name. Open the same
+export in our editor → the name reads once. Export a brochure with a few edits → it looks exactly as it does today.
+
+**Known limits:** text inside a Form XObject (some Word and LaTeX files) and inline images cannot be rewritten yet, so
+those pages keep the cover only, with a warning; scanned pages have no text to remove; text drawn as outlines (already
+not editable) is unaffected; PDFs exported **before** this task still contain their old words — re-export them to
+clean them.
+
+**Land:** merge `remove-covered-text` → `main`. Commit: `Export removes the words it covers, not just hides them (Task 67)`.
+
+#### Task 67 — Revision 1  ✅ DONE by Claude (2026-09-20, user: Codex limits reached), on branch `remove-covered-text`, **not committed** — also clean text drawn inside Form XObjects (Canva files), and count word spacing   *(Medium · 1–2 days)*
+
+**Why:** Task 67 removes covered words only from a page's **own** content stream. Canva draws most text inside a
+**Form XObject** ("a sticker the page stamps on"), so `planCoveredGlyphRemoval` skips those pages and the old words
+stay in the exported file. Measured on the user's files (pages with text drawn inside a form): `ziro.pdf` **17 of 19**,
+`healing.pdf` **15 of 19**, `ladakh.pdf` **16 of 20**, `1-healthy-GOA.pdf` **11 of 16**, `delhi-tour.pdf` **4 of 10**,
+`sejda-before/after.pdf` **1 of 1**, `Rahul_Resume.pdf.pdf` **1 of 1**. Résumé-style files (`rishi-edited.pdf`,
+`rahul-rajput-edited.pdf`, `corporate-edited-3.pdf`) have none and already work. The Task 67 sweep reported
+**347 items removed, 132 page-attempts skipped**, nearly all of them "the page contains a Form XObject".
+
+**What the user gets:** changing the title of a Canva brochure and exporting leaves **no trace of the old title** in
+the file — Ctrl+F in Chrome finds nothing — exactly as already happens with résumés. The page still looks identical.
+
+Steps 1 → 4 in order. Run the touched test files after each step.
+
+**Step 1 — Follow the text into the forms.** In `src/lib/export/coveredGlyphs.ts`:
+1. Replace the "page has a Form XObject → skip" rule with a **nested walk**: tokenize the page's own streams, and when
+   an operator is `Do` for an XObject whose `/Subtype` is `/Form`, tokenize that form's stream and continue counting
+   text-show operators **inside** it before returning to the page, recursively (cap the depth, e.g. 8). This
+   reproduces the order pdf.js reports, because pdf.js expands forms in place.
+2. Each text-show operator now carries **where it lives**: the page stream index, or the chain of form references that
+   reach it (`[formRefA, formRefB]`) plus its index inside that stream.
+3. The existing guard stays: if the count of text-show operators in the walk differs from pdf.js's count, or any glyph
+   codes do not match the bytes, **skip the page**. Everything else in the plan (the ≥ 90 % cover rule, the byte-range
+   matching, the advance list) is unchanged — text item rectangles already include the form's own matrix, so they are
+   in the same space as the covers.
+4. **Skip the page** (with a warning) when the same form is invoked **more than once** on that page and any of its text
+   must be removed; one shared copy cannot hold two different results. Note it in the known limits.
+
+**Step 2 — Change a copy of the form, never the original.** In `src/lib/export/exportPdf.ts`:
+1. A form can be used by **several pages** (Canva reuses the same bar or frame). Rewriting it in place would delete
+   text from other pages. Before rewriting, **copy the form**: register a new stream object with the same dictionary
+   and the rewritten bytes, and point **only this page's** `/Resources /XObject` entry at the copy.
+2. For a form inside another form, copy along the whole chain (the outer form's resources must point at the copied
+   inner form), so no original object is ever modified.
+3. Keep the round-trip guard per stream: if a rewritten form stream does not re-tokenize, restore the original and
+   leave the page's cover alone.
+4. Delete the now-unused `pageHasFormXObject` early skip; every other fail-closed path (encryption, decode failure,
+   mapping failure, count mismatch) stays exactly as it is.
+
+**Step 3 — Count word spacing in the gap.** In `src/lib/export/coveredGlyphs.ts`:
+1. Track `OPS.setWordSpacing` (and the `"` operator's word-spacing operand) the same way `charSpacing` is tracked.
+2. A glyph's advance becomes `glyph.width + (charSpacing + wordSpacing when the glyph is a single-byte code 32) × 1000
+   / fontSize`. Word spacing applies only to the one-byte code 32, never to multi-byte codes.
+3. If a glyph to remove is a space in a **multi-byte** font and word spacing is not 0, **skip the page** rather than
+   guess.
+
+**Step 4 — Tests.**
+- `coveredGlyphs.test.ts` / `exportPdf.test.ts` (generated, run in CI):
+  - text drawn **inside a form** (build it with pdf-lib's `embedPage`, then draw that page): covered words are
+    removed, the new text reads once, and the page renders identically at 150 dpi;
+  - the **same form on two pages**, edited on page 1 → page 1 is cleaned and **page 2 still has its text** (this is the
+    copy-on-write proof);
+  - the same form used twice on one page → skipped with the warning;
+  - a form inside a form → cleaned through the chain;
+  - word spacing: a justified line where the removed part contains spaces → the kept words stay within 0.05 pt of
+    their original x position (compare text item positions before and after).
+- `src/lib/pdf/reeditSweep.local.test.ts` (local, `TASK66_SWEEP=1`): unchanged checks (105 round trips, **0 untouched
+  lines changed**), but the totals must now show the brochures cleaned. Report per file: removed, skipped, and the
+  reason for any remaining skip. Expected: `ziro.pdf`, `healing.pdf`, `ladakh*.pdf`, `1-healthy-GOA.pdf` and
+  `delhi-tour.pdf` go from "removed 0" to removing their covered text.
+- **Speed:** measure export time for `ziro.pdf` (19 pages) and `1-healthy-GOA.pdf` before and after this revision;
+  report both. A modest increase is fine; more than 2× needs a note.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/coveredGlyphs.ts` + test | Steps 1 and 3: the nested walk with stream locations, the same-form-twice guard, word spacing in the advance. The ≥ 90 % rule, byte matching and every fail-closed path stay. |
+| `src/lib/export/exportPdf.ts` + test | Step 2: resolve form streams, copy-on-write per page (and along nested chains), rewrite the copies, drop `pageHasFormXObject`. Handlers, z-order and warnings keep their current shape. |
+| `src/lib/export/contentStream.ts` | Only if the tokenizer needs to expose the `Do` operand; the tokenizer itself is already loss-free and must stay byte-exact. |
+| `src/lib/pdf/reeditSweep.local.test.ts` | Step 4 reporting. |
+| `src/lib/pdf/hiddenText.ts`, `textContent.ts` | No change — Task 66 reading behaviour must not move. |
+| `src/lib/export/handlers/**`, `src/lib/edit/**`, `src/lib/projects/**`, `src/components/**` | No change. |
+
+**Guardrails:** never modify a shared object in place — always copy for the page being exported; never delete a glyph
+that is not ≥ 90 % under a cover; when anything is uncertain, keep the cover-only behaviour for that page and warn;
+the visible page must stay identical (the 150 dpi comparison proves it); no new dependencies.
+
+**Verify (user):** open `Ziro Festival Firgun.pdf` → change the cover title → **Export PDF** → open the export in
+Chrome → **Ctrl+F "ZIRO"** → the old title is not found, only your new one. The page looks exactly as before. Repeat
+with GOA 2026 and the Healing brochure, and check pages you did **not** edit still read normally.
+
+**Known limits:** a form used twice on the same page is still skipped; text drawn as outlines has nothing to remove;
+scanned pages have no text; files exported before this revision still contain their old words until re-exported.
+
+**Land:** together with Task 67 in one commit, `Export removes the words it covers, not just hides them (Task 67)`.
+
+**Result of Rev 1 (Claude, 2026-09-20):** typecheck / lint / build green, 1106 tests. New `src/lib/export/formStreams.ts`
+walks a page's own streams **and** the Form XObjects it paints (nested, depth 8), and copies any form before rewriting
+it so other pages keep their text; `coveredGlyphs.ts` walks that tree, matches items across operators in one glyph
+sequence, counts word spacing, and skips a page when the same form name is painted twice; the redaction reader uses
+the legacy PDF.js build under Node so tests exercise the real path (the browser bundle is unchanged); annotation
+appearances are excluded from the operator list so filled forms stop mismatching. Sweep over all 43 local PDFs:
+**723 items removed, 0 pages skipped**, 105 / 105 round trips, 0 untouched lines changed. Live: Ziro title and the
+Healing brochure's "RISHIKESH" are absent from the exported files.
+**The gap it did not fix — Revision 2:** the ≥ 90 % area rule never matches our ink-hugging covers on large or
+re-aligned lines (measured 0.76 and 0.72 height share on the user's two files), so those lines are still only covered.
+
+#### Task 67 — Revision 2  🔲 TODO → same branch `remove-covered-text` (after Rev 1) — remove means remove: the edit says which words it replaced, Export deletes exactly those   *(Medium · 1–1.5 days)*
+
+**The user's words: "remove means remove."** Sejda deletes the text object the user replaced, because it knows which
+one it was. Our Export does not: by the time it runs it only receives a **cover rectangle** and the **new text**, so
+Task 67 has to guess which words the rectangle was meant to replace, using a geometric threshold (≥ 90 % of the run's
+area). That threshold is wrong for our own covers, which hug the ink:
+
+| File (in `tmp/text-doubling/`, gitignored) | Run | Width covered | Height covered | Task 67 result |
+|---|---|---:|---:|---|
+| `rahul-live-edited.pdf` | `RAHUL RAJPUT`, 32 pt, centred | 1.00 | **0.76** | **not removed** |
+| `utkarsh-cv-edited2.pdf` | `eddyutkarshteddy@gmail.com`, 13.9 pt | 1.00 | **0.72** | **not removed** |
+
+So the user edits a name, exports, and Chrome's Ctrl+F still finds the old name. **This revision removes the guessing
+from Export**: the edit itself carries the exact words it replaced.
+
+**What the user gets:** every text edit — name, price, date, a whole paragraph, a deleted line — leaves **nothing** of
+the old words in the exported file, whatever the font size, alignment or cover shape. Ctrl+F in Chrome finds nothing;
+copying the line pastes only the new text.
+
+Steps 1 → 5 in order. Run the touched test files after each step.
+
+**Step 1 — The edit records what it replaces.** `src/lib/export/types.ts`:
+```ts
+export interface ReplacedText {
+  /** Exactly as `extractTextRuns` read it. */
+  readonly text: string;
+  /** The run's rect in the same PDF-point space as every other edit rect. */
+  readonly rect: PdfRect;
+}
+```
+`CoverEdit` gains `readonly replaces?: readonly ReplacedText[]`. Optional, because covers that hide a picture or a
+rule line replace no text, and saved projects from before this revision have none.
+
+**Step 2 — Fill it in where covers are built.** `src/lib/edit/buildTextEdits.ts` (and the bullet-list path):
+1. The cover for a text **line** carries that line's runs (`line.runs.map(run => ({ text: run.text, rect: run.rect }))`).
+2. The cover for a **block** carries every run of the lines it covers; per-line covers carry their own line's runs.
+3. A **bullet list** edit carries the runs of the list's text lines (the dots are images or drawn shapes, not text).
+4. **Deleting** text (cover with no replacement text) carries the runs it hides, so a deletion removes the words too.
+5. Covers created elsewhere (`ImageOverlay`'s delete / move covers, rule-line covers in `OverlayLayer`) stay as they
+   are, with no `replaces`.
+
+**Step 3 — Export deletes exactly those runs.** `src/lib/export/coveredGlyphs.ts`:
+1. When a cover has `replaces`, a text item is removed when its trimmed text equals a replaced entry's trimmed text
+   **and** its rect centre is within `max(1 pt, 0.3 × the item's height)` of that entry's rect centre. **No area
+   threshold at all.** An entry that matches nothing is not an error (an earlier generation may already have removed
+   it); an item that matches nothing is left alone.
+2. When a cover has **no** `replaces`, fall back to geometry, with the same corrected rule as Task 66 Revision 1:
+   width ≥ 0.9 **and** (height ≥ 0.9 **or** (height ≥ 0.6 **and** the cover contains the item's middle line)).
+3. Everything else stays: glyph codes must match the content stream byte for byte, operator counts must agree, forms
+   are followed and copied before rewriting (Rev 1), word spacing is counted, and **any** uncertainty skips the page
+   with its warning.
+
+**Step 4 — Saved projects keep the new field.** `src/lib/projects/projectState.ts` validates and clones every edit, so
+add `replaces` to the cover's serialize / deserialize path. Old saves simply have none (geometric fallback). Keep the
+format version; a missing optional field must never make a save unreadable.
+
+**Step 5 — Tests.**
+- `coveredGlyphs.test.ts`: a cover that reaches only **72 %** of a run's height removes it when `replaces` names it;
+  the same cover with **no** `replaces` removes it too (rule 2 above); a cover covering **40 %** of the height removes
+  nothing; a `replaces` entry that matches no item is ignored; an item under the cover that is **not** in `replaces`
+  is left alone.
+- `exportPdf.test.ts`: a generated page whose line is replaced through `buildTextEdits` (not a hand-made cover) →
+  the old words are absent from the exported document's text, the new text appears once, and the page renders the
+  same at 150 dpi. Keep the Rev 1 tests (form text removed, shared form copied, word spacing) green.
+- `src/lib/edit/buildTextEdits.test.ts`: covers carry the runs of the lines they hide, for a line, a block, a bullet
+  list and a deletion.
+- `src/lib/pdf/reeditSweep.local.test.ts` (local, `TASK66_SWEEP=1`, 43 files): unchanged checks (105 round trips,
+  **0 untouched lines changed**) plus **0 redaction failures**: after every generation the replaced text must be
+  absent from the exported file. Report removed / skipped per file.
+- **The two files that failed:** rebuild them from their sources (`tmp/bullets/Rahul_Resume.pdf.pdf` and the CV the
+  user exported from) by editing the name / contact line through the editor's own edit-building code, exporting, and
+  asserting the old text is absent.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/types.ts` | `ReplacedText` and `CoverEdit.replaces` (optional). |
+| `src/lib/edit/buildTextEdits.ts` + test | Step 2. Geometry of covers and text edits must not move — this only adds information. |
+| `src/lib/export/coveredGlyphs.ts` + test | Step 3. |
+| `src/lib/projects/projectState.ts` + test | Step 4. |
+| `src/lib/export/exportPdf.ts` | Pass each cover's `replaces` into the plan; no other change. |
+| `src/components/OverlayLayer.tsx`, `ImageOverlay.tsx` | Only if they build text covers directly; their image / rule-line covers keep no `replaces`. |
+| `src/lib/pdf/hiddenText.ts` | No change here — the reading rule is Task 66 Revision 1. |
+
+**Files that must not change:** how edits are drawn, page operations, saved-project behaviour beyond the new field,
+the tools, voice and chat.
+
+**Guardrails:** never delete a glyph that no edit claims and no cover geometrically hides; never change the visible
+page (the 150 dpi comparison stays); a page that cannot be rewritten safely keeps the cover and warns; exports must
+not get noticeably slower (report `ziro.pdf` and `1-healthy-GOA.pdf` timings before and after).
+
+**Verify (user):** open `Rahul Resume.pdf` → change the name → **Export PDF** → open the export in Chrome →
+**Ctrl+F** the old name → not found; select the line and paste it → only the new name. Repeat on the CV's contact
+line, a brochure title (Ziro / GOA) and a paragraph. Then open each export in our editor → every line reads once.
+
+**Known limits:** PDFs exported before this revision still contain their old words until they are re-exported; text
+drawn as outlines has nothing to remove; scanned pages have no text.
+
+**Land:** together with Task 67 in one commit, `Export removes the words it covers, not just hides them (Task 67)`.
+
+#### Task 66 — Revision 1  🔲 TODO → branch `covered-text-rule` (create from `main`) — the editor must hide old text under an ink-hugging cover   *(Easy · half a day)*
+
+**The bug the user hit (twice, in real files):** re-opening a PDF our editor exported still shows the old words glued
+to the new ones in the edit box:
+- `UTKARSH TANEJARAHUL RAJPUT` (a 32 pt centred name), and
+- `Gurgaon, Haryana | eddyutkarshteddy@gmail.com …` shown twice (a 13.9 pt contact line).
+
+**Why (measured — copies are in `tmp/text-doubling/`, gitignored: `rahul-live-edited.pdf`,
+`utkarsh-cv-edited2.pdf`):** Task 66's hidden rule needs a covering box over **95 % of the run's area**. PDF.js
+reports a run's box with the font's full ascender / descender room, while our export cover hugs the ink, so it is
+shorter:
+
+| File | Run | Run rect | Cover rect | Width covered | Height covered |
+|---|---|---|---|---:|---:|
+| `rahul-live-edited.pdf` | `RAHUL RAJPUT` | x 172.4, y 797.8, w 250.7, h 32.0 | x 169.8, y 793.3, w 255.8, h 28.9 | 1.00 | **0.76** |
+| `utkarsh-cv-edited2.pdf` | `eddyutkarshteddy@gmail.com` | x 214.2, y 735.6, w 174.8, h 13.9 | x 98.8, y 732.3, w 397.2, h 13.3 | 1.00 | **0.72** |
+
+Both are far below 0.95, so the runs are treated as visible. The existing fallback ("hidden when a later run is
+redrawn at the same origin") does not save them either: the replacement is **centred**, so it starts 18 pt further
+left, outside the 15 %-of-font-size tolerance.
+
+**The rule to implement** (in `dropCoveredTextRuns`, `src/lib/pdf/hiddenText.ts`) — a run is hidden when a covering
+box painted **after** it satisfies **either**:
+1. it covers **≥ 95 % of the run's area** (today's rule, unchanged); **or**
+2. it covers **≥ 95 % of the run's width**, **≥ 60 % of its height**, **and** contains the run's horizontal middle
+   line (`run.rect.y + run.rect.h / 2`).
+
+Delete the "redrawn at the same origin" fallback; rule 2 replaces it. Everything else in Task 66 stays: boxes painted
+**before** the text never hide it, transparent / blended / clipped / stroke-only boxes are ignored, a page whose
+paint order cannot be matched keeps every run, and Fix A (same-spot copies) is untouched.
+
+**Why 60 % and the middle line are safe:** a cover that hides the ink always contains the middle of the glyph box;
+a box that only clips the top or bottom of a line (a rule, an underline, a table edge) covers well under 60 % of the
+height or misses the middle line, so partly visible text is still kept.
+
+**Tests**
+- Unit (`hiddenText.test.ts`): full width with height share 0.72 and 0.76, middle line inside → hidden; height share
+  0.55 → kept; height share 0.8 but the middle line **outside** the box (a tall box sitting above the line) → kept;
+  width share 0.9 → kept. The existing cases (box before the text, half cover, opacity 0.5, Multiply blend, clipping
+  path, mapping failure) must keep their current results.
+- Real files (local-only, skipped with a message when `tmp/text-doubling/` is missing): `rahul-live-edited.pdf` page 1
+  reads the name block as exactly `UTKARSH TANEJA`; `utkarsh-cv-edited2.pdf` page 1 contains the contact line
+  **once**, and `rishi-edited.pdf`, `corporate-edited-3.pdf`, `ziro.pdf` keep the results Task 66 already has.
+- `src/lib/pdf/reeditSweep.local.test.ts` must stay at **0 untouched lines changed** across all 43 PDFs: no visible
+  text may disappear because of the looser rule.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/hiddenText.ts` + `hiddenText.test.ts` | The rule above. Keep every existing guard and the fail-closed behaviour. |
+| `src/lib/pdf/textDoubling.local.test.ts` | Add the two real-file cases. |
+| `src/lib/pdf/textContent.ts`, `images.ts` | No change. |
+| `src/lib/export/**` | No change — the export-side rule is Task 67 Revision 2. |
+
+**Guardrails:** never hide text a reader can still see; when the box is partial, keep the text; no change to Fix A, to
+speed (no extra page work), or to any other reading behaviour.
+
+**Verify (user):** open `Rahul Resume.pdf-edited.pdf` → **Edit text** → click the name → the box shows
+**`UTKARSH TANEJA`** only. Open `UTKARSH TANEJA CV --edited-edited.pdf` → click the contact line → it appears
+**once**. Open an ordinary PDF and click a heading, a paragraph, a bullet line and a table row → everything reads as
+it looks on the page.
+
+**Land:** commit on `covered-text-rule`: `Fix: the editor hides old text under an ink-hugging cover (Task 66 Rev 1)`.

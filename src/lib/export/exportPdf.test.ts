@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+  beginText,
+  degrees,
+  endText,
+  moveText,
+  PDFDocument,
+  PDFOperator,
+  PDFOperatorNames,
+  PDFString,
+  setFontAndSize,
+  setWordSpacing,
+  StandardFonts,
+} from 'pdf-lib';
 import { exportPdf } from './exportPdf';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { extractTextRuns } from '@/lib/pdf/textContent';
@@ -111,6 +123,99 @@ async function makeFormXObjectDocument(): Promise<EditDocument> {
       sampleBackground: false,
     }],
   };
+}
+
+/** Two pages stamping the SAME embedded form; only page 1 is covered. */
+async function makeSharedFormDocument(): Promise<EditDocument> {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const sourcePage = source.addPage([320, 400]);
+  const sourceFont = await source.embedFont(StandardFonts.Helvetica);
+  sourcePage.drawText('SHARED SECRET', { x: 30, y: 310, size: 14, font: sourceFont });
+
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const [embeddedPage] = await pdf.embedPdf(await source.save());
+  if (!embeddedPage) throw new Error('The shared form fixture page was not embedded.');
+  for (let index = 0; index < 2; index += 1) pdf.addPage([320, 400]).drawPage(embeddedPage);
+  const geometry = (pageIndex: number) => ({
+    pageIndex,
+    widthPt: 320,
+    heightPt: 400,
+    rotation: 0 as const,
+    boxOffset: { x: 0, y: 0 },
+  });
+  return {
+    originalBytes: await pdf.save(),
+    pages: [geometry(0), geometry(1)],
+    edits: [{
+      id: 'cover-shared',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 307, w: 120, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
+
+/** A justified-style line drawn with word spacing, where only the start is covered. */
+async function makeWordSpacedDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([400, 200]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontKey = page.node.newFontDictionary('Helvetica', font.ref);
+  const removed = 'OLD WORDS HERE';
+  const wordSpacing = 6;
+  const spaces = 3;
+  page.pushOperators(
+    beginText(),
+    setFontAndSize(fontKey, 14),
+    setWordSpacing(wordSpacing),
+    moveText(30, 120),
+    PDFOperator.of(PDFOperatorNames.ShowText, [PDFString.of(`${removed} KEEP`)]),
+    endText(),
+  );
+  const removedWidth = font.widthOfTextAtSize(`${removed} `, 14) + wordSpacing * spaces;
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 400,
+      heightPt: 200,
+      rotation: 0 as const,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [{
+      id: 'cover-word-spaced',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 117, w: removedWidth, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
+
+async function firstItemPosition(bytes: Uint8Array, needle: string): Promise<number | null> {
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const content = await (await document.getPage(1)).getTextContent();
+    for (const item of content.items) {
+      if ('str' in item && item.str.includes(needle)) return item.transform[4] ?? null;
+    }
+    return null;
+  } finally {
+    await document.destroy();
+  }
+}
+
+async function pageText(bytes: Uint8Array, pageNumber: number): Promise<string> {
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const content = await (await document.getPage(pageNumber)).getTextContent();
+    return content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
+  } finally {
+    await document.destroy();
+  }
 }
 
 async function makeTwoPageDocument(): Promise<EditDocument> {
@@ -456,20 +561,36 @@ describe('exportPdf', () => {
     }
   });
 
-  it('fails closed with a warning when page text is inside a Form XObject', async () => {
+  it('removes covered words painted inside a Form XObject', async () => {
     const result = await exportPdf(await makeFormXObjectDocument());
-    expect(result.redaction).toEqual({ removedItems: 0, skippedPages: 1 });
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toMatch(/stays hidden under the cover.*Form XObject/i);
 
-    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
-    try {
-      const content = await (await reopened.getPage(1)).getTextContent();
-      const raw = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
-      expect(raw).toContain('FORM SECRET');
-    } finally {
-      await reopened.destroy();
-    }
+    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.warnings).toEqual([]);
+    expect(await pageText(result.bytes, 1)).not.toContain('FORM SECRET');
+  });
+
+  it('copies a shared form so the other page keeps its text', async () => {
+    const result = await exportPdf(await makeSharedFormDocument());
+
+    expect(result.redaction.removedItems).toBe(1);
+    expect(await pageText(result.bytes, 1)).not.toContain('SHARED SECRET');
+    expect(await pageText(result.bytes, 2)).toContain('SHARED SECRET');
+  });
+
+  it('keeps word-spaced text in place when the start of the line is removed', async () => {
+    const doc = await makeWordSpacedDocument();
+    const result = await exportPdf(doc);
+
+    expect(result.redaction.skippedPages).toBe(0);
+    expect(result.redaction.removedItems).toBeGreaterThan(0);
+    expect(await pageText(result.bytes, 1)).not.toContain('OLD WORDS HERE');
+    // Word spacing counted: the kept word sits exactly where it was drawn.
+    const [before, after] = await Promise.all([
+      firstItemPosition(doc.originalBytes, 'KEEP'),
+      firstItemPosition(result.bytes, 'KEEP'),
+    ]);
+    expect(before).not.toBeNull();
+    expect(after).toBeCloseTo(before as number, 2);
   });
 
   it.skipIf(!optionalCanvas)('renders identically to the cover-only fallback at 150 dpi', async () => {

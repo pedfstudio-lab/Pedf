@@ -1,13 +1,4 @@
-import {
-  decodePDFRawStream,
-  PDFArray,
-  PDFContentStream,
-  PDFDict,
-  PDFDocument,
-  PDFName,
-  PDFRawStream,
-  PDFStream,
-} from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { groupBy } from '@/lib/util/groupBy';
 import { invariant } from '@/lib/util/assert';
 import { isIdentityPagePlan } from '@/state/pagePlan';
@@ -25,6 +16,7 @@ import {
 import type { ContentToken } from './contentStream';
 import { planCoveredGlyphRemoval } from './coveredGlyphs';
 import type { CoveredGlyphRewrite } from './coveredGlyphs';
+import { buildPageStreamTree } from './formStreams';
 
 const REMOVE_COVERED_TEXT = true;
 
@@ -36,69 +28,6 @@ export interface ExportResult {
   readonly bytes: Uint8Array;
   readonly warnings: string[];
   readonly redaction: ExportRedactionResult;
-}
-
-interface PageStreamBinding {
-  readonly tokens: readonly ContentToken[];
-  replace(bytes: Uint8Array): void;
-}
-
-function decodedStream(stream: PDFStream): Uint8Array | null {
-  try {
-    if (stream instanceof PDFContentStream) return stream.getUnencodedContents();
-    if (stream instanceof PDFRawStream && stream.dict.get(PDFName.of('Filter'))) {
-      return decodePDFRawStream(stream).decode();
-    }
-    return stream.getContents();
-  } catch {
-    return null;
-  }
-}
-
-function replacementStream(pdf: PDFDocument, stream: PDFStream, bytes: Uint8Array): PDFRawStream {
-  const dictionary = stream.dict.clone(pdf.context);
-  dictionary.delete(PDFName.of('Filter'));
-  dictionary.delete(PDFName.of('DecodeParms'));
-  dictionary.delete(PDFName.Length);
-  return PDFRawStream.of(dictionary, bytes);
-}
-
-function pageStreamBindings(pdf: PDFDocument, pageIndex: number): PageStreamBinding[] | null {
-  const page = pdf.getPage(pageIndex);
-  const contents = page.node.Contents();
-  if (!contents) return [];
-  const streams: Array<{ stream: PDFStream; replace(bytes: Uint8Array): void }> = [];
-  if (contents instanceof PDFStream) {
-    streams.push({
-      stream: contents,
-      replace(bytes) {
-        const ref = pdf.context.register(replacementStream(pdf, contents, bytes));
-        page.node.set(PDFName.Contents, ref);
-      },
-    });
-  } else if (contents instanceof PDFArray) {
-    for (let index = 0; index < contents.size(); index += 1) {
-      const stream = contents.lookupMaybe(index, PDFStream);
-      if (!stream) return null;
-      streams.push({
-        stream,
-        replace(bytes) {
-          contents.set(index, pdf.context.register(replacementStream(pdf, stream, bytes)));
-        },
-      });
-    }
-  }
-  const bindings: PageStreamBinding[] = [];
-  for (const binding of streams) {
-    const bytes = decodedStream(binding.stream);
-    if (!bytes) return null;
-    try {
-      bindings.push({ tokens: tokenizeContentStream(bytes), replace: binding.replace });
-    } catch {
-      return null;
-    }
-  }
-  return bindings;
 }
 
 function rewriteStream(
@@ -134,14 +63,22 @@ function sourcePageIndex(doc: EditDocument, pageIndex: number): number | null {
   return entry.kind === 'source' ? entry.sourceIndex : null;
 }
 
-function pageHasFormXObject(pdf: PDFDocument, pageIndex: number): boolean {
-  const resources = pdf.getPage(pageIndex).node.Resources();
-  const xObjects = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
-  if (!xObjects) return false;
-  return xObjects.entries().some(([name]) => {
-    const stream = xObjects.lookupMaybe(name, PDFStream);
-    return stream?.dict.get(PDFName.of('Subtype')) === PDFName.of('Form');
-  });
+/**
+ * Read the original bytes for the redaction pass. The browser uses the app's
+ * worker-backed PDF.js; Node (tests, scripts) has no worker URL, so it loads
+ * the legacy build, which runs on the main thread. The specifier is hidden from
+ * the bundler so the legacy build never reaches the browser bundle.
+ */
+async function readForRedaction(
+  bytes: Uint8Array,
+): Promise<Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>> {
+  const options = { data: bytes.slice(), fontExtraProperties: true };
+  if (typeof window === 'undefined') {
+    const specifier = 'pdfjs-dist/legacy/build/pdf.mjs';
+    const legacy = await import(/* @vite-ignore */ specifier) as typeof pdfjs;
+    return legacy.getDocument(options).promise;
+  }
+  return pdfjs.getDocument(options).promise;
 }
 
 async function removeCoveredText(
@@ -162,25 +99,13 @@ async function removeCoveredText(
     return { removedItems: 0, skippedPages: coverPages.length };
   }
 
-  const eligiblePages: number[] = [];
+  const eligiblePages = coverPages;
   let skippedPages = 0;
-  for (const pageIndex of coverPages) {
-    if (pageHasFormXObject(pdf, pageIndex)) {
-      skippedPages += 1;
-      warnings.push(
-        `Old text on page ${pageIndex + 1} could not be removed; it stays hidden under the cover. (the page contains a Form XObject)`,
-      );
-    } else eligiblePages.push(pageIndex);
-  }
-  if (eligiblePages.length === 0) return { removedItems: 0, skippedPages };
 
   let reader: Awaited<ReturnType<typeof pdfjs.getDocument>['promise']> | undefined;
   let removedItems = 0;
   try {
-    reader = await pdfjs.getDocument({
-      data: doc.originalBytes.slice(),
-      fontExtraProperties: true,
-    }).promise;
+    reader = await readForRedaction(doc.originalBytes);
   } catch {
     for (const pageIndex of eligiblePages) {
       warnings.push(`Old text on page ${pageIndex + 1} could not be removed; it stays hidden under the cover.`);
@@ -192,39 +117,45 @@ async function removeCoveredText(
     for (const pageIndex of eligiblePages) {
       let reason: string | undefined;
       try {
-      const bindings = pageStreamBindings(pdf, pageIndex);
+      const tree = buildPageStreamTree(pdf, pageIndex);
       const originalPageIndex = sourcePageIndex(doc, pageIndex);
       const covers = (editsByPage.get(pageIndex) ?? []).flatMap((edit) => (
         edit.kind === 'cover' ? [edit.rect as PdfRect] : []
       ));
-      if (!bindings) reason = 'the content streams could not be decoded';
+      if (!tree) reason = 'the content streams could not be decoded';
       else if (originalPageIndex === null || originalPageIndex < 0 || originalPageIndex >= reader.numPages) {
         reason = 'the page has no original text source';
       } else {
         const sourcePage = await reader.getPage(originalPageIndex + 1);
         const content = await sourcePage.getTextContent();
-        const operatorList = await sourcePage.getOperatorList();
+        // 0 = AnnotationMode.DISABLE: form-field appearances are separate
+        // objects that getTextContent never reports, so including them would
+        // make the operator counts differ and skip the page.
+        const operatorList = await sourcePage.getOperatorList({ annotationMode: 0 });
         const plan = planCoveredGlyphRemoval(
           content.items,
           operatorList,
           sourcePage.getViewport({ scale: 1, rotation: 0 }),
-          bindings.map(({ tokens }) => tokens),
+          tree.roots,
           covers,
         );
         if (plan.skipped) reason = plan.reason ?? 'the page could not be mapped safely';
         else {
-          const candidates = bindings.flatMap((binding, streamIndex) => {
-            const rewrites = plan.rewrites.filter((rewrite) => rewrite.streamIndex === streamIndex);
-            if (rewrites.length === 0) return [];
-            return [{ binding, bytes: rewriteStream(binding.tokens, rewrites) }];
-          });
-          if (candidates.some((candidate) => candidate.bytes === null)) {
-            reason = 'the rewritten stream failed its round-trip guard';
-          }
-          else {
-            for (const candidate of candidates) {
-              if (candidate.bytes) candidate.binding.replace(candidate.bytes);
+          const rewritten = new Map<string, Uint8Array>();
+          for (const key of new Set(plan.rewrites.map((rewrite) => rewrite.streamKey))) {
+            // The walk resolved every touched stream, page or form, already.
+            const tokens = tree.tokensFor(key);
+            const bytes = tokens
+              ? rewriteStream(tokens, plan.rewrites.filter((rewrite) => rewrite.streamKey === key))
+              : null;
+            if (!bytes) {
+              reason = 'the rewritten stream failed its round-trip guard';
+              break;
             }
+            rewritten.set(key, bytes);
+          }
+          if (!reason) {
+            tree.apply(rewritten);
             removedItems += plan.removedItems;
           }
         }
