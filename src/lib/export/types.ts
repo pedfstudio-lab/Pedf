@@ -111,3 +111,8 @@ export interface EditDocument {
   plan?: PagePlan;
   sampleBackground?: (pageIndex: number, rect: PdfRect) => Rgb;
 }
+
+export interface ExportRedactionResult {
+  readonly removedItems: number;
+  readonly skippedPages: number;
+}

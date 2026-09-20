@@ -3,9 +3,115 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { extractTextRuns } from '@/lib/pdf/textContent';
+import { worstBlockDiff } from '@/harness/pixelDiff';
 import { planToGeometry } from '@/state/pagePlan';
 import type { PagePlan } from '@/state/pagePlan';
 import type { CoverEdit, EditDocument, LineEdit, PdfRect, TextEdit } from './types';
+
+const optionalCanvas = await import('@napi-rs/canvas').catch(() => undefined);
+
+async function renderFirstPage(bytes: Uint8Array): Promise<ImageData> {
+  const createCanvas = optionalCanvas?.createCanvas;
+  if (!createCanvas) throw new Error('Optional @napi-rs/canvas is unavailable.');
+  const document = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const page = await document.getPage(1);
+    const viewport = page.getViewport({ scale: 150 / 72 });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const context = canvas.getContext('2d');
+    await page.render({
+      canvasContext: context as unknown as CanvasRenderingContext2D,
+      viewport,
+    }).promise;
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      data: new Uint8ClampedArray(image.data),
+      width: image.width,
+      height: image.height,
+      colorSpace: 'srgb',
+    } as ImageData;
+  } finally {
+    await document.destroy();
+  }
+}
+
+async function makeCoveredTextDocument(): Promise<EditDocument> {
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const page = pdf.addPage([320, 400]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const oldText = 'OLD PRIVATE NAME';
+  const oldWidth = font.widthOfTextAtSize(oldText, 14);
+  page.drawText(oldText, { x: 30, y: 310, size: 14, font });
+  page.drawText('UNCHANGED LINE', { x: 30, y: 250, size: 14, font });
+  const rect = { x: 28, y: 307, w: oldWidth + 4, h: 19 };
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [
+      {
+        id: 'cover-old-name',
+        kind: 'cover',
+        pageIndex: 0,
+        rect,
+        z: 1,
+        sampleBackground: false,
+      },
+      {
+        id: 'new-name',
+        kind: 'text',
+        pageIndex: 0,
+        rect: { ...rect, x: 30, y: 310 },
+        z: 2,
+        text: 'NEW PUBLIC NAME',
+        style: {
+          fontName: 'Helvetica',
+          fontSizePt: 14,
+          bold: false,
+          italic: false,
+          color: { r: 0, g: 0, b: 0 },
+        },
+      },
+    ],
+  };
+}
+
+async function makeFormXObjectDocument(): Promise<EditDocument> {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const sourcePage = source.addPage([320, 400]);
+  const sourceFont = await source.embedFont(StandardFonts.Helvetica);
+  sourcePage.drawText('FORM SECRET', { x: 30, y: 310, size: 14, font: sourceFont });
+
+  const pdf = await PDFDocument.create({ updateMetadata: false });
+  const [embeddedPage] = await pdf.embedPdf(await source.save());
+  if (!embeddedPage) throw new Error('The Form XObject fixture page was not embedded.');
+  const page = pdf.addPage([320, 400]);
+  page.drawPage(embeddedPage);
+  return {
+    originalBytes: await pdf.save(),
+    pages: [{
+      pageIndex: 0,
+      widthPt: 320,
+      heightPt: 400,
+      rotation: 0,
+      boxOffset: { x: 0, y: 0 },
+    }],
+    edits: [{
+      id: 'cover-form-secret',
+      kind: 'cover',
+      pageIndex: 0,
+      rect: { x: 28, y: 307, w: 100, h: 19 },
+      z: 1,
+      sampleBackground: false,
+    }],
+  };
+}
 
 async function makeTwoPageDocument(): Promise<EditDocument> {
   const pdf = await PDFDocument.create({ updateMetadata: false });
@@ -325,5 +431,58 @@ describe('exportPdf', () => {
     }];
 
     await expect(exportPdf(doc)).rejects.toThrow(/Not implemented yet: Indic text export/);
+  });
+
+  it('removes covered old words from raw extraction while keeping the new and untouched text', async () => {
+    const result = await exportPdf(await makeCoveredTextDocument());
+    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.warnings).toEqual([]);
+
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const page = await reopened.getPage(1);
+      const content = await page.getTextContent();
+      const raw = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
+      expect(raw).not.toContain('OLD PRIVATE NAME');
+      expect(raw).toContain('NEW PUBLIC NAME');
+      expect(raw).toContain('UNCHANGED LINE');
+
+      const runs = await extractTextRuns(page, 0);
+      expect(runs.filter((run) => run.text === 'NEW PUBLIC NAME')).toHaveLength(1);
+      expect(runs.some((run) => run.text === 'OLD PRIVATE NAME')).toBe(false);
+      expect(runs.some((run) => run.text === 'UNCHANGED LINE')).toBe(true);
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it('fails closed with a warning when page text is inside a Form XObject', async () => {
+    const result = await exportPdf(await makeFormXObjectDocument());
+    expect(result.redaction).toEqual({ removedItems: 0, skippedPages: 1 });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/stays hidden under the cover.*Form XObject/i);
+
+    const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const content = await (await reopened.getPage(1)).getTextContent();
+      const raw = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' ');
+      expect(raw).toContain('FORM SECRET');
+    } finally {
+      await reopened.destroy();
+    }
+  });
+
+  it.skipIf(!optionalCanvas)('renders identically to the cover-only fallback at 150 dpi', async () => {
+    const doc = await makeCoveredTextDocument();
+    const [baseline, redacted] = await Promise.all([
+      exportPdf(doc, { removeCoveredText: false }),
+      exportPdf(doc),
+    ]);
+    const [before, after] = await Promise.all([
+      renderFirstPage(baseline.bytes),
+      renderFirstPage(redacted.bytes),
+    ]);
+
+    expect(worstBlockDiff(before, after).meanError).toBeLessThan(0.01);
   });
 });

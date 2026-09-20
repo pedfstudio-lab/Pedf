@@ -26,6 +26,9 @@ interface FileResult {
   failed: number;
   untouched: number;
   textLines: number;
+  removedItems: number;
+  skippedPages: number;
+  redactionFailures: number;
   reason?: string;
   details: string[];
 }
@@ -124,7 +127,8 @@ function isolatedFromOtherLines(line: TextLine, lines: readonly TextLine[]): boo
 
 function selectLines(lines: readonly TextLine[]): TextLine[] {
   const eligible = lines.filter((line) => (
-    line.text.trim().length >= 4 && canFit(line) && isolatedFromOtherLines(line, lines)
+    line.text.trim().length >= 4 && canFit(line) && isolatedFromOtherLines(line, lines) &&
+    lines.filter((candidate) => candidate.text === line.text).length === 1
   ));
   const bullet = eligible.filter((line) => /^[•▪◦‣-]\s*/u.test(line.text));
   const regular = eligible.filter((line) => !bullet.includes(line));
@@ -140,6 +144,26 @@ function selectLines(lines: readonly TextLine[]): TextLine[] {
 
 async function pageLines(page: PDFPageProxy, pageIndex: number): Promise<TextLine[]> {
   return mergeRunsIntoLines(await extractTextRuns(page, pageIndex));
+}
+
+function normalized(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function occurrenceCount(haystack: string, needle: string): number {
+  if (needle === '') return 0;
+  let count = 0;
+  let offset = 0;
+  while ((offset = haystack.indexOf(needle, offset)) >= 0) {
+    count += 1;
+    offset += needle.length;
+  }
+  return count;
+}
+
+async function rawPageText(document: PDFDocumentProxy, pageIndex: number): Promise<string> {
+  const content = await (await document.getPage(pageIndex + 1)).getTextContent();
+  return normalized(content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' '));
 }
 
 async function reeditLine(
@@ -183,8 +207,27 @@ async function reeditLine(
         edits: [...built.covers, ...built.texts],
         pages: await pagesFor(document),
       });
+      result.removedItems += exported.redaction.removedItems;
+      result.skippedPages += exported.redaction.skippedPages;
       bytes = exported.bytes;
       const reopened = await open(bytes);
+      const raw = await rawPageText(reopened, pageIndex);
+      const obsolete = [line.text, `EDIT ONE ${word}`, `EDIT TWO ${word}`].slice(0, generation + 1);
+      const active = normalized(replacement);
+      const stillPresent = obsolete.filter((text) => {
+        const old = normalized(text);
+        return occurrenceCount(raw, old) > occurrenceCount(active, old);
+      });
+      if (stillPresent.length > 0) {
+        if (exported.redaction.skippedPages > 0) {
+          result.details.push(`${file} p.${pageIndex + 1}: removal unavailable after Edit ${generation + 1}; raw text still has ${JSON.stringify(stillPresent)}; ${exported.warnings.join(' ')}`);
+        } else {
+          result.redactionFailures += 1;
+          result.failed += 1;
+          result.details.push(`${file} p.${pageIndex + 1}: raw old text remained after Edit ${generation + 1}: ${JSON.stringify(stillPresent)}`);
+          return;
+        }
+      }
       const after = await pageLines(await reopened.getPage(pageIndex + 1), pageIndex);
       const atSpot = after.filter((candidate) => nearLine(line, candidate));
       if (atSpot.length !== 1 || atSpot[0]?.text !== replacement) {
@@ -220,7 +263,10 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
     const results: FileResult[] = [];
 
     for (const file of selected) {
-      const result: FileResult = { file, pages: 0, flagged: 0, passed: 0, failed: 0, untouched: 0, textLines: 0, details: [] };
+      const result: FileResult = {
+        file, pages: 0, flagged: 0, passed: 0, failed: 0, untouched: 0,
+        textLines: 0, removedItems: 0, skippedPages: 0, redactionFailures: 0, details: [],
+      };
       results.push(result);
       let document: PDFDocumentProxy;
       let originalBytes: Uint8Array;
@@ -260,14 +306,15 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
           ? 'no extractable text (scan or outlines)'
           : 'no safe isolated editable line (overlap or line too narrow)';
       }
-      process.stdout.write(`${file} | pages ${result.pages} | flagged ${result.flagged} | round trips ${result.passed}/${result.passed + result.failed} | untouched ${result.untouched}${result.reason ? ` | ${result.reason}` : ''}\n`);
+      process.stdout.write(`${file} | pages ${result.pages} | flagged ${result.flagged} | round trips ${result.passed}/${result.passed + result.failed} | untouched ${result.untouched} | removed ${result.removedItems} | skipped ${result.skippedPages}${result.reason ? ` | ${result.reason}` : ''}\n`);
       for (const detail of result.details) process.stdout.write(`  ${detail}\n`);
       await Promise.all(openDocuments.splice(0).map((opened) => opened.destroy()));
     }
 
-    process.stdout.write(`TASK66 TOTAL files ${results.length}, pages ${results.reduce((sum, result) => sum + result.pages, 0)}, flagged ${results.reduce((sum, result) => sum + result.flagged, 0)}, round trips ${results.reduce((sum, result) => sum + result.passed, 0)} passed / ${results.reduce((sum, result) => sum + result.failed, 0)} failed, untouched ${results.reduce((sum, result) => sum + result.untouched, 0)}\n`);
+    process.stdout.write(`TASK67 TOTAL files ${results.length}, pages ${results.reduce((sum, result) => sum + result.pages, 0)}, flagged ${results.reduce((sum, result) => sum + result.flagged, 0)}, round trips ${results.reduce((sum, result) => sum + result.passed, 0)} passed / ${results.reduce((sum, result) => sum + result.failed, 0)} failed, untouched ${results.reduce((sum, result) => sum + result.untouched, 0)}, removed ${results.reduce((sum, result) => sum + result.removedItems, 0)}, skipped ${results.reduce((sum, result) => sum + result.skippedPages, 0)}\n`);
     expect(results.flatMap((result) => result.details.filter((detail) => detail.includes('expected') || detail.includes('export failed')))).toEqual([]);
     expect(results.reduce((sum, result) => sum + result.failed, 0)).toBe(0);
     expect(results.reduce((sum, result) => sum + result.untouched, 0)).toBe(0);
+    expect(results.reduce((sum, result) => sum + result.redactionFailures, 0)).toBe(0);
   }, 600_000);
 });
