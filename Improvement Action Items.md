@@ -2,152 +2,351 @@
 
 **Action items must be followed in the exact order listed below.**
 
-## AI-001: Evaluate Qwen and Propose Online/Offline AI Modes
+## User Experience
 
-**Date:** 2026-09-16  
-**Status:** Proposal and evaluation only; no model replacement or mode implementation has started.  
-**Priority:** First; decide the model and processing architecture before authentication integration.  
-**Candidate:** Qwen3.5-9B, compared with the existing Sarvam experience.  
-**Next step:** Website trial comparing conversational quality and human touch.  
-**Owner:** To be assigned.
+We are adding an **Offline tab inside the existing PDF chat dialog**. Users will be able to choose between the current Online assistant and answering questions locally on their device. This is a planned change, not an already available feature.
 
-**The complete implementation is yet to be finalized.** Qwen is a candidate, not the selected replacement. The desired outcome is the same model and supported capabilities in both modes, without an intentional quality downgrade offline. Feasibility, hardware requirements, and quality parity must be demonstrated before committing.
+1. **Open chat as usual.** The dialog opens on **Online**, using the existing Sarvam experience without waiting for a local model to download. Normal network and provider response times still apply.
+2. **Choose Offline when local PDF reasoning is wanted.** On a compatible desktop/laptop Chrome or Edge browser, selecting Offline starts downloading the model if it is not already cached. The top of that tab shows download size, progress, Cancel and Retry. The preferred model has about 963 MB of weights, plus supporting files; the displayed total must include them. There is no two-minute download limit, and cached assets can be reused across PDFs while available.
+3. **Keep working while it prepares.** Users can edit the PDF and type a question during download, model loading and document preparation. Offline Send and Enter submission stay disabled until both the model and current document are ready; voice also requires permission. Online does not wait for this preparation.
+4. **Choose whether voice may use the cloud.** The Offline tab includes **Allow cloud AI for voice**, initially checked. Checked allows permitted cloud speech services while PDF reasoning stays local. Unchecking disables voice and cloud dialogue processing, leaving local text chat available once ready. The disclosure will read:
 
-**Decision gate for AI-002:** After the model trial and architecture review, decide whether application-funded online inference, remote speech, or other account-backed services remain in scope. Only then confirm whether website authentication is needed and adapt that proposal to the selected provider. A local-only workflow does not need website login merely to run the model.
+	> Spoken questions and answer text, including information from this PDF, may be sent to Sarvam.
 
-### What We Are Trying to Do
+5. **Ask questions about the current PDF.** The local assistant will answer in English, explain passages and summarize selectable text across English PDFs up to 50 MB, including confirmed edits. Clickable page references will take users to supporting passages. It will acknowledge missing evidence or unreadable images instead of inventing an answer; OCR and image understanding are not included.
+6. **Keep control when something fails.** Unsupported devices and preparation failures will show a reason or recovery option without losing edits or silently sending a local question to Online. Automatic cloud location detection will be removed, and document-derived Search, Maps and Calendar actions will be disabled while Offline is selected.
 
-Create a secure PDF editor environment where users can work with private documents without sending those documents, extracted content, or stored conversation context to the cloud. A verifiable private offline experience can be the product's **unique selling proposition (USP)**.
+**Privacy distinction:** Offline with cloud voice checked is local PDF reasoning with remote speech, not a wholly offline conversation. Offline with voice unchecked keeps PDF questions and answers local after preparation. Initial asset downloads still need internet; opening the whole application from scratch without a connection is not promised. Manual editing and export remain local in both tabs.
 
-Proposed USP wording, subject to successful verification: **"Private Offline mode: your PDF content and conversation are processed on your device."** This is a target, not a claim about the current application or its online mode. Local processing also needs secure application code, controlled storage, and data-deletion controls; a local model alone does not guarantee security.
+## Plan Status
 
-### Why We Are Considering Another Model
+**Updated:** 2026-09-20  
+**Document status:** Implementation plan; the new tabs, local model and privacy controls are not implemented or validated.  
+**Ownership:** Assign an owner and record evidence against each acceptance check before marking it complete.
 
-- The current Sarvam chat path sends extracted PDF text and recent conversation to a hosted model. A server-side proxy protects credentials but does not keep that content on the user's device.
-- [Location detection](src/lib/smart/locationDetect.ts) also sends extracted PDF text to AI, independently of chat. The [viewer](src/components/PdfViewer.tsx) starts it automatically on document load when provider configuration permits. Any offline boundary must cover this feature too.
-- Qwen3.5-9B has downloadable Apache-2.0 weights and documented server deployment options, making it a candidate for both hosted and on-device processing. A complete browser build and its capabilities still need validation.
-- Sarvam-105B also has open weights, but its much larger storage and hardware requirements make ordinary browser deployment impractical. The open checkpoint has not been verified as identical to the app's `sarvam-105b-conversations` API variant.
-- Privacy, same-model deployment, and preservation of conversational quality drive this investigation. Lower online token prices are an additional benefit, not sufficient justification for sacrificing capability or human touch.
+The obsolete AI-001 model-replacement proposal has been removed. Its same-model parity requirement, hosted comparison trial, toolbar mode selector and fully local voice proposal are superseded. AI-002 retains its original identifier but moves after the new local-processing work. Follow the order shown, not numerical identifier order. Local prototypes must remain private until the final release gate passes.
 
-### Benchmark Comparison
+## Implementation Summary
 
-Published developer-reported scores checked **2026-09-16**. Higher is better within each benchmark; these are not overall ratings or percentages of product readiness.
+Each action and sub-action below pairs **what changes** with **how we will make it happen**, in execution order. The detailed Why/What/How sections and acceptance checks follow. Recommendations and provider choices marked for confirmation are not settled requirements.
 
-| Benchmark | What It Measures | Qwen3.5-9B | Sarvam-105B |
-| --- | --- | ---: | ---: |
-| MMLU-Pro | Knowledge and reasoning | 82.5 | 81.7 |
-| GPQA Diamond | Difficult scientific reasoning | 81.7 | 78.7 |
-| IFEval | Following explicit instructions | 91.5 | 84.8 |
-| LiveCodeBench v6 | Coding problem solving | 65.6 | 71.7 |
-
-These values come from separate vendor evaluations, not a controlled head-to-head. Prompts, generation budgets, inference settings, and evaluation procedures may differ. They do not establish equal PDF accuracy, Hindi/Tamil fluency, conversational warmth, or browser performance. The Sarvam scores describe the published 105B checkpoint, not a verified evaluation of our exact conversations endpoint. A quantized offline Qwen build must be evaluated separately; published full-model scores cannot simply be carried over.
-
-| Product Requirement | Current Assessment |
-| --- | --- |
-| Natural conversation and human touch | Qwen is a plausible candidate; no verified comparison establishes that it feels as natural as the current Sarvam experience. |
-| Hindi, Tamil, and mixed-language conversation | Sarvam has a specific Indian-language focus. Qwen's broad multilingual coverage does not prove equal quality for these languages. |
-| PDF questions, citations, and location extraction | Both need testing with identical document context and expected answers. Correct numbers, names, and page references matter more than generic benchmark rankings. |
-| Safe editing commands | Evaluate intent, target selection, structured proposals, clarification of ambiguity, and preservation of unrelated content. Voice-driven editing is not currently implemented. |
-| Images, diagrams, and scans | Qwen supports image input at the model level, but the chosen local runtime and document pipeline must actually support it. This does not automatically solve OCR or PDF fidelity. |
-| Voice quality | Qwen3.5-9B does not replace Sarvam's separate Saaras transcription or Bulbul speech-generation models. End-to-end voice capability needs its own decision and evaluation. |
-
-### Cost Comparison
-
-Published API rates checked **2026-09-16**. These are inference charges, separate from authentication, databases, application hosting, taxes, and currency-conversion fees. Confirm current rates and service terms before purchase.
-
-| Model and API Host | Input per 1 Million Tokens | Output per 1 Million Tokens | Cached Input |
-| --- | ---: | ---: | --- |
-| Qwen3.5-9B, DeepInfra default tier | USD 0.10 | USD 0.15 | Not assumed in the comparison |
-| Qwen3.5-9B, Together serverless | USD 0.17 | USD 0.25 | Not assumed in the comparison |
-| Sarvam-105B / `sarvam-105b-conversations`, Sarvam | INR 29.28 | INR 73.20 | INR 10.98 per million qualifying cached input tokens |
-
-**Illustrative workload:** 10,000 input tokens and 500 billed output tokens per request, no cache discounts, and an assumed **USD 1 = INR 90** for comparison only. This is not a live exchange rate or a traffic forecast.
-
-| Requests per Month | Qwen on DeepInfra | Qwen on Together | Sarvam |
-| ---: | ---: | ---: | ---: |
-| 1,000 | INR 96.75 | INR 164.25 | INR 329.40 |
-| 10,000 | INR 967.50 | INR 1,642.50 | INR 3,294.00 |
-| 100,000 | INR 9,675.00 | INR 16,425.00 | INR 32,940.00 |
-
-Input includes prompts, supplied document text, and history. Count all billed output, including reasoning where charged. Different tokenizers, response lengths, retries, and automatic extraction requests can change actual cost; equal request counts do not guarantee equal token usage.
-
-- **Online speech remains separate:** Sarvam currently lists standard speech-to-text at INR 30 per audio hour, rounded up to whole seconds per request, and Bulbul v3 at INR 30 per 10,000 characters. Keeping those services while changing the reasoning model does not remove their charges.
-- **Offline inference has no hosted per-request fee:** both published reasoning checkpoints have Apache-2.0 weights, subject to license compliance. Device compute, storage, power, distribution bandwidth, development, and maintenance are still costs. Sarvam-105B requires much more local hardware than Qwen3.5-9B.
-- **Self-hosted online inference is another cost model:** GPU time, capacity, and operations must be budgeted. The current Cloudflare proxy is a gateway, not a GPU inference server. No fixed self-hosting quote is established yet.
-- **Exact model parity can affect hosting choice:** the API prices above do not guarantee the same revision or quantization as the offline build. Matching them may require a controlled deployment rather than a generic hosted endpoint.
-
-### Proposed Online and Offline Options
-
-Add a top-toolbar **AI Mode: Online / Offline** segmented selector near Ask. It controls AI processing, not PDF editing: manual editing and export remain local in both modes. This selector does not exist yet.
-
-| Behavior | Online Mode | Offline Mode |
+| Item | What We Are Doing | How We Will Do It |
 | --- | --- | --- |
-| Reasoning | Retain the current hosted flow while the candidate is evaluated; final online model is undecided. | Run a downloaded model on the user's device. |
-| Document and conversation data | Hosted reasoning sends supplied context outside the device; require a clear disclosure and user authorization. | No document content, stored conversation, edit state, or derived content is sent to cloud services. |
-| First use | Requires network and any agreed account configuration. | Requires a separate connected setup step with permission to download model and runtime assets. |
-| Voice | Remote transcription and speech may be used under the online policy. | Requires local speech models or verified local speech services; feature parity must be tested before promising full offline voice. |
-| Location detection and other background AI | Governed by the same online consent and provider policy. | Use local processing; do not leave the existing automatic cloud call enabled. |
-| Failure | Show provider/network errors and preserve document work. | Never silently fall back to cloud AI; preserve manual editing if local AI cannot run. |
+| **AI-003: Model qualification** | Establish a viable browser-local model before committing to production. | Test a pinned SmolLM2-1.7B Q4/WebLLM package on representative passages and Chrome/Edge devices; approve it only against measured criteria. |
+| AI-003.1 | Pin the evaluation package. | Fix model, runtime, tokenizer and compiled-library versions; verify licenses/integrity and run local streaming tests with public or synthetic text. |
+| AI-003.2 | Establish quality and hardware baselines. | Define expected answers and pass/fail thresholds; measure download, loading, indexing and answer latency separately on representative devices. |
+| **AI-004: Privacy enforcement** | Prevent unintended cloud processing in every route. | Remove automatic location requests and enforce a capability-level policy before any reasoning, speech or external action. |
+| AI-004.1 | Remove automatic cloud location detection globally. | Remove the viewer's detection trigger, provider-backed detector and dependent automatic overlays/state; retain unrelated local features. |
+| AI-004.2 | Route capabilities by tab and voice permission. | Replace implicit provider fallback with explicit dispatch: Online reasoning to Sarvam, Offline reasoning to WebLLM, and remote speech only when permitted. |
+| AI-004.3 | Guard links, logs and policy transitions. | Apply policy checks to external actions and telemetry; abort incompatible work and use operation/revision IDs to discard late results. |
+| **AI-005: Model lifecycle** | Prepare the local model without delaying Online. | Use lazy WebLLM loading, a versioned browser cache and worker-based inference with observable preparation states. |
+| AI-005.1 | Detect unsupported browsers or hardware. | Check WebGPU, required features and storage locally during the greeting; handle actual load failures without blocking Online or editing. |
+| AI-005.2 | Download only when Offline is selected and assets are missing. | Connect loader progress to the top-panel size/status, Cancel and Retry controls; deduplicate downloads and recover without cloud fallback. |
+| AI-005.3 | Reuse assets and manage resources. | Use WebLLM worker/cache APIs, separate model assets from PDFs/history, and support safe unload, eviction recovery and model removal. |
+| **AI-006: Document context** | Make the whole current PDF available to local answers. | Build revisioned, page-anchored text chunks and a local search index instead of using the truncated document string. |
+| AI-006.1 | Extract all supported English text from PDFs up to 50 MB. | Reuse page extraction without the 50,000-character cap; track unreadable pages and explain limitations without adding OCR. |
+| AI-006.2 | Include confirmed edits and page changes. | Combine extracted text with edit/page-plan state; reindex affected chunks on confirmation, Undo/Redo or page changes, excluding drafts. |
+| AI-006.3 | Retrieve relevant passages and track readiness. | Index page-anchored chunks locally, test paraphrase retrieval, and enable submission only when the active document revision and model are ready. |
+| **AI-007: Grounded generation** | Produce PDF-supported answers, summaries and references. | Feed local evidence to WebLLM within its token budget, validate source references and summarize longer documents section by section. |
+| AI-007.1 | Implement streamed local discussion. | Adapt WebLLM to the existing provider interface and text-delta callback; budget instructions, passages, output and up to eight recent messages. |
+| AI-007.2 | Validate answers and clickable citations. | Give passages source IDs before generation, map citations to current local anchors, check claim support and abstain when evidence is insufficient. |
+| AI-007.3 | Summarize the whole document. | Summarize all readable sections, combine their results with source IDs, and report missing coverage or cancellation explicitly. |
+| **AI-008: Chat interface** | Add Online/Offline tabs with accurate preparation feedback. | Extend the existing chat component and bind controls to active tab, capability, model and document-readiness state. |
+| AI-008.1 | Keep Online as the immediate default. | Reset the active tab to Online whenever chat opens; render the greeting locally and keep Online independent of local preparation. |
+| AI-008.2 | Show Offline preparation at the top. | Connect download/loading/indexing state to progress, Cancel, Retry and errors; observe local readiness without cloud polling or artificial delay. |
+| AI-008.3 | Prevent premature submissions. | Use one readiness/permission guard for Send, Enter and voice; allow drafts and editing, and provide accessible focus/status behavior. |
+| **AI-009: Cloud voice consent** | Offer optional cloud speech while keeping Offline reasoning local. | Route permitted audio/translation/playback separately from WebLLM and enforce the same consent at every speech entry point. |
+| AI-009.1 | Add the agreed checkbox and disclosure. | Show the initially checked Allow cloud AI for voice option with the Sarvam disclosure before microphone use; bind it to voice policy. |
+| AI-009.2 | Connect speech to local PDF answers. | Transcribe/translate the utterance with Sarvam if permitted, answer locally, then translate/speak that answer without uploading hidden PDF context. |
+| AI-009.3 | Stop remote dialogue when permission is removed. | Gate and cancel recording, translation, playback, fillers, queued work and retries; do not use unverified browser speech as a fallback. |
+| **AI-010: History and transitions** | Resolve tab history, saved voice permission and cancellation behavior. | Confirm the proposed defaults, then isolate in-memory histories and restore only approved preferences through existing project storage. |
+| AI-010.1 | Keep private history out of Online requests. | Confirm separate session-only tab histories; construct requests from the appropriate history and clear it on refresh or document change. |
+| AI-010.2 | Preserve voice denial while retaining Online-on-open. | Confirm per-saved-PDF permission persistence; store only that preference through project state/autosave, not chat or the active tab. |
+| AI-010.3 | Make switches and closing chat recoverable. | Confirm download continuation/cancellation rules; preserve drafts and edits, cancel incompatible tasks and reject completions from inactive operations. |
+| **AI-002: Cloud access controls** | Protect application-funded services without blocking local text inference. | After the preceding work and policy approval, add server-verified identity, atomic usage controls and protected production speech transport. |
+| AI-002.1 | Confirm access policy and hosting. | Approve or revise Supabase, login scope, budgets and voice scope; verify whether Cloudflare API requests reach Pages/Workers backend code. |
+| AI-002.2 | Add identity, account data and login recovery. | If approved, use Supabase/Google OAuth with minimal scopes, row-level security and stable user IDs; preserve files, edits and drafts across sign-in. |
+| AI-002.3 | Secure requests and bound spending. | Verify sessions in the proxy, keep secrets server-side, atomically reserve/reconcile quotas and enforce request/audio/concurrency limits. |
+| AI-002.4 | Complete protected live speech transport. | Add an authenticated WebSocket relay with origin and usage checks; close recording and connections on denial, expiry, cancellation or quota exhaustion. |
+| AI-002.5 | Explain cloud use and verify controls. | Add clear disclosure/error states and test invalid sessions, user isolation and concurrent quotas; keep PDF content out of account data and routine logs. |
+| **AI-011: Release validation** | Approve release using tested quality, privacy and operational evidence. | Run focused automated checks and real-browser scenarios, inspect network traffic, and stage deployment with an explicit release/rollback gate. |
+| AI-011.1 | Verify quality and performance end to end. | Test representative PDFs, current edits, citations and summaries on target devices; measure the five-second routine answer-start target after preparation. |
+| AI-011.2 | Verify privacy under normal and failing conditions. | Inspect HTTP, sockets, workers, navigation and retries in all modes; block network access after preparation and test local answers and transitions. |
+| AI-011.3 | Document and stage the release. | Run tests/typecheck/lint/build/export verification, update operational docs and budgets, and approve rollout/rollback without rerouting local requests to cloud AI. |
 
-**Offline download proposal:** check browser/GPU compatibility and storage, then show the exact download size, storage requirements, supported capabilities, and Download/Cancel controls. Show progress and retry behavior; verify and version all required model, tokenizer, runtime, and application assets before marking Offline ready. Cache them in browser-managed storage for reuse, support removal, and handle storage eviction or cleared site data. Several GB may be necessary; an MB-sized download is not promised. Download size and working RAM/GPU memory are different requirements.
+**Optional authentication follow-up:** add email/password only if approved, using Supabase's supported verification/recovery/linking flows and a production SMTP sender rather than implementing authentication ourselves.
 
-**Mode boundaries:** offline operation must not depend on live login or cloud usage checks. Stop and invalidate in-flight cloud requests and speech when switching offline, while explaining that already-sent data cannot be recalled. Preserve document edits and never automatically upload offline conversation when switching online. Gate external Search/Maps/Calendar actions and content-bearing logs as well as explicit model calls. Remote audio transcription with local reasoning is a hybrid workflow, not fully Offline: anything spoken can still reach the provider.
+## Agreed Direction
 
-**Same-model goal:** if Qwen is selected, aim to run the same checkpoint in both modes, with matched quantization, tokenizer, prompts, retrieval, context budget, and editing schema. Retaining Sarvam online and Qwen offline would not meet that goal. Runtime differences may still affect results and latency. All PDF modifications must continue through deterministic validation, user confirmation, and the local edit/export system.
+| Area | Requirement |
+| --- | --- |
+| Chat navigation | Two tabs inside the chat dialog: **Online** and **Offline**. Online is selected whenever the dialog opens. No separate toolbar mode selector. |
+| Online | Retain the existing Sarvam chat experience without waiting for local-model preparation. Normal extraction, network and provider latency still apply. |
+| Offline | Generate PDF answers locally in desktop/laptop Chrome and Edge, with no installed companion application. |
+| Local model | Preferred evaluation candidate: **SmolLM2-1.7B-Instruct, Q4, through WebLLM**. Production selection remains conditional on testing. Exclude Chinese-developed models. |
+| Offline voice | Show **Allow cloud AI for voice**, checked by default for a new choice. Checked permits the disclosed remote voice path, not cloud PDF reasoning. Unchecked disables voice and remote dialogue processing. |
+| Disclosure | **Spoken questions and answer text, including information from this PDF, may be sent to Sarvam.** Show this next to the voice checkbox. Offline with voice enabled is a hybrid workflow, not wholly offline. |
+| Download | Selecting Offline starts the model download only when required assets are not cached. Show size, progress and Cancel at the top of the Offline panel; no additional approval dialog. |
+| Download timing | The former two-minute initial-download limit is removed. Duration depends on the connection; downloads do not block manual PDF editing or Online chat. |
+| Local document scope | English-only PDFs and English answers; all selectable text across the whole document, including confirmed edits. Maximum **50 MB per PDF for local AI analysis**, not a new limit on manual editing. |
+| Local answers | Generate explanations, summaries and cross-page synthesis grounded only in the current PDF, with clickable references to supporting passages. No OCR, image understanding or outside-knowledge answers. |
+| Ready state | Permit drafting while preparing, but block Offline Send, Enter submission and voice until both the model and current document index are ready. Voice additionally requires permission. |
+| Response target | First meaningful routine answer text within **five seconds after submission once ready**, on qualified devices. This is a test target, not a measured guarantee or full-answer deadline; whole-book summaries may take longer. |
+| Privacy | No automatic cloud fallback. Remove automatic cloud location detection globally. Disable document-derived Search, Maps and Calendar actions while Offline is selected, including with cloud voice enabled. |
+| History | Session-only; clear on refresh or document change, do not save chat with the project. Preserve the existing last-eight-messages history behavior within the available token budget. |
 
-### Next Step: Website Trial for Human Touch
+**Recommendations pending confirmation:** keep separate session-only histories for the tabs; remember the voice permission per saved PDF, applying checked-by-default only to new PDFs and preserving explicit denial. Do not restore a saved Offline selection over the new Online-on-open default. Regardless of presentation, private Offline history must never be automatically included in a cloud request.
 
-The immediate next step is **to try Qwen3.5-9B on a hosted website and compare its interaction with Sarvam**. This is an evaluation, not approval to replace the current model or begin full implementation.
+**Not implied by this plan:** identical Online/Offline models or capabilities, offline speech recognition/TTS, AI-driven editing commands, mobile local AI, cloud PDF synchronization, or guaranteed cold-start operation without internet. Local text inference after preparation must not require cloud services; installation and asset downloads require connectivity. Manual editing and export remain local and available.
 
-1. Use a demo that explicitly identifies **Qwen3.5-9B**, such as the DeepInfra model page. General Qwen Chat can provide an initial impression but must not be treated as a 9B test unless the exact model is confirmed. Record the model name, provider, date, and available thinking/settings information.
-2. Compare with the current Sarvam conversations experience using only public or synthetic excerpts and the same prompts/history. Do not upload private PDFs, private passages, or confidential conversation to either website. Use normal consent/account flows without exposing credentials in review notes.
-3. Try English, Hindi, Tamil, and mixed-language conversations. Include greetings, a simple explanation, "make that shorter," clarification, a user correction, multi-turn references, document questions, and an ambiguous editing request.
-4. Have reviewers score each response from 1 to 5 for naturalness/human touch, language fluency, relevance, concision, and continuity. Record factual/citation errors, invented claims, and response delay separately; pleasant wording must not hide incorrect answers. Blind A/B review is preferable where feasible.
-5. Separate writing quality from voice quality. A text demo cannot establish spoken naturalness. If the candidate passes the text trial, compare both reasoning outputs through the same voice and playback settings in a controlled online test using public/synthetic content. Later test the complete local speech and reasoning path independently.
-6. Record whether Qwen is better, comparable, or worse for each criterion and language, with example transcripts and test settings. Do not replace this with a single unsupported overall rating. A hosted website trial does not prove the offline quantized model will behave identically.
+## AI-003: Qualify the Local Model and Browser Runtime
 
-### Expected Impact and Finalization Gates
+**Status:** Not started; model files and public metadata have been researched, but inference has not been tested.  
+**Depends on:** The agreed direction above.  
+**Purpose:** Establish a viable local baseline before building the complete user workflow.
 
-- **Product value:** a verified local-processing option can differentiate the editor for private books and documents. The USP must remain mode-specific while online processing can disclose content.
-- **User experience:** users gain an explicit choice, but offline setup adds a download, hardware/storage checks, and possible device limitations. Do not silently reduce capabilities to fit weaker devices.
-- **Quality:** preserve the conversational experience users value, while qualifying accuracy, language support, and safe edit behavior. No benchmark or website review yet establishes parity.
-- **Engineering and cost:** keep the local PDF engine, but add model lifecycle management, mode-aware provider routing, local context preparation, and privacy testing. Hosted inference may become cheaper; offline model distribution and maintenance add work.
-- **Not finalized:** exact model/revision, browser versus desktop runtime, quantization, minimum devices, speech stack, online hosting, authentication scope, default mode, consent behavior, download size, and implementation effort remain open. The deferred AI-002 authentication estimates do not cover this new offline implementation.
+### AI-003.1: Pin the Evaluation Package
 
-### Evaluation Checklist
+- **Why:** A model name or vendor benchmark does not establish the quality of a particular browser conversion.
+- **What:** Evaluate `SmolLM2-1.7B-Instruct-q4f16_1-MLC` through WebLLM without changing the Online Sarvam provider.
+- **How:** Pin compatible runtime, model revision, tokenizer and compiled WebGPU library; verify their availability, licenses and integrity. Record generation settings and artifact provenance. Use public or synthetic English passages locally, not private PDFs in hosted demos.
 
-- [ ] Complete the exact-model website trial and document the human-touch comparison with Sarvam.
-- [ ] Establish acceptance thresholds for factual accuracy, languages, conversational quality, and latency; choose the model only after review.
-- [ ] Validate the intended offline artifact, license/distribution terms, memory requirements, and supported capabilities on target devices.
-- [ ] Test the same document questions, location extraction, and validated editing proposals online and offline; evaluate speech separately.
-- [ ] Prove no offline content egress with external network access blocked after setup and with network-request inspection while connectivity is available, including automatic location detection, speech, navigation, and mode changes.
-- [ ] Finalize and approve the complete architecture, release scope, cost budget, and implementation plan before development.
-- [ ] Decide whether AI-002 is required for the chosen online/account services, or can be omitted for a local-only release.
+Metadata checked on 2026-09-20: approximately **962.79 MB of model weights**, a WebLLM context override of **4,096 tokens**, `shader-f16` support, and an estimated **1,774.19 MB of GPU memory**. These are not total application download/storage/RAM requirements or certified minimum hardware. Include supporting assets in the UI's measured download size. The model's Apache-2.0 license requires compliance; its published IFEval score of 56.7 is an average instruction-following metric, not our quantized PDF accuracy.
 
-### Comparison Sources
+### AI-003.2: Establish Quality and Device Baselines
 
-- [Qwen3.5-9B model card and benchmark tables](https://huggingface.co/Qwen/Qwen3.5-9B)
-- [Sarvam-105B model card and benchmark tables](https://huggingface.co/sarvamai/sarvam-105b)
-- [Sarvam evaluation methodology and Indian-language focus](https://www.sarvam.ai/blogs/sarvam-30b-105b)
-- [DeepInfra Qwen3.5-9B pricing and demo](https://deepinfra.com/Qwen/Qwen3.5-9B)
-- [Together API pricing](https://www.together.ai/pricing)
-- [Sarvam API pricing, including the conversations variant and speech](https://docs.sarvam.ai/api/getting-started/pricing)
+- **Why:** The local option must provide useful generated answers, not merely load successfully or quote passages.
+- **What:** A reproducible browser evaluation covering direct questions, summaries, cross-page evidence, numerical facts, follow-ups and unsupported questions.
+- **How:** Agree pass/fail thresholds before testing; record failures and first-meaningful-text latency on representative Chrome/Edge devices. Measure cold download, initialization, indexing and warm answer generation separately. Keep minimum RAM/GPU/storage requirements provisional until measured. If the model fails, return for a non-Chinese candidate decision rather than silently changing capability or falling back to cloud reasoning.
+
+### Acceptance
+
+- [ ] Exact artifacts and license notices are recorded and a local streaming response runs on target browsers.
+- [ ] Baseline quality results, limits and provisional supported devices are documented; production selection is not claimed from public scores alone.
+
+## AI-004: Enforce Privacy Routing and Remove Automatic Cloud Detection
+
+**Status:** Not started.  
+**Depends on:** AI-003; implement these boundaries before exposing a local workflow.
+
+### AI-004.1: Remove the Automatic Location Feature Globally
+
+- **Why:** Opening a PDF currently can send text remotely without any chat submission.
+- **What:** Remove the automatic cloud location-detection feature in both tabs, not just disable it in Offline.
+- **How:** Remove the trigger in [PdfViewer](src/components/PdfViewer.tsx), the provider-backed path in [locationDetect](src/lib/smart/locationDetect.ts), and dependent automatic overlays/state/tests as appropriate. Do not substitute another background cloud extractor. Preserve unrelated local date detection and manual editing; any remaining external actions must obey AI-004.3.
+
+### AI-004.2: Route Each Capability by Active Policy
+
+- **Why:** The current sequential [provider chain](src/lib/providers/index.ts) starts with Sarvam; adding a local provider to that chain would not enforce privacy.
+- **What:** Explicit routes for Online, Offline with cloud voice, and Offline text-only.
+- **How:** Reuse the [provider interface](src/lib/providers/types.ts), but authorize each method before dispatch. Offline `discuss` and any document-derived reasoning always stay local. Only voice-related audio and the dialogue needed for permitted translation/playback may leave in hybrid mode; never attach the full PDF, retrieved passages or hidden history to those requests. Text-only denies all remote dialogue calls, retries, speech preloads and fallbacks. Asset downloads are separate from content-bearing requests. Opening a document or chat, showing the greeting, checking compatibility or selecting a tab must not itself send document or dialogue content.
+
+| Active Policy | Reasoning Context | Remote Voice/Dialogue |
+| --- | --- | --- |
+| Online | Sarvam receives the context needed for an explicitly submitted request. | Existing supported Sarvam voice flow, subject to permission and access controls. |
+| Offline, voice allowed | Local model and local document index only. | Only disclosed, user-triggered voice/translation/playback data; generated answers can contain PDF-derived information. |
+| Offline, voice denied | Local model and local document index only. | None; disable input voice and remote speech output. |
+
+### AI-004.3: Guard Side Effects and Policy Changes
+
+- **Why:** External URLs, logs and already-running tasks can bypass an apparently local chat interface.
+- **What:** One policy applied to all content egress, not only the visible Send and microphone controls.
+- **How:** Disable document-derived Search, Maps and Calendar links/actions in Offline regardless of voice permission. Audit requests, WebSockets, analytics, error reports and logs without recording private contents. On tab/permission/document changes, stop incompatible recording/playback, abort requests where possible and reject stale completions using operation/revision identifiers. Already-transmitted data cannot be recalled. Never upload Offline history automatically or route a failed local request online.
+
+### Acceptance
+
+- [ ] Document/chat opening sends no document or dialogue content remotely; automatic cloud location detection is removed in all modes.
+- [ ] Routing tests reject forbidden methods and prove failures, retries and tab changes cannot trigger cloud fallback or history leakage.
+- [ ] Offline external actions and content-bearing telemetry are blocked, including while cloud voice is allowed.
+
+## AI-005: Implement Model Download, Caching and Lifecycle
+
+**Status:** Not started.  
+**Depends on:** AI-004.
+
+### AI-005.1: Check Compatibility Without Delaying Online
+
+- **Why:** Unsupported hardware must be detected without penalizing users who keep the current Online experience.
+- **What:** Lightweight browser/WebGPU/feature/storage checks, followed by real load-time error handling.
+- **How:** Run local capability checks during the greeting without downloading weights. Keep Offline preparation unavailable while checking; show a reason if unsupported, using "Local AI is unavailable because this device does not meet the minimum requirements." Keep Online and manual editing usable. Do not claim exact free GPU memory can be determined reliably; handle initialization failure even after an initial pass.
+
+### AI-005.2: Download Only on Offline Selection
+
+- **Why:** Nearly 1 GB of weights should not be downloaded for default Online users or once per PDF.
+- **What:** A shared, lazy model loader with visible size, byte progress, cancellation, retry and cached reuse.
+- **How:** Start or attach to one active preparation operation when Offline is selected and compatible. Display progress at the top of the Offline panel; distinguish downloading, loading and preparing the PDF. Measure all required assets rather than using weight bytes alone. Do not impose the removed two-minute timeout or add an approval modal. Handle network loss, partial/corrupt cache and storage exhaustion; preserve drafts and edits. Deduplicate loads and use resumable caching only where supported and verified.
+
+### AI-005.3: Manage Cache and Worker Resources
+
+- **Why:** A downloaded model is not necessarily loaded, and browser storage can be cleared or evicted.
+- **What:** Versioned cache, off-main-thread inference, recoverable unload/reload and a way to remove downloaded model assets.
+- **How:** Reuse WebLLM's supported worker/cache APIs. Validate a pinned asset manifest; keep model assets separate from PDF projects and conversation state. Reuse the cache across PDFs in the same browser profile. Do not promise permanent storage or persist private conversation/KV state with model weights. Release GPU/worker resources safely and recover from device loss. Model removal must not delete PDFs, and deleting a PDF must not require downloading the shared model again. Validate asset hosting limits, CORS/CSP and distribution bandwidth costs before release.
+
+### Acceptance
+
+- [ ] Online never waits for or initiates a model download; compatible Offline selection starts preparation with top-panel progress and Cancel.
+- [ ] Cached, uncached, cancelled, interrupted, evicted, corrupt and low-storage cases preserve work and expose actionable recovery without cloud fallback.
+
+## AI-006: Build Whole-Document, Current-Edit-Aware Local Context
+
+**Status:** Not started.  
+**Depends on:** AI-005.
+
+### AI-006.1: Extract All Supported Text
+
+- **Why:** The current [document text helper](src/lib/pdf/documentText.ts) supplies a `full` string capped at 50,000 characters; that cannot represent an entire book reliably.
+- **What:** Complete selectable English text from every relevant page for local analysis of PDFs up to 50 MB.
+- **How:** Reuse page extraction, but build a separate whole-document context/index rather than pass the truncated `full` field. Track page coverage and extraction errors. Apply the size limit only to local analysis; settle the exact MB byte convention before implementation. Identify image-only or partly unreadable documents without adding OCR. Do not report missing topics as proven absent when pages were not readable. Keep all extraction/index data local.
+
+### AI-006.2: Reflect Confirmed Edits and Page Changes
+
+- **Why:** Answers based on pristine import bytes can contradict what the user now sees.
+- **What:** A revisioned representation of current confirmed text and page order; exclude uncommitted drafts.
+- **How:** Combine extracted content with the authoritative edit and page-plan state, including replacement/addition/removal, Undo/Redo, inserted/deleted/reordered/duplicated pages, and corresponding source anchors. Do not count both covered original text and its confirmed replacement as current content. Keep original bytes immutable; this is not secure redaction. Invalidate affected chunks and reject responses from stale revisions. Test that older chat claims cannot override the current document.
+
+### AI-006.3: Index Locally and Track Readiness
+
+- **Why:** A whole PDF and eight chat messages will often exceed a 4,096-token model budget.
+- **What:** Page-anchored chunks, local passage retrieval and full-document coverage metadata.
+- **How:** Choose a lightweight existing retrieval approach and test paraphrases and multi-page questions. If embeddings are needed, include their model assets in the download, licensing and readiness budgets. Track model readiness independently from document-index readiness. Reindex changes without blocking editing, and disable Offline submission until the active revision is ready. Do not confuse a 50 MB file-size limit with a guarantee of bounded extracted-text memory or preparation time.
+
+### Acceptance
+
+- [ ] Questions about text beyond the old character cap work; every readable page is represented without silent truncation.
+- [ ] Confirmed edits, Undo/Redo and page changes update context and references; unconfirmed drafts do not affect answers.
+- [ ] Oversized, image-only and extraction-failure cases explain limitations instead of hanging or fabricating absence.
+
+## AI-007: Generate Grounded Answers, Summaries and Page References
+
+**Status:** Not started.  
+**Depends on:** AI-006.
+
+### AI-007.1: Implement the Local Discussion Provider
+
+- **Why:** [BrowserProvider](src/lib/providers/browser.ts) is currently a shell with no supported methods.
+- **What:** Local English generation with streamed answer text and explicit unsupported capabilities.
+- **How:** Adapt the qualified WebLLM package to `discuss` and `onTextDelta`, with an explicit local route. Supply only the relevant passages, question and permitted session history. Budget system instructions, up to the last eight messages, retrieved evidence and output together; trim older context when necessary and clarify ambiguous references instead of guessing. Treat PDF text as untrusted evidence, not instructions. Do not enable editing tools or external browsing for this release.
+
+### AI-007.2: Ground Responses and Validate Citations
+
+- **Why:** A fluent answer or a model-generated `grounded` flag is not proof of source support.
+- **What:** Explanations and cross-page answers based only on supported current-document evidence, with clickable page references.
+- **How:** Assign source IDs before generation and map returned references to real page/passage anchors; reject invented IDs and stale revisions. Check support for important claims, numbers and names. Use "I do not see any mention about this topic in the PDF." only when coverage and retrieval justify it; otherwise explain that no supporting answer could be located or that text was unreadable. For image-based questions, say "I cannot read images in this PDF." Do not fill gaps with outside knowledge. Clicking a citation navigates locally to its supporting passage.
+
+### AI-007.3: Summarize Across the Whole Document
+
+- **Why:** A top-ranked handful of passages cannot establish a whole-book summary.
+- **What:** Section/chunk summaries combined into a grounded final summary with traceable evidence.
+- **How:** Cover all readable sections, carry source IDs through intermediate steps, and distinguish section summaries from whole-book summaries. Report omissions, cancellation and unreadable pages. Longer summaries may take longer than routine questions; show honest progress and never substitute a partial result as complete coverage.
+
+### Acceptance
+
+- [ ] Direct, follow-up, cross-page, numerical and missing-topic tests pass agreed quality thresholds without outside-knowledge substitution.
+- [ ] Citations resolve to current supporting passages; false grounding, fabricated citations and stale responses are detected in tests.
+- [ ] Whole-book summaries cover all readable sections and disclose incomplete coverage.
+
+## AI-008: Add Online/Offline Chat Tabs and Readiness States
+
+**Status:** Not started.  
+**Depends on:** AI-007.
+
+### AI-008.1: Keep Online the Immediate Default
+
+- **Why:** Existing users should not encounter local download or compatibility waits for Online chat.
+- **What:** Accessible Online and Offline tabs inside [PdfChat](src/components/PdfChat.tsx), with Online selected whenever the dialog opens.
+- **How:** Keep [Toolbar](src/components/Toolbar.tsx) Ask available only after the PDF is fully open. Preserve current Online submission and supported voice behavior, except for the intentional privacy fixes and future access controls. Never gate Online on Offline readiness or show a fake zero-latency promise. Render the greeting locally: "Hello, your PDF agent is here to help you. What is the question?" The greeting animation and background capability check must not block Online or issue cloud requests.
+
+### AI-008.2: Present Offline Setup at the Top
+
+- **Why:** Downloading, loading and document preparation are different states the user must understand.
+- **What:** Top-panel size/progress/status, Cancel and Retry, followed by the agreed voice permission checkbox and disclosure.
+- **How:** Bind the panel to AI-005 and AI-006 state; reuse cached assets without redundant downloads. Show "Your PDF agent is getting ready..." while required preparation is incomplete. Keep the editor and question draft usable. Observe local readiness at least every second without cloud polling or an artificial delay. Distinguish unsupported device, download failure and unreadable-document states; show model available separately from document ready.
+
+### AI-008.3: Gate Every Submission Path
+
+- **Why:** Disabling one button does not stop Enter, continuous voice or stale asynchronous submissions.
+- **What:** A single readiness/policy check for Send, keyboard submission and all voice entry points.
+- **How:** Enable Offline text submission only when the model and active document revision are ready. Enable voice only when those conditions and cloud voice permission hold. Keep it disabled when permission is unchecked even after preparation. Handle rapid tab changes, unmounts and keyboard activation consistently. Provide accessible labels, focus order, progress announcements and reduced-motion behavior without changing the established visual design.
+
+### Acceptance
+
+- [ ] Every dialog opening defaults to Online with no added model wait; selecting Offline exposes the preparation state at the top.
+- [ ] Users can draft/edit during preparation but no Offline submission path bypasses readiness or permission.
+- [ ] Unsupported/error/retry/cancel states are accessible and do not lose edits or drafts.
+
+## AI-009: Add Consent-Controlled Cloud Voice to Offline Chat
+
+**Status:** Not started.  
+**Depends on:** AI-008; production transport and authorization also require AI-002 before release.
+
+### AI-009.1: Apply the Agreed Consent Wording and Polarity
+
+- **Why:** "Offline" with cloud voice enabled does not mean conversation content stays entirely on the device.
+- **What:** A checkbox labeled **Allow cloud AI for voice**, initially checked, with the accepted disclosure immediately beside/below it.
+- **How:** Display **Spoken questions and answer text, including information from this PDF, may be sent to Sarvam.** Make the hybrid behavior explicit before microphone use. Checked permits only the voice workflow; it does not authorize sending the document/index to a remote reasoning model. Unchecked means local text-only and disables microphone/Conversation controls and cloud read-aloud.
+
+### AI-009.2: Separate Speech From Local Reasoning
+
+- **Why:** Audio services can be remote while answers are still generated from the PDF locally.
+- **What:** Permitted flow: user audio -> Sarvam transcription/English translation if needed -> local PDF reasoning -> permitted answer translation/TTS for playback.
+- **How:** Reuse supported Sarvam speech components without calling Sarvam `discuss` for Offline answers. Keep the canonical local answer in English. Implement and test any missing translation bridge explicitly; existing translation stubs are not working features. Send only the utterance or answer needed for that speech operation, never hidden retrieved context. Preserve typed chat if translation, speech or network fails.
+
+### AI-009.3: Stop All Remote Dialogue When Permission Is Removed
+
+- **Why:** Disabling the microphone alone leaves TTS, fillers, queued work and browser speech fallbacks as possible content leaks.
+- **What:** Permission enforcement across recording, transcription, translation, acknowledgments, speech queues, read-aloud and retries.
+- **How:** Gate these operations before requests; stop recording/playback and invalidate queued/in-flight work on uncheck or policy change. Do not preload cloud speech merely when the dialog opens. Browser/OS speech must not be assumed local; with voice denied, do not use it as a fallback. Re-enabling permission must not automatically transmit previously drafted or queued private dialogue.
+
+### Acceptance
+
+- [ ] Checked Offline voice uses cloud speech plus local reasoning, with accurate disclosure and no document-context upload.
+- [ ] Unchecked Offline is text-only with no cloud dialogue requests, including background, playback and retry paths.
+- [ ] Speech failures, permission revocation and disconnections preserve usable local text chat.
+
+## AI-010: Define Tab History, Saved Preferences and Transition Behavior
+
+**Status:** Not started; the specific history presentation and migrated preference defaults need confirmation.  
+**Depends on:** AI-009.
+
+### AI-010.1: Isolate Private History
+
+- **Why:** A later Online question could leak previous Offline messages if both tabs share the same request history.
+- **What:** Recommended implementation: separate in-memory histories per tab, using the agreed session-only retention.
+- **How:** Confirm this presentation before implementation. Independently enforce that Online prompts never automatically include Offline turns. Supply up to the last eight messages from the relevant history, within the model's context budget. Clear both on refresh or document change; do not persist them in IndexedDB, account storage, telemetry or model caches. Clearly associate visible answers/drafts with their tab.
+
+### AI-010.2: Preserve Voice Denial Without Restoring the Wrong Tab
+
+- **Why:** A checked default for new PDFs must not silently override a user's previous explicit denial.
+- **What:** Recommended adaptation of the earlier saved-project preference requirement: persist cloud voice permission per saved PDF, but always open chat on Online.
+- **How:** Confirm the migrated setting and unsaved-document defaults. Extend existing [project state](src/lib/projects/projectState.ts) and autosave only for the permission, not chat. Restore it before any Offline voice operation. Model cache readiness is shared and independent of that permission. Do not reintroduce the removed local-processing checkbox or a remembered active tab contrary to Online-on-open.
+
+### AI-010.3: Make Transitions Recoverable
+
+- **Why:** Downloads, answers and audio can complete after a user switches tabs, closes chat or changes documents.
+- **What:** Deterministic cancellation and operation ownership across transitions.
+- **How:** Preserve manual edits and unsent drafts, prevent duplicate model loads, release inactive resources and discard late completions. Define whether an explicit model download continues after switching to Online or closing chat; recommended default is to stop unnecessary work while retaining valid cached assets. Never cancel into a cloud retry, silently resend a draft or auto-share private history.
+
+### Acceptance
+
+- [ ] Recommended history/preference/transition behaviors are confirmed and tested without treating them as already implemented.
+- [ ] Online-on-open, session-only history, saved voice denial and shared model caching remain independent.
+- [ ] Rapid switches, close/reopen and document replacement cannot leak history or render stale answers.
 
 ## AI-002: Website Login and Controlled Online AI Access
 
 **Date:** 2026-09-15  
-**Updated:** 2026-09-16  
-**Status:** Deferred pending AI-001; implementation and deployment have not started.  
-**Priority:** Second, only if the chosen architecture needs online/account services; complete required access controls before public access to application-funded AI.  
-**Depends on:** AI-001 model evaluation and Online/Offline architecture decisions.  
-**Planning direction:** Reassess Supabase Auth + PostgreSQL and the Cloudflare API layer after AI-001.  
+**Updated:** 2026-09-20  
+**Status:** Deferred until the preceding items are resolved; implementation and deployment have not started.  
+**Priority:** After AI-010, before public release of application-funded cloud services.  
+**Depends on:** AI-003 through AI-010 and approval of the account/access policy.  
+**Planning direction:** Supabase Auth + PostgreSQL and the Cloudflare API layer remain proposed; Sarvam remains the Online provider.  
 **Owner:** To be assigned.
 
-> **Scope update, 2026-09-16:** Do not start authentication integration before AI-001 resolves the model and online-service requirements. Authentication is not specific to Sarvam: hosted Qwen, paid speech, or other account-backed services may still need it. If the release is local-only and has no account-backed features, this item may be omitted. Offline processing must not require live login, cloud allowance checks, or a remote provider. The existing Sarvam implementation below is a reference point, not a commitment to retain that provider.
+> **Scope update, 2026-09-20:** Online chat remains Sarvam-backed. Permitted cloud voice in the Offline tab is also a remote, billable service and must receive the same authorization and usage controls. Local text reasoning, local model reuse, and manual PDF tools must not depend on live login or cloud quota checks. Supabase, login methods and allowances require approval; unprotected application-funded endpoints must not be publicly released while those decisions are pending.
 
 ### What We Are Trying to Do
 
-If online/account services remain in scope, allow users to sign in to this website and use its online PDF assistant without supplying their own provider API key. Supabase remains a proposed option for authentication and a managed PostgreSQL database for user-related application data, subject to the AI-001 decision gate.
+Allow users to use approved application-funded Sarvam services without supplying their own provider API key. Supabase remains a proposed option for authentication and managed PostgreSQL account/usage data, subject to approval after the local architecture work. This applies to Online chat and to permitted cloud voice in Offline, not to local text inference.
 
 - Start with an app-branded login screen and **Continue with Google** if authentication is approved.
 - Design around the Supabase user ID and session so email/password login can be added without changing backend authorization. Treat that login method as an optional follow-up, not committed initial scope.
@@ -173,19 +372,37 @@ If online/account services remain in scope, allow users to sign in to this websi
 - [Streaming provider methods](src/lib/providers/sarvam.ts) explicitly reject production streaming speech until WebSocket proxy support exists. Website login alone will not make live voice work in production.
 - [Saved projects](src/lib/projects/projectStore.ts) use browser IndexedDB, not cloud storage or an account-scoped database.
 
-### How to Implement It
+### AI-002.1: Confirm Access Policy and Hosting
 
-1. **Confirm the dependency and release boundaries.** Proceed only after AI-001 identifies the selected model, hosting, and need for online/account services. Reassess the authentication provider and estimates. Agree on AI-only login gating, Google-only initial scope, initial allowances, and whether live voice is required at first release. Check the actual hosting setup: the repository has a Pages Functions endpoint but [Wrangler configuration](wrangler.jsonc) currently describes Workers static assets without an API entrypoint. Verify that deployed API requests reach backend code rather than the SPA fallback.
-2. **Configure Supabase and Google if selected.** Create the free Supabase project and Google OAuth client. Request only basic identity scopes (`openid`, email, profile), configure app branding and the production audience, and allow only the required origins and callback URLs. Use a maintained Supabase SDK and its supported OAuth flow; keep the Google client secret in provider configuration, not in the browser.
-3. **Define minimal SQL data and access policies.** Let Supabase Auth own identities. Add proposed application tables for `profiles` linked to `auth.users.id`, user preferences, and online AI allowance/usage records. Enable row-level security on exposed tables: users may access only their own permitted fields and must not edit their quota or consumption. Perform quota changes through restricted server operations. Do not duplicate passwords or retain Google access tokens that the application does not need.
-4. **Add the website login experience.** Implement sign-in, callback completion, session restoration, logout, and cancellation/error states. Entering login from Ask must preserve the open PDF and unsaved edits across the OAuth flow. Use the stable Supabase user ID for account records, not an email address or Google-specific ID. Handle account deletion and a defined session-revocation policy.
-5. **Protect the HTTP/SSE proxy.** Verify the session on every protected request using supported verification tooling, including signature, expiry, expected issuer and audience as applicable. Derive the user ID from verified identity; do not trust an ID supplied by the client. Reject missing or invalid sessions before contacting the selected online provider. Keep provider keys and Supabase privileged credentials server-side, never in `VITE_*` variables. Do not forward website session credentials to AI providers.
-6. **Enforce allowances before online provider calls.** Use atomic PostgreSQL operations to reserve bounded usage before dispatch and reconcile it afterward. Limits must hold across concurrent requests, tabs, and backend instances. Add per-user and IP throttles, model/output limits, actual body-byte limits, audio-duration limits, timeouts, and an application-wide AI budget cutoff. Track text and speech usage separately. Fail closed when authorization or required online quota checks are unavailable; an in-memory counter or frontend limit is insufficient. These checks must not block offline processing.
-7. **Complete protected online voice transport when in scope.** Authenticate live speech connections through a WebSocket relay; use a protected handshake or short-lived, single-use connection ticket, never a provider key in the browser. Validate origins, messages, connection count, duration, and audio volume. Close microphone capture and both sides of the connection on logout, expiry, cancellation, or quota exhaustion. Preserve supported online batch speech fallback and streaming chat behavior.
-8. **Explain errors and data disclosure.** Show clear signed-out, expired-session, exhausted-allowance, and provider-unavailable states without discarding the document. Before online AI use, explain which document text or audio is sent to which provider. Store minimal account/usage metadata, define retention and deletion, and exclude document content and credentials from routine logs.
-9. **Test, deploy, and update documentation.** Run authentication and proxy tests, database policy tests, concurrency tests, and real Google/selected-provider staging checks. Verify desktop/mobile login, microphone behavior, and existing PDF export. Update [architecture](ARCHITECTURE.md) and [progress tracking](PROJECT_PROGRESS.md) to reflect the new account/backend model after implementation. Document deployment, monitoring, key rotation, and rollback.
+- **Why:** Retaining cloud services creates ongoing credential, abuse and spending risks even with a local reasoning option.
+- **What:** Approved login scope, provider budgets, production voice scope and a verified Cloudflare deployment path.
+- **How:** After AI-010, approve or revise Supabase, Google-only initial login and the policy for cloud voice in Offline. Check whether the actual deployment is Pages or Workers: [Wrangler configuration](wrangler.jsonc) describes static assets while the API is a Pages Function. Verify requests reach backend code, not the SPA fallback. Keep protected staging separate from public release.
 
-**Proposed online request flow:** Website login -> Supabase session -> Cloudflare session validation -> SQL allowance reservation -> selected online provider with server credentials -> response and usage reconciliation.
+### AI-002.2: Configure Identity, SQL and Login Recovery
+
+- **Why:** User identity must be verified without losing the document or putting PDF data into account storage.
+- **What:** Minimal account/usage tables and an app-branded sign-in, callback, logout and recovery flow.
+- **How:** If Supabase is approved, configure Google with only `openid`, email and profile scopes and restricted callback origins. Use its maintained SDK and stable user ID. Enable row-level security; forbid client changes to allowances or consumption. Do not duplicate passwords or retain unnecessary Google tokens. Preserve open files, unsaved edits and drafts across OAuth. Define deletion and revocation behavior; existing IndexedDB projects are not automatically isolated by account.
+
+### AI-002.3: Protect Cloud Requests and Bound Spending
+
+- **Why:** A frontend checkbox or login screen cannot protect an application-funded API.
+- **What:** Server-side authentication, authorization, per-user allowances and application-wide spending limits for every remote capability.
+- **How:** Validate session signature, expiry, issuer/audience as applicable, derive identity server-side and reject unauthorized requests before Sarvam calls. Keep provider and privileged Supabase secrets out of `VITE_*`, browser bundles, URLs and logs. Atomically reserve/reconcile usage in PostgreSQL across concurrent tabs/instances. Limit actual streamed body bytes, audio duration, output tokens, concurrency and timeouts. Track speech and reasoning separately, including permitted cloud voice from Offline. Fail closed for remote calls when auth/quota checks fail, while leaving local text inference and manual tools usable.
+
+### AI-002.4: Complete Production Speech Transport
+
+- **Why:** Current production streaming speech explicitly rejects use until a WebSocket relay exists; HTTP login protection does not fix that.
+- **What:** Protected live speech transport for all included voice workflows, with clear handling for unsupported/deferred capabilities.
+- **How:** Authenticate the relay via a secure handshake or short-lived single-use ticket, never a provider key in the browser. Validate origin, messages, connection count, duration and audio volume. Close microphone capture and upstream connections on logout, expiry, cancellation, permission denial or quota exhaustion. Preserve supported batch speech where policy permits, but never use fallback speech when Offline cloud voice is unchecked. Verify the hybrid route still generates answers locally.
+
+### AI-002.5: Disclose Cloud Use and Verify Access Controls
+
+- **Why:** Users need accurate distinctions between local documents, cloud dialogue, account data and service failures.
+- **What:** Clear signed-out, expired-session, exhausted-allowance and provider-error states plus security validation.
+- **How:** Keep document contents out of routine logs and SQL usage metadata; define retention/deletion. Test wrong-project, revoked and malformed sessions, two-user row isolation, concurrent budget exhaustion and staging OAuth/voice flows. Preserve local text chat when account services fail. Feed results into the final AI-011 release gate rather than declaring readiness after a prototype.
+
+**Proposed remote request flow:** Website login -> Supabase session -> Cloudflare session validation -> SQL allowance reservation -> Sarvam with server credentials -> response and usage reconciliation. This applies to approved cloud requests from either tab, never to local inference itself.
 
 ### Optional Email/Password Follow-Up
 
@@ -201,8 +418,8 @@ Configure a production SMTP sender for verification and recovery messages. Supab
 | Security | Server-verified identity and usage controls protect the application-funded API. | Login alone does not prevent abuse, multiple-account creation, or excessive AI spend. |
 | User data | SQL stores account metadata and online usage allowances in one managed platform. | Row-level security, restricted quota writes, deletion, and retention must be configured correctly. |
 | PDF behavior | Existing editing, export, and local saved-project behavior remain unchanged. | Login does not add cloud file sync or isolate existing IndexedDB files between accounts sharing a browser profile. |
-| Privacy | Ordinary document processing remains local; online AI disclosure becomes explicit. | Account data is stored in Supabase, and authorized online AI text/audio crosses the network. Do not claim the whole application is entirely local. |
-| Operations | Managed authentication reduces identity-service maintenance. | Online account services depend on Supabase availability; offline processing must remain independent. Monitoring and recovery remain team responsibilities. |
+| Privacy | Local PDF reasoning remains local; remote dialogue use is disclosed separately. | Account data is stored in Supabase; Online context and permitted Offline voice/answer text cross the network. Do not claim the Offline tab is wholly private while cloud voice is checked. |
+| Operations | Managed authentication reduces identity-service maintenance. | Online chat and permitted cloud voice depend on account services; local text inference remains independent. Monitoring and recovery remain team responsibilities. |
 | Scope | Reuse React/Vite, the provider interface, and Cloudflare rather than migrate frameworks. | Production online voice may need its own protected relay; do not mark it complete after implementing HTTP authentication. |
 
 ### Cost and Effort
@@ -219,26 +436,26 @@ Published prices checked **2026-09-15**, in USD before tax; confirm again before
 
 MAU counts distinct users who sign in or refresh a session within the billing cycle, not all registered accounts or each login attempt. Supabase's Pro spend cap covers selected usage categories, not every infrastructure charge and not the external AI provider bill.
 
-**Earlier planning estimate, to be reassessed after AI-001:** 3-4 developer-days for Google login plus a protected-chat prototype; 8-12 total developer-days for a tested beta including production online voice and usage controls. Email/password support adds approximately 2-4 days. These estimates assumed the previous Sarvam-based online plan and one experienced full-stack developer with a working baseline, excluding external approval delays, payments, and cloud PDF synchronization. They do not cover offline implementation or a finalized new-provider integration. The prototype is not a public-release security gate.
+**Historical authentication-only estimate, to be reassessed after AI-010:** 3-4 developer-days for Google login plus a protected-chat prototype; 8-12 total developer-days for a tested beta including production voice and usage controls. Email/password support adds approximately 2-4 days. These estimates assumed one experienced full-stack developer and a working baseline, excluding external approvals, payments and cloud PDF synchronization. They do not cover the new local-model, indexing, citation, tab or privacy work. Do not use them as an estimate for this complete plan; the prototype is not a public-release security gate.
 
 ### Acceptance Criteria
 
-- [ ] AI-001 has resolved the model and processing architecture, and the need for AI-002 has been explicitly approved.
+- [ ] AI-003 through AI-010 have resolved the local architecture and UX, and the AI-002 access policy has been explicitly approved.
 - [ ] A user can sign in with Google, reload, and sign out without entering a provider key or losing the open document and unsaved work.
 - [ ] Unauthenticated, expired, revoked according to the defined policy, malformed, and wrong-project sessions cannot access protected online AI endpoints or trigger upstream calls.
 - [ ] Two users cannot access each other's restricted SQL data, and neither can change their own allowance or usage counters through client requests.
 - [ ] Concurrent requests cannot exceed reserved allowance; oversized streamed bodies and over-budget requests are blocked before an unintended provider call.
-- [ ] The application-wide cutoff works, and failure of required authentication/quota services blocks online AI while leaving offline processing and local PDF tools usable.
+- [ ] The application-wide cutoff works; authentication/quota failure blocks cloud chat and cloud voice from either tab, while leaving local text processing and PDF tools usable.
 - [ ] No provider key, Google client secret, or Supabase privileged key appears in the browser bundle, browser request URLs, or logs; website session credentials are not sent to AI providers.
 - [ ] Included online chat and speech flows work in production mode; logout, expiry, disconnect, and cancellation release microphone and upstream resources. Deferred voice work remains explicitly tracked.
 - [ ] AI data disclosure, local-file limitations, account deletion, cost monitoring, and free-tier restrictions are documented accurately.
 - [ ] Focused tests, typecheck, lint, production build, and the existing PDF export verification harness pass before release; any pre-existing failures are recorded separately.
 - [ ] If email/password is included, verified signup, recovery, account linking, and email rate-limit/error paths pass production-sender tests.
 
-### Decisions Before Implementation
+### Decisions Before Authentication Implementation
 
-- Based on AI-001, confirm whether accounts and online access controls are needed at all; remove or narrow this item if they are not.
-- Confirm AI-only login gating versus other online account requirements, without making offline processing depend on live authentication.
+- Approve Supabase or another access-control approach for retained application-funded Sarvam services; no unprotected public release.
+- Confirm AI-only login gating, including cloud voice in Offline, without making local text inference depend on live authentication.
 - Confirm Google-only first release versus including email/password immediately.
 - Set per-user text/speech allowances, concurrency limits, global budget, and the quota-exhaustion experience for approved online services.
 - Confirm the actual Pages/Workers deployment, online voice release scope, and acceptance of free-tier inactivity and default callback-hostname limitations.
@@ -251,3 +468,60 @@ MAU counts distinct users who sign in or refresh a session within the billing cy
 - [Supabase production email delivery](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Supabase cost controls](https://supabase.com/docs/guides/platform/cost-control)
 - [Clerk pricing and retained-user definition](https://clerk.com/pricing)
+
+## AI-011: Validate the Complete Workflow and Release Safely
+
+**Status:** Not started.  
+**Depends on:** All preceding items, including approved cloud access controls in AI-002.
+
+### AI-011.1: Run End-to-End Quality and Performance Tests
+
+- **Why:** Component tests and vendor benchmarks cannot establish a usable browser PDF assistant.
+- **What:** Evidence for the production model choice, device baseline, source fidelity and readiness/response targets.
+- **How:** Reuse existing Vitest/Testing Library tests and the PDF verification harness, adding targeted tests for the touched modules. Exercise real Chrome/Edge with public/synthetic PDFs up to the local-analysis limit, long text beyond 50,000 characters, scans, mixed readable/unreadable pages, current edits and page changes. Measure model download separately from loading, indexing, routine answer start and complete summaries. Test the five-second first-meaningful-text target on supported hardware, with actual evidence and citations rather than filler. Do not run public benchmark scores as product acceptance substitutes.
+
+### AI-011.2: Verify Network Privacy and Mode Transitions
+
+- **Why:** Static source scans do not cover dependencies, workers, speech sockets or background retries.
+- **What:** Runtime network evidence for Online, Offline with voice allowed, and Offline text-only.
+- **How:** Inspect fetch/XHR, WebSockets, beacons, workers, speech, navigation and error reporting. Verify no document/dialogue request on import or chat opening; no automatic cloud location extraction anywhere; no document/index upload or private-history transfer from Offline. With voice allowed, only explicitly permitted speech/dialogue payloads may leave. With voice denied, no content-bearing requests may leave. After preparation, block external network access and test local text answers without live login; do not confuse this with a guaranteed offline cold launch. Exercise cache eviction, cancelled downloads, permission changes, multiple tabs and late responses.
+
+### AI-011.3: Document, Stage and Approve Release
+
+- **Why:** Published claims, hosting limits and rollback behavior must match what was actually tested.
+- **What:** Updated architecture/progress records, deployment runbook, cost budget and an explicit release decision.
+- **How:** Update [ARCHITECTURE.md](ARCHITECTURE.md), [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md) and [TASKS.md](TASKS.md) after implementation. Record pinned model/runtime versions, all asset sizes, licenses, storage controls, support matrix, privacy disclosures and known limitations. Budget model distribution bandwidth, hosting, Sarvam reasoning/speech and approved account services separately; local inference has no hosted per-question fee but is not cost-free. Keep GoDaddy as domain registrar; no model, database or hosting purchase is implied by domain registration. Stage the deployment, validate the API route and assets, and provide rollback that never reroutes a local request to cloud AI. If quality or hardware goals fail, keep local AI unavailable and report the issue rather than weaken privacy or claim readiness.
+
+### Release Acceptance
+
+- [ ] Online opens by default and retains its existing supported experience without any Offline preparation wait.
+- [ ] Offline preparation shows accurate top-panel status, size, Cancel and Retry; cached reuse works without a two-minute download deadline.
+- [ ] Offline text-only has no remote content processing; permitted hybrid voice uses the accepted disclosure and never cloud PDF reasoning.
+- [ ] Whole-document coverage, confirmed edits, reliable citations, summaries and missing-topic/image limitations pass the agreed evaluation.
+- [ ] Minimum hardware and browser support are measured; the five-second routine answer-start target is met or release is explicitly held.
+- [ ] Tab/permission transitions, session-only history, cancellation and saved-preference behavior cannot expose private dialogue or stale answers.
+- [ ] Runtime privacy checks, account authorization, concurrent quotas, production voice and failure recovery pass before public access.
+- [ ] `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` and the existing PDF export verification harness pass; unrelated pre-existing failures are recorded separately.
+- [ ] No regression to manual editing, local saved projects, PDF tools or export, including on devices without local AI support.
+- [ ] Documentation, license notices, operating budget and rollout/rollback are reviewed; remaining limitations are disclosed accurately.
+
+## Remaining Decisions and Evidence
+
+| Item | State / Next Action |
+| --- | --- |
+| Local model | SmolLM2-1.7B Q4 + WebLLM is the preferred trial, not a proven production winner; qualify in AI-003 and approve using AI-011 results. |
+| Download limit | Resolved: no two-minute cap. Display size, progress, cancellation and connection-dependent duration. |
+| History and preferences | Confirm separate tab histories, per-saved-PDF voice permission, and download behavior on tab switch/close in AI-010. |
+| Device and document limits | Measure minimum devices, RAM/GPU/storage and preparation times; define 50 MB in bytes consistently. No additional page/text cap is approved. |
+| Quality thresholds | Establish representative expected answers and acceptable grounding/citation/summary failure thresholds before model testing. |
+| Cloud access | Approve authentication, allowances, production speech transport and budgets in AI-002. Local text inference remains independent. |
+| Fully disconnected startup | Not part of the current commitment. Separately scope application-asset caching/PWA support before advertising offline cold-start availability. |
+
+## Local Processing References
+
+- [SmolLM2-1.7B-Instruct model card, limitations and license](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct)
+- [MLC Q4/F16 model package](https://huggingface.co/mlc-ai/SmolLM2-1.7B-Instruct-q4f16_1-MLC)
+- [MLC weight manifest used to calculate model bytes](https://huggingface.co/mlc-ai/SmolLM2-1.7B-Instruct-q4f16_1-MLC/resolve/main/ndarray-cache.json)
+- [WebLLM prebuilt model registry and context overrides](https://github.com/mlc-ai/web-llm/blob/main/src/config.ts)
+- [WebLLM documentation](https://webllm.mlc.ai/docs/)
+- [Sarvam pricing; recheck before budgeting or provisioning](https://docs.sarvam.ai/api/getting-started/pricing)
