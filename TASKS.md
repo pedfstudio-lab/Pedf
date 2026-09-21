@@ -10120,3 +10120,457 @@ correctly. Merged to `main` as `dfe5628` and pushed (Cloudflare deploys from `ma
 Note: one full run showed 2 flaky failures that did not reproduce in three later full runs; the failing names were
 lost because the output was filtered. Capture full vitest output to a file from now on. Scope: this fixes only what
 the **editor shows** — old words remain inside exported files until Task 67 Revision 2.
+
+### Task 68 — Delete means delete for pictures: a removed photo leaves the file  ✅ MERGED to `main` (`e9c24c1`, 2026-09-22; includes Rev 1 and Rev 2; branch `remove-covered-images`)   *(Large · 2–3 days)*
+
+**What happens today.** Deleting a picture does not delete it. `src/components/ImageOverlay.tsx` builds a `CoverEdit`
+whose colour is sampled from the paper around the picture (`sampleOutsideImage`, `sampleBackground: false`) and paints
+it over the top. The picture's drawing instruction and its image object stay in the file untouched. The same happens
+when a picture is **moved** (the vacated spot gets a cover, the original stays) and when one is **replaced** (the old
+photo sits under the new one). So a "deleted" signature, face, ID card, stamp or client logo can be pulled straight
+back out of the exported PDF with any free image-extraction tool, and the file never gets smaller.
+
+Task 67 fixed this for words. This is the same promise for pictures, and it matters more: a leftover bullet dot tells
+nobody anything, but a photo **is** the information.
+
+**What the user gets:** deleting a picture removes it from the file; **cropping really removes the part cropped
+away**; replacing leaves only the new one; moving leaves exactly one copy; the exported file gets smaller; and
+bullets drawn as small images are removed with their list. Extracting the images from the export finds nothing that
+was deleted, and nothing that was cropped off.
+
+Steps 1 → 6 in order. Run the touched test files after each step.
+
+**Step 1 — Record which picture a cover replaces.** `src/lib/export/types.ts`:
+```ts
+export interface ReplacedImage {
+  /** PDF.js object id of the drawn image, when it has one. Absent for inline images. */
+  readonly objectId?: string;
+  readonly kind: 'image' | 'inline' | 'mask';
+  /** Where it was drawn, in the same PDF-point space as every other edit rect. */
+  readonly rect: PdfRect;
+}
+```
+`CoverEdit` gains `readonly replacesImages?: readonly ReplacedImage[]`, beside the existing `replaces` for text. Both
+optional: a text cover records no images, an image cover records no text, and saves from before this have neither.
+
+**Step 2 — Fill it in where those covers are built.**
+1. `src/components/ImageOverlay.tsx`: record inside **`makeExistingCover`** itself — the one function every cover over
+   an existing picture goes through. That covers all four paths in a single place: `image-delete-cover`,
+   `image-move-cover`, `image-cover` (replace with a new file) and `image-crop-cover` (crop). Values come from the
+   `DrawnImage` the overlay resolved through `imageDrawsFromOperatorList` (`src/lib/pdf/images.ts`): `objectId`,
+   `kind`, `region.rect`. Where the caller holds only an `ImageRegion` — the crop path passes
+   `cropTarget.region.rect` — leave `objectId` undefined and let Step 3 match on the rect.
+
+   **Crop is the most serious of the four.** Cropping an existing picture covers the **whole original** and places a
+   freshly captured piece on top (`confirmCrop` → `capturePdfRegion`), so today the **entire uncropped photo stays in
+   the file**. Someone who crops a face, a signature or an ID number out of a photo has removed nothing — and unlike
+   delete, they have no reason to suspect anything was left behind.
+2. `src/lib/edit/buildTextEdits.ts` (`buildBulletListEdits`): a bullet list whose markers are **images** records those
+   markers in `replacesImages`, closing the gap Revision 2a left open. Image markers are matched by rect only —
+   `matchImageBulletMarkers` works from `ImageRegion`, which carries no object id — so `objectId` stays undefined and
+   Step 3 falls back to rect matching.
+3. Record only the pictures the cover actually hides. Never widen a cover's claim to reach a neighbour.
+
+**Step 3 — Export removes the draw.** New `src/lib/export/coveredImages.ts`, mirroring `coveredGlyphs.ts` so the two
+share their safety model:
+1. Walk the same `buildPageStreamTree` roots — page stream plus Form XObjects, copy-on-write before any rewrite,
+   the existing depth and cycle guards. A form painted more than once on a page is **skipped**, as in Revision 1.
+2. Match PDF.js's image draws (`imageDrawsFromOperatorList` over the same operator list) to the tokens by operator
+   order, exactly as text does. If the counts disagree, **skip the page with a reason** — never guess.
+3. A draw is removed when a cover claims it: same `objectId` when both have one, otherwise the rects agree within a
+   point. No area threshold, no overlap measuring. An entry matching nothing is not an error; a draw no entry claims
+   is left alone.
+4. Remove the paint operator — `Do` for an image XObject, `BI…ID…EI` for an inline image, the mask paint for a mask —
+   together with the `q`/`cm`/`Q` that exist **only** to place it. Never remove graphics state another operator
+   depends on.
+
+**Step 4 — Delete the image object, not only the reference. This is the point of the task.**
+1. After the rewrite, drop the name from the owning `/Resources /XObject` when nothing else in the document paints it.
+2. Then delete the image stream object itself, and its `/SMask` and `/Mask` when those are referenced by nothing else.
+3. **pdf-lib writes every object it holds when saving, so an unreferenced image is still written into the file.**
+   Removing the reference alone leaves the photo fully extractable. Step 6's first test is what proves this happened;
+   a page-looks-right check would pass either way and must not be trusted here.
+
+**Step 5 — Keep the cover.** The sampled-colour patch is still drawn. It keeps the page pixel-identical, and it is the
+**fallback**: when a page cannot be rewritten safely, the picture stays in the file but stays hidden exactly as today,
+so a bail-out is never worse than the current behaviour. Do **not** change `sampleOutsideImage`, the delete sample, or
+how the patch picks its colour. Revealing the true background instead of the patch is a separate, cosmetic task.
+
+**Step 6 — Tests.**
+- **Prove it first.** A page with a distinctive photo, deleted through `ImageOverlay`'s own cover-building code, then
+  exported → **extract the images from the exported document and assert the photo is not among them**. Not "the page
+  looks right" — the actual image list. This test must fail before Step 4 exists.
+- **Shared image:** the same photo drawn on pages 1 and 2, deleted only on page 1 → page 1 loses it, **page 2 keeps
+  it**, and page 2 renders unchanged.
+- **Shared form:** a logo painted through one Form XObject used by every page, deleted on one page → the form is
+  copied first and the other pages keep their logo.
+- **Transparency:** a PNG with an `/SMask` → the mask object goes too, and nothing else loses its mask.
+- **Inline image** and **image mask** each removed correctly.
+- **Move:** the vacated original is gone and exactly one copy remains.
+- **Crop:** a photo with a distinctive mark in the part being cropped away, cropped through `confirmCrop`'s own
+  code → the exported file's images contain the cropped piece and **not** the full original. Assert on the extracted
+  image, not on how the page looks.
+- **Replace:** replacing an existing picture with a new file leaves only the new one in the document.
+- **Bullets:** a list with image markers, edited → the marker images are gone from the file (the Revision 2a gap).
+- **Size:** exporting after deleting a large photo is materially smaller than exporting the same document untouched.
+- **Pixels:** every touched page renders identically at 150 dpi.
+- `src/lib/pdf/reeditSweep.local.test.ts` (local, `TASK66_SWEEP=1`, 47 files): text expectations unchanged —
+  **121 / 121** round trips, **0 redaction failures**, **0 skipped pages**, **0 untouched lines changed** — plus
+  **0 image-removal failures**. Report removed images per file.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/types.ts` | `ReplacedImage` and `CoverEdit.replacesImages` (optional). |
+| `src/components/ImageOverlay.tsx` | Step 2.1 only. Cover geometry, colour sampling and placement must not move. |
+| `src/lib/edit/buildTextEdits.ts` + test | Step 2.2, image bullet markers only. Text `replaces` is unchanged. |
+| `src/lib/export/coveredImages.ts` + test | **New.** Step 3. |
+| `src/lib/export/exportPdf.ts` | Run image removal beside `removeCoveredText`, share the stream tree, extend `ExportResult.redaction` with `removedImages` and its own skip reasons. |
+| `src/lib/projects/projectState.ts` + test | Serialize, validate and deep-clone `replacesImages`; old saves stay readable. |
+| `src/lib/pdf/images.ts` | **No change** unless a draw's object id is not already reachable; if it is not, expose it without altering detection. |
+| `src/lib/pdf/reeditSweep.local.test.ts` | The extra assertion above. |
+
+**Files that must not change:** `coveredGlyphs.ts` and the text-removal rules, the reading rules (Task 66 and its
+Revision 1), how edits are drawn, page operations, the compression tools (Task 63), voice and chat.
+
+**Guardrails:** never remove a picture no edit claims; never remove an image another page, another draw or another
+resource still uses; a page that cannot be rewritten keeps its cover and warns; every touched page must render
+identically at 150 dpi; export must not get noticeably slower — report `ziro.pdf` and `1-healthy-GOA.pdf` timings
+before and after.
+
+**Verify (user):** open a PDF with a photo → delete it → **Export PDF** → the exported page looks exactly as before →
+open the export with any "extract images from PDF" tool → **the deleted photo is not listed** → the file is smaller
+than the original. Repeat for **replace** and for **move**. Then the one that matters most: take a photo with two
+people in it, **crop** one of them out, export, and extract the images — only the cropped piece may be there, never
+the original with both. Finally take a document whose logo appears on every page, delete it on page 1 only, and
+confirm every other page still shows it.
+
+**Known limits:** a page the rewriter must skip keeps its cover and warns, so the picture stays hidden but present;
+a scanned page is one full-page image, so deleting it empties the page, which is correct; logos drawn as vector
+shapes are drawings rather than images and are out of scope; files exported before this still contain their old
+pictures until re-exported.
+
+**Land:** branch `remove-covered-images` from `main`. Commit: `Delete means delete for pictures (Task 68)`.
+
+#### Task 68 — Revision 1  ✅ DONE by Codex, reviewed and merged to `main` (`e9c24c1`, 2026-09-22) — identify a picture by where it is, not by a PDF.js ticket number, and never fail silently   *(Easy–Medium · half a day)*
+
+**What the user saw.** Task 68 was built, its tests passed, and in the real editor it removed **nothing**. The user
+deleted pictures at `http://127.0.0.1:5173`, exported, and extracted the images with iLovePDF. Measured directly on
+the files (stored image objects and the images each page actually draws):
+
+| File | Before | After export | Pictures removed | Warning shown |
+|---|---|---|---:|---|
+| `images (3).pdf` — 3 pages, 6 photos, all drawn straight on the page | 6 drawn / 6 stored, 8,958 KB | 6 drawn / 6 stored, 8,959 KB | **0** | none |
+| `Ziro Festival Firgun-edited-edited (1).pdf` — Canva, 19 pages | 71 drawn / 86 stored | 72 drawn / 87 stored | **0** | none |
+
+The export ran (the extra kilobyte is the cover being drawn), but no picture left the file, and nothing told the
+user so.
+
+**Why — reproduced, not inferred.**
+1. `imageMatchesReplacement` (`src/lib/export/coveredImages.ts`) accepts a draw only when the rects agree within a
+   point **and**, whenever both sides carry one, the `objectId`s are equal.
+2. That `objectId` is **not a property of the file.** It is a label PDF.js hands out while it evaluates a page, like
+   a ticket machine: every evaluation with a different cache key gets fresh numbers. Measured on page 1 of
+   `images (3).pdf`, the same two photos:
+
+   | How the page was read | Ids PDF.js returned |
+   |---|---|
+   | first `getOperatorList()` | `img_p0_1`, `img_p0_2` |
+   | then `getOperatorList({ annotationMode: 0 })` | `img_p0_3`, `img_p0_4` |
+   | then `getOperatorList({ intent: 'print' })` | `img_p0_5`, `img_p0_6` |
+   | then `getOperatorList()` again (cached) | `img_p0_1`, `img_p0_2` |
+   | the export's fresh reader, `annotationMode: 0` | `img_p0_1`, `img_p0_2` |
+
+3. In the browser the page is **drawn on screen before** `detectImageCandidates` reads it, so the editor records
+   shifted ids, while the export opens a fresh reader and sees the first ones. The ids never agree, every claim is
+   refused, and removal does nothing.
+4. Reproduced end to end through `detectImageCandidates` → the overlay's recording → `exportPdf` on
+   `images (3).pdf`, deleting both page-1 photos:
+
+   | Earlier read of the page before detection | Ids recorded | `removedImages` | Warnings | Exported size |
+   |---|---|---:|---|---:|
+   | none | `img_p0_1`, `img_p0_2` | **2** | none | **5,780 KB** |
+   | one, `annotationMode: 2`, as screen drawing does | `img_p0_3`, `img_p0_4` | **0** | **none** | **8,958 KB** |
+
+   The second row is the user's result to the kilobyte. The first row proves the rest of Task 68 works: both photos
+   (1.6 MB each) are gone from the draws **and** from the stored objects, and the file shrinks by 3 MB.
+
+**These are spec defects, not implementation mistakes.** Task 68 Step 1 defined `objectId` as the picture's identity
+and Step 3 required it to match, on the unchecked assumption that it was stable. Step 3 also said "an entry matching
+nothing is not an error" — copied from the text work, where it is true — which turned a total failure into silence.
+And Step 6 did not require the tests to follow the editor's real reading order: `coveredImagesExport.test.ts` types
+`replacesImages` by hand, so the ids could never drift in a test.
+
+**What the user gets:** deleting, cropping, replacing or moving a picture removes it from the exported file however
+many times the page was read, in the same session or after reopening a saved project. If a picture ever cannot be
+removed, a warning says so plainly instead of the user believing it is gone.
+
+Steps 1 → 4 in order. **Write Step 4's Test A first and watch it fail on today's code** before changing anything.
+
+**Step 1 — Identify a picture by where it is drawn, never by a PDF.js id.**
+1. `src/lib/export/types.ts`: `ReplacedImage` becomes `{ readonly kind: 'image' | 'inline' | 'mask'; readonly rect:
+   PdfRect }`. Remove `objectId`.
+2. `imageMatchesReplacement`: a draw matches when the **kind is the same** and **all four edges of the rect agree
+   within 1 pt**. Nothing else is compared.
+3. Why position is safe — **checked before writing this**: the editor computes rects with the page's own rotation
+   (`page.getViewport({ scale: 1 })` in `detectImageCandidates`) and the export with rotation forced to 0
+   (`exportPdf.ts`), and both convert back to PDF points. On `images (3).pdf` rotated to 0°, 90°, 180° and 270°, the two
+   agree with a worst difference of **0.000 pt**. Position comes from the file's own drawing instructions, so it is
+   the same on every read and in every session.
+4. Do **not** replace `objectId` with any other identifier taken from PDF.js operator-list arguments or object
+   caches — every one of them has the same ticket-machine problem. `DrawnImage.objectId` itself stays in
+   `src/lib/pdf/images.ts`, because other features read it; it is simply never used to decide what to remove.
+
+**Step 2 — Record the new shape, in one shared helper.**
+1. New `src/lib/edit/replacedImage.ts` exporting `replacedImageFor(region: ImageRegion, draws: readonly
+   DrawnImage[]): ReplacedImage` — the lookup `ImageOverlay` does today in `drawForRegion` plus the recording in
+   `makeExistingCover`, moved out of the component so tests call the **same code** the delete button runs.
+2. `src/components/ImageOverlay.tsx`: `makeExistingCover` calls that helper. The four paths it serves — delete, move,
+   replace, crop — change in no other way. Colour sampling, cover geometry and placement do not move.
+3. `src/lib/edit/buildTextEdits.ts`: image bullet markers already record rect-only; confirm they produce the new
+   shape and nothing else changes.
+4. `src/lib/projects/projectState.ts`: validation must still **accept** a saved `replacesImages` entry that carries
+   an `objectId` — projects saved while Task 68 was being tested have them — and **drop** the field when loading or
+   cloning. An old save must never become unreadable.
+
+**Step 3 — Never fail silently.**
+1. `planCoveredImageRemoval` counts, per page, every claimed entry that matched **no** draw.
+2. Any unmatched entry adds the warning `A deleted picture on page N could not be found in the file; it is still
+   hidden under the cover but was not removed.` and `ExportResult.redaction` gains `unmatchedImages`.
+3. This replaces Task 68 Step 3.3 **for pictures only**. Text keeps its rule, because an earlier generation may
+   legitimately have removed a word already. Pictures differ: the export always works from the original bytes, and
+   the editor can only offer a picture it found in them, so an unmatched picture claim is always a failure.
+4. The cover is still drawn in every case, so an unmatched picture stays hidden exactly as before Task 68 — the
+   warning is the only new behaviour on that path.
+
+**Step 4 — Tests that follow the editor's real path.**
+- **Test A — the regression; write it first, it must fail today.** A PDF with two photos on one page → read the page
+  once with a different annotation mode first, as drawing it on screen does → `detectImageCandidates` → build each
+  cover's `replacesImages` with `replacedImageFor` → `exportPdf` → assert both photos are gone from the page's draws
+  **and** from the stored image objects, `removedImages === 2`, `unmatchedImages === 0`, no warnings, and the
+  exported file is materially smaller.
+- **Test B — saved project.** Build the same edits, serialize and deserialize them through `projectState`, export
+  with a fresh reader → same result. Include one saved entry that still carries an old `objectId`.
+- **Test C — unmatched claim.** A cover claiming a rect where nothing is drawn → the warning appears,
+  `unmatchedImages === 1`, no other picture is removed, the cover is still drawn.
+- **Test D — rotation.** The Test A deletion on a page rotated 0°, 90°, 180°, 270° → removed each time.
+- `coveredImagesExport.test.ts`: its hand-typed covers may stay as **export unit tests**, but label them so, and
+  none of them may be the only proof of an editor-facing behaviour.
+- **The user's files** (local only, skipped with a message when missing): copy `images (3).pdf` and
+  `Ziro Festival Firgun-edited-edited (1).pdf` into `tmp/image-removal/` (gitignored). `images (3).pdf`, both page-1
+  photos deleted through Test A's path → **4 images drawn, 4 stored**, about **5,780 KB**. Ziro, one photo deleted on
+  a page where it appears once → that image leaves the draws and the stored objects.
+- `src/lib/pdf/reeditSweep.local.test.ts` (`TASK66_SWEEP=1`, 47 files): text expectations unchanged — **121 / 121**
+  round trips, **0 redaction failures**, **0 skipped pages**, **0 untouched lines changed** — plus **0 unmatched
+  images**. Also report every page where two **different** draws share a rect within 1 pt, so we know how often the
+  trade-off below can occur.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/types.ts` | Step 1.1 — `ReplacedImage` loses `objectId`. |
+| `src/lib/export/coveredImages.ts` + tests | Step 1.2 matching; Step 3 unmatched count and warning. |
+| `src/lib/edit/replacedImage.ts` + test | **New.** Step 2.1, the shared recording helper. |
+| `src/components/ImageOverlay.tsx` | Step 2.2 — call the helper. Nothing else in the overlay changes. |
+| `src/lib/edit/buildTextEdits.ts` | Step 2.3 — confirm only; change only if it still emits `objectId`. |
+| `src/lib/projects/projectState.ts` + test | Step 2.4 — accept and drop a legacy `objectId`. |
+| `src/lib/export/exportPdf.ts` | Pass `unmatchedImages` and the warning through `ExportResult`. |
+| `src/lib/export/coveredImagesExport.test.ts`, `exportPdf.test.ts` | Step 4. |
+| `src/lib/pdf/images.ts` | **No change.** `objectId` stays on `DrawnImage` for other features. |
+
+**Files that must not change:** text removal (`coveredGlyphs.ts`) and its rules, the reading rules (Task 66 and its
+Revision 1), colour sampling and cover geometry, how edits are drawn, page operations, the compression tools, voice
+and chat.
+
+**Guardrails:** never remove a picture no cover claims; never remove an image another page, draw or resource still
+uses; a page that cannot be rewritten keeps its cover and warns; every touched page renders identically at 150 dpi;
+an unmatched claim is always reported, never swallowed.
+
+**Verify (user):** hard-refresh `http://127.0.0.1:5173` (**Ctrl+Shift+R**) → open `images (3).pdf` → delete **both**
+photos on page 1 → **Export PDF** → no warning, and the file is about **5,780 KB** instead of 8,958 KB → extract with
+iLovePDF → **4** images, not 6. Then **Save & close**, reopen it from **Saved files**, export again → the same result.
+Finally the Ziro brochure: delete one photo that appears only once → export → extract → one fewer image than the
+original.
+
+**Known trade-off:** two pictures drawn at exactly the same position and size on one page are treated as one, so
+deleting it removes both. That only happens when one picture sits exactly on top of another, where only one of them
+can ever be seen. The sweep report above tells us how rare it is.
+
+**Still open — not part of this revision:**
+- The Ziro export also gained a **new** image object: 443 × 806, Flate-encoded, 626 KB, drawn on page 5 — the whole
+  of that file's growth. That is the lossless snapshot the editor creates for a **crop or move**; a delete should never
+  create one. Confirm with the user what was done on page 5 before treating it as a bug.
+- The two-colour patch after a delete on the Varanasi brochure predates Task 68 (colour sampling is unchanged) and
+  needs the "before" state of that page to diagnose.
+
+**Land:** same branch. Task 68 and this revision are committed together, only after the full suite, the sweep and
+the user's own check above have passed.
+
+#### Task 68 — Revision 2  ✅ DONE by Codex, finished by Claude (2026-09-22, user: Codex limit reached), reviewed and merged to `main` (`e9c24c1`) — only ever remove what a patch hides, and prove it on every test PDF   *(Medium · 1 day)*
+
+**This is the final revision of Task 68.** It adds one safety rule to the code and one large local test. Nothing
+else in Task 68 or Revision 1 changes. Every acceptance number is written below; when they are met, Task 68 is done.
+
+**Where Task 68 stands (reviewed 2026-09-21).** Task 68 plus Revision 1 works on the user's real files:
+`images (3).pdf` drops from 8,958 KB to 5,780 KB with both page-1 photos gone from the draws and from storage; one
+Ziro photo leaves both; the Vietnam brochure's three originals — two deletes and one crop — are all gone. Full suite
+1,154 passed / 6 skipped, typecheck, lint and build clean. Two gaps remain, and they are what this revision closes:
+
+1. **Stacked pictures are common.** The text sweep counted **50 pages** across the test PDFs — mostly Canva brochures
+   (`ziro.pdf`, `healing.pdf`, `ladakh.pdf`, `delhi-tour.pdf`) — where two to eight **different** pictures are drawn
+   at exactly the same position and size. Matching is by kind and position, so deleting one removes the whole stack.
+   That is harmless only if everything removed was hidden under a patch. Today that is true by construction, but
+   nothing in the code enforces it, and nothing tests it on real files.
+2. **No test deletes pictures across the real PDFs.** `reeditSweep.local.test.ts` re-edits **text**; its image
+   counters are all zero because it never deletes a picture. Picture removal is proven only by unit tests, two real
+   files and the user's own checks.
+
+**Checked before writing this — do not re-investigate:**
+- **The patch is never smaller than the picture it replaces.** Crop, replace and move covers use the picture's own
+  rect; the delete sampler (`sampleDeleteImageCover`, `src/lib/images/outsideBackground.ts`) returns the picture's
+  rect or grows it outward, and only differs where the picture runs past the edge of the page.
+- **Speed is not a problem — leave it alone.** Measured on the same page, one export each, median of three:
+  `ziro.pdf` — no removal 548 ms, one text line 836 ms, **one picture 817 ms**; `1-healthy-GOA.pdf` — 382 ms, 408 ms,
+  **442 ms**. Deleting a picture costs the same as editing a line of text. The earlier "twice as slow" compared
+  against doing no removal at all. **Do not optimise the export in this revision.**
+- **Stencil and inline pictures do not occur in the test PDFs:** 1,152 image draws across the 46 readable files, all
+  ordinary images, zero masks, zero inline. Out of scope; a mismatch there already produces the unmatched warning.
+
+**What the user gets:** deleting, cropping, replacing or moving a picture can **never** change anything visible on
+the page beyond the patch the user already sees — even on brochures that stack several pictures in one spot — and
+this is proven on every test PDF, not assumed.
+
+Steps 1 → 3 in order.
+
+**Step 1 — The safety rule: remove a picture only if what shows of it is fully under a patch.**
+In `planCoveredImageRemoval` (`src/lib/export/coveredImages.ts`), after a draw is found to be claimed and before it
+is selected for removal:
+1. Take the draw's rect and clip it to the page's visible box — `viewport.viewBox`, the same viewport the plan already
+   receives. Parts of a picture that lie off the page cannot be seen, so they never count.
+2. The clipped rect must lie inside **at least one** of the page's cover rects, allowing **1 pt** on every edge (the
+   same tolerance matching uses). Use the rects of **all** covers passed to the plan.
+3. If it does not: **do not remove that draw.** Leave its paint, its resource name and its image object exactly as they
+   are, count it in a new `outsideCoverImages` on the plan and on `ExportResult.redaction`, and add one warning per
+   such draw: `A picture on page N was not removed because the patch does not fully cover it; it is left as it was.`
+4. This is a per-draw decision, not a page skip. Other claimed draws on the same page are still removed, and the page
+   is not counted in `imageSkippedPages`.
+5. A draw whose clipped rect is empty (entirely off the page) is removed if claimed — nothing of it can be seen.
+
+Unit tests in `src/lib/export/coveredImages.test.ts`:
+- A claimed draw fully inside its cover → removed; `outsideCoverImages === 0`.
+- A claimed draw 5 pt wider than its cover → **not** removed, its paint and object still present, the warning
+  appears, `outsideCoverImages === 1`, and a second claimed draw on the same page is still removed.
+- A claimed draw that runs 20 pt past the page edge, with a cover that stops at the edge → removed.
+- Three different draws stacked at the same rect, one cover over that rect → all three removed.
+
+**Step 2 — The picture-deletion sweep.**
+New `src/lib/pdf/imageDeletionSweep.local.test.ts`, enabled only by `TASK68_IMAGE_SWEEP=1` and skipped with a message
+otherwise. It runs over **exactly the file list** `reeditSweep.local.test.ts` uses (the 47 PDFs), and follows the
+editor's real path everywhere: read the page once with `getOperatorList({ annotationMode: 2 })` first, as drawing it on
+screen does, then `detectImageCandidates`, then build each cover's `replacesImages` with `replacedImageFor`. A cover is
+`{ kind: 'cover', rect: region.rect, color: white, sampleBackground: false }` — screen sampling cannot run here, and the
+rect is what matters.
+
+For every page that has at least one picture candidate, run these exports:
+
+- **Run A — delete everything on the page.** One cover per candidate, all in one export.
+- **Run B — delete one of a stack.** For every page where two or more **different** draws share a rect within 1 pt,
+  one extra export deleting only the **first** candidate of each such group, one group per export.
+- **Run C — a picture that appears on more than one page.** For every image object drawn on two or more pages of the
+  same file, one export deleting it on its **first** page only.
+
+For every export, compare the export **with removal** against the same edits exported with
+`{ removeCoveredImages: false }` (cover drawn, nothing removed), and check:
+
+| # | Check | Pass when |
+|---|---|---|
+| C1 | Claimed pictures are gone | Every claimed draw is absent from the exported page's draws — unless it was reported as outside-cover or its page was skipped with a warning. |
+| C2 | Unclaimed pictures are untouched | Every draw not claimed is still present, same kind and rect within 1 pt; the page's draw count falls by exactly the number removed. |
+| C3 | Storage is right | The image object of each removed draw is gone from storage **unless** it is still drawn anywhere in the exported file. In Run C it must still be stored, and its other pages must still draw it. |
+| C4 | **Nothing visible changed** | Every page of the file renders at 150 dpi (`@napi-rs/canvas`, `worstBlockDiff` from `src/harness/pixelDiff.ts`) with `meanError < 0.01` against the no-removal export. **Every page**, not only the edited one. |
+| C5 | Text untouched | Each page's text items (`getTextContent`, `str` and position) are identical to the no-removal export. |
+| C6 | No silent failure | `unmatchedImages === 0`. Every skipped page and every outside-cover draw appears in `warnings` with its reason. |
+
+Print one line per file:
+`TASK68 IMAGE SWEEP <file> | pages N | candidates N | removed N | stacked extras N | shared-object runs N | skipped pages N | outside-cover N | unmatched N | failures N | ms N`,
+followed by one line per failure naming the file, page, run, check and reason; then one `TASK68 IMAGE SWEEP TOTAL`
+line with the same fields. `stacked extras` counts pictures removed beyond the one the cover's candidate named.
+
+**Acceptance — the revision is done when all of these hold:**
+- **0 failures** on C1–C6 across all files.
+- `unmatched` is **0** in total.
+- Skipped pages and outside-cover draws are allowed **only** with a reason already defined in Task 68 or Step 1 —
+  each one listed. They are the safety net working, not a failure, and they need no further revision.
+- If the corpus has no picture drawn on two or more pages, Run C reports `shared-object runs 0`; the existing unit
+  test for shared images covers it and nothing else is needed.
+- The whole sweep finishes in under **30 minutes**; report the time.
+
+**Step 3 — Run and report everything.**
+- The full suite: `npx vitest run`, total count.
+- `TASK66_SWEEP=1` — unchanged: **121 / 121**, **0 untouched lines changed**, **0 redaction failures**, **0 skipped**.
+- `TASK68_REAL=1` — unchanged: `images (3).pdf` **4 drawn / 4 stored / ~5,780 KB**; the Ziro photo gone.
+- `TASK68_IMAGE_SWEEP=1` — the totals line above.
+- typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/coveredImages.ts` + `coveredImages.test.ts` | Step 1 — the containment check and `outsideCoverImages`. |
+| `src/lib/export/types.ts` | `outsideCoverImages` on `ExportResult.redaction`. |
+| `src/lib/export/exportPdf.ts` | Add up `outsideCoverImages` and pass its warnings through. Nothing else. |
+| `src/lib/pdf/imageDeletionSweep.local.test.ts` | **New.** Step 2. |
+
+**Files that must not change:** everything else — matching, recording, `replacedImageFor`, `ImageOverlay`, saved
+projects, text removal, the reading rules, colour sampling, how edits are drawn, page operations, the compression
+tools, voice and chat. No speed work.
+
+**Out of scope, deliberately — none of these need a revision of Task 68:**
+- Crop saving a heavy lossless snapshot instead of cutting the original photo (Vietnam: 432 KB became 3,325 KB) —
+  crop behaved this way before Task 68; it becomes its own task.
+- Bullet dots drawn as vector **shapes** (the Rahul résumé has no pictures at all) — shapes are drawings, not
+  pictures.
+- Stencil and inline pictures on real files — none exist in the corpus.
+- The two-colour patch on the Varanasi brochure — predates Task 68 and needs the page's "before" state.
+
+**Verify (user):** unchanged from Revision 1 — hard-refresh `http://127.0.0.1:5173`, delete both photos on page 1 of
+`images (3).pdf`, export: no warning, about 5,780 KB, 4 images in iLovePDF. Then open a Canva brochure (Ziro or
+Healing), delete one photo, export, and compare the page with the editor's view — nothing beyond the patch may look
+different.
+
+**Land:** same branch. Task 68, Revision 1 and Revision 2 are committed together only after Step 3's numbers and the
+user's check have passed, then merged to `main`.
+
+**Review of Task 68 Revisions 1 and 2 (2026-09-22):** accepted and merged as `e9c24c1`.
+
+Codex built Step 1 exactly as written: `clippedToViewBox` + `coverContains` in `coveredImages.ts`, a per-draw
+decision that never skips the page, `outsideCoverImages` on the plan and on `ExportResult.redaction`, one warning per
+draw, and all four unit tests. The user stopped Codex partway through its sweep run and hit the Codex limit, so
+Claude finished three small items **in test code only**, after confirming Codex had not already done them:
+1. `exportPdf.test.ts` (three `toEqual` blocks): added `outsideCoverImages: 0` — the redaction object had gained the
+   field, so the three exact-match tests failed although the code was right.
+2. `imageDeletionSweep.local.test.ts`: removed a `removeCoveredImages: false` export whose result was discarded.
+3. Same file: the file loop's empty `catch {}` swallowed any error. An error after the file has loaded now counts as a
+   failure; an unreadable fixture prints `TASK68 IMAGE SWEEP UNREADABLE <file> | <reason>` and has no runs.
+
+**Deviations from the spec, accepted:** check C4 compares against the **source** render with the patch areas masked,
+not against a cover-only export, and pixel-renders only the edited page plus any page drawing an affected image
+object; every other page is checked by its image-draw count. Equally safe, and much faster.
+
+Verified:
+- Full suite **1,158 passed / 7 skipped (1,165)** across 159 files; typecheck, lint, build clean.
+- Picture sweep on **16 of the 47** PDFs — the user chose not to run the other 31 (the heaviest remaining are
+  `ziro.pdf`, `delhi-tour.pdf`, `ladakh.pdf` and the GOA files): 82 pages, 356 pictures offered, 45 stacked extras,
+  30 shared-picture runs, **0 failures, 0 unmatched, 0 skipped, 0 outside a patch**; 49 runs started, 49 finished.
+  Unreadable fixtures `2-broken-index.pdf` and `6-locked.pdf` report their reason.
+- Text sweep, all 47: **121 / 121**, **0 untouched lines changed**, 807 removed, 0 skipped — identical to before.
+- `TASK68_REAL=1`: `images (3).pdf` **4 drawn / 4 stored / 5,780 KB**; the Ziro photo gone from draws and storage.
+- Removing the discarded export did **not** noticeably speed up the sweep (`images (2).pdf` 28 s → 27.5 s): its
+  time goes into rendering photo-heavy pages, not exporting.
+- The "error after load" path of item 3 is verified by reading only; the unreadable path was run.
+
+Still open, outside Task 68: crop stores a lossless 3× snapshot instead of cutting the original photo (Vietnam:
+432 KB became 3,325 KB); bullet dots drawn as vector shapes stay under the patch; the two-colour patch on the
+Varanasi page; `coveredFraction` in `coveredGlyphs.ts` unused since Task 67 Rev 2.
