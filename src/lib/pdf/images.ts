@@ -18,6 +18,8 @@ export interface ImageRegion {
 
 export interface ImageRegionTextSignals {
   readonly region: ImageRegion;
+  /** The exact PDF.js draw behind this region, when detection retained it. */
+  readonly draw?: DrawnImage;
   readonly hasText: boolean;
   readonly paragraph: boolean;
 }
@@ -309,9 +311,18 @@ export async function detectImageCandidates(
   page: PDFPageProxy,
   pageIndex: number,
 ): Promise<ImageRegionTextSignals[]> {
-  const [regions, textRuns] = await Promise.all([
-    detectImages(page, pageIndex),
+  const [operatorList, textRuns] = await Promise.all([
+    page.getOperatorList(),
     extractTextRuns(page, pageIndex),
   ]);
-  return filterTextBackedRegions(regions, textRuns);
+  const draws = imageDrawsFromOperatorList(
+    operatorList,
+    page.getViewport({ scale: 1 }),
+    pageIndex,
+  );
+  const uniqueDraws = draws.filter((draw, index) => (
+    draws.findIndex((candidate) => sameRect(candidate.region.rect, draw.region.rect)) === index
+  ));
+  return filterTextBackedRegions(uniqueDraws.map((draw) => draw.region), textRuns)
+    .map((signals, index) => ({ ...signals, draw: uniqueDraws[index] }));
 }

@@ -69,6 +69,10 @@ function allEditKinds(): Edit[] {
         text: 'Original saved text',
         rect: { x: 30, y: 280, w: 120, h: 12 },
       }],
+      replacesImages: [{
+        kind: 'image',
+        rect: { x: 18, y: 270, w: 140, h: 45 },
+      }],
     },
     image,
     {
@@ -155,13 +159,39 @@ describe('project state serialization', () => {
     expect(serializedCover?.replaces).toEqual(sourceCover?.replaces);
     expect(serializedCover?.replaces).not.toBe(sourceCover?.replaces);
     expect(serializedCover?.replaces?.[0]?.rect).not.toBe(sourceCover?.replaces?.[0]?.rect);
+    expect(serializedCover?.replacesImages).toEqual(sourceCover?.replacesImages);
+    expect(serializedCover?.replacesImages).not.toBe(sourceCover?.replacesImages);
+    expect(serializedCover?.replacesImages?.[0]?.rect).not.toBe(sourceCover?.replacesImages?.[0]?.rect);
 
     const legacy = serializeProject(source, 0, 1) as unknown as {
       history: { present: { edits: Array<Record<string, unknown>> } };
     };
     const legacyCover = legacy.history.present.edits.find((edit) => edit.kind === 'cover');
     delete legacyCover?.replaces;
-    expect(deserializeProject(legacy, 3)).toMatchObject({ ok: true });
+    const legacyReplacement = Array.isArray(legacyCover?.replacesImages)
+      ? legacyCover.replacesImages[0]
+      : undefined;
+    if (legacyReplacement && typeof legacyReplacement === 'object') {
+      (legacyReplacement as Record<string, unknown>).objectId = 'img_p0_17';
+    }
+    const restoredLegacy = deserializeProject(legacy, 3);
+    expect(restoredLegacy).toMatchObject({ ok: true });
+    if (restoredLegacy.ok) {
+      const restoredCover = restoredLegacy.value.history.present.edits.find((edit) => edit.kind === 'cover');
+      expect(restoredCover && restoredCover.kind === 'cover'
+        ? restoredCover.replacesImages?.[0]
+        : undefined).toEqual({
+        kind: 'image',
+        rect: { x: 18, y: 270, w: 140, h: 45 },
+      });
+    }
+
+    const olderWithoutImageClaims = serializeProject(source, 0, 1) as unknown as {
+      history: { present: { edits: Array<Record<string, unknown>> } };
+    };
+    const olderCover = olderWithoutImageClaims.history.present.edits.find((edit) => edit.kind === 'cover');
+    delete olderCover?.replacesImages;
+    expect(deserializeProject(olderWithoutImageClaims, 3)).toMatchObject({ ok: true });
   });
 
   it('rejects corrupt replacement metadata', () => {
@@ -175,6 +205,13 @@ describe('project state serialization', () => {
       ok: false,
       reason: 'corrupt',
     });
+
+    const corruptImage = serializeProject(history(), 0, 1) as unknown as {
+      history: { present: { edits: Array<Record<string, unknown>> } };
+    };
+    const imageCover = corruptImage.history.present.edits.find((edit) => edit.kind === 'cover');
+    if (imageCover) imageCover.replacesImages = [{ kind: 'photo', rect: { x: 1, y: 2, w: 3, h: 4 } }];
+    expect(deserializeProject(corruptImage, 3)).toMatchObject({ ok: false, reason: 'corrupt' });
   });
 
   it('exports identically before saving and after restoring', async () => {

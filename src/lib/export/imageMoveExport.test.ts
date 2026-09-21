@@ -43,6 +43,7 @@ describe('moved image export', () => {
           z: 1,
           color: { r: 1, g: 1, b: 1 },
           sampleBackground: false,
+          replacesImages: [{ kind: 'image', rect: oldRect }],
         },
         {
           id: 'image-moved-test',
@@ -55,6 +56,7 @@ describe('moved image export', () => {
       ],
     };
     const output = await exportPdf(doc);
+    expect(output.redaction).toMatchObject({ removedImages: 1, imageSkippedPages: 0 });
     const reopened = await getDocument({ data: output.bytes.slice(), verbosity: 0 }).promise;
     try {
       const outputPage = await reopened.getPage(1);
@@ -62,21 +64,13 @@ describe('moved image export', () => {
       const imageIndices = operators.fnArray
         .map((operator, index) => operator === OPS.paintImageXObject ? index : -1)
         .filter((index) => index >= 0);
-      expect(imageIndices).toHaveLength(2);
-      const coverTransformIndex = operators.fnArray.findIndex((operator, index) =>
-        operator === OPS.transform &&
-        index > imageIndices[0]! &&
-        index < imageIndices[1]! &&
-        JSON.stringify(operators.argsArray[index]) === JSON.stringify([1, 0, 0, 1, oldRect.x, oldRect.y]),
-      );
-      expect(coverTransformIndex).toBeGreaterThan(imageIndices[0]!);
-      expect(operators.fnArray.slice(coverTransformIndex, imageIndices[1])).toContain(OPS.fill);
+      expect(imageIndices).toHaveLength(1);
       const regions = imageRegionsFromOperatorList(
         operators,
         outputPage.getViewport({ scale: 1 }),
         0,
       );
-      expect(regions.map((region) => region.rect)).toEqual(expect.arrayContaining([oldRect, newRect]));
+      expect(regions.map((region) => region.rect)).toEqual([newRect]);
     } finally {
       await reopened.destroy();
     }

@@ -84,12 +84,20 @@ export interface ReplacedText {
   readonly rect: PdfRect;
 }
 
+export interface ReplacedImage {
+  readonly kind: 'image' | 'inline' | 'mask';
+  /** Where it was drawn, in the same PDF-point space as every other edit rect. */
+  readonly rect: PdfRect;
+}
+
 export interface CoverEdit extends BaseEdit {
   readonly kind: 'cover';
   readonly color?: Rgb;
   readonly sampleBackground: boolean;
   /** Source text runs intentionally hidden by this cover. */
   readonly replaces?: readonly ReplacedText[];
+  /** Source image draws intentionally hidden by this cover. */
+  readonly replacesImages?: readonly ReplacedImage[];
 }
 
 export interface ImageEdit extends BaseEdit {
@@ -124,4 +132,8 @@ export interface EditDocument {
 export interface ExportRedactionResult {
   readonly removedItems: number;
   readonly skippedPages: number;
+  readonly removedImages: number;
+  readonly unmatchedImages: number;
+  readonly outsideCoverImages: number;
+  readonly imageSkippedPages: number;
 }

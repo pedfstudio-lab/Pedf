@@ -336,6 +336,9 @@ export function buildBulletListEdits(
     return { covers: [], texts: [], usedHeightPt, overflow: true };
   }
 
+  const replacesImages = list.items.flatMap((item) => (
+    item.markerImage ? [{ ...item.markerImage, rect: { ...item.markerImage.rect } }] : []
+  ));
   const cover: CoverEdit = {
     id: id(),
     kind: 'cover',
@@ -347,6 +350,7 @@ export function buildBulletListEdits(
       ...(item.markerRun ? [item.markerRun] : []),
       ...item.lines.flatMap((line) => line.runs),
     ])),
+    ...(replacesImages.length > 0 ? { replacesImages } : {}),
   };
   const texts: TextEdit[] = [];
   const boxText = formatBulletEditorText(items.map((item) => item.text));

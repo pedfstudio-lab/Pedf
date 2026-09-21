@@ -36,8 +36,19 @@ export interface PageStreamTree {
   readonly roots: readonly ContentStreamNode[];
   /** Tokens of any stream the walk has already resolved, page or form. */
   tokensFor(key: string): readonly ContentToken[] | null;
+  /** Resolve an image XObject name in the resource scope used by this stream. */
+  imageFor(streamKey: string, name: string): ImageResourceBinding | null;
   /** Write the rewritten streams back, copying every form that changes. */
-  apply(bytesByKey: ReadonlyMap<string, Uint8Array>): void;
+  apply(
+    bytesByKey: ReadonlyMap<string, Uint8Array>,
+    removedImages?: readonly ImageResourceBinding[],
+  ): readonly PDFRef[];
+}
+
+export interface ImageResourceBinding {
+  readonly resourceKey: string;
+  readonly name: string;
+  readonly ref?: PDFRef;
 }
 
 function decodedStream(stream: PDFStream): Uint8Array | null {
@@ -63,10 +74,12 @@ function xObjectsWith(
   pdf: PDFDocument,
   resources: PDFDict | undefined,
   patch: ReadonlyMap<string, PDFRef>,
+  removed: ReadonlySet<string> = new Set(),
 ): PDFDict {
   const cloned = resources ? resources.clone(pdf.context) : pdf.context.obj({});
   const existing = cloned.lookupMaybe(XOBJECT, PDFDict);
   const xObjects = existing ? existing.clone(pdf.context) : pdf.context.obj({});
+  for (const name of removed) xObjects.delete(PDFName.of(name));
   for (const [name, ref] of patch) xObjects.set(PDFName.of(name), ref);
   cloned.set(XOBJECT, xObjects);
   return cloned;
@@ -83,20 +96,21 @@ export function buildPageStreamTree(pdf: PDFDocument, pageIndex: number): PageSt
   const resolved = new Map<string, ContentStreamNode | null>();
   let failed = false;
 
+  const resourceOwner = (record: StreamRecord): {
+    readonly key: string;
+    readonly resources: PDFDict | undefined;
+  } => {
+    if (record.ownResources) return { key: record.key, resources: record.ownResources };
+    const owner = records.get(record.ownerKey ?? PAGE_RESOURCES_KEY);
+    if (owner?.ownResources) return { key: owner.key, resources: owner.ownResources };
+    return { key: PAGE_RESOURCES_KEY, resources: page.node.Resources() ?? undefined };
+  };
+
   const node = (record: StreamRecord): ContentStreamNode => ({
     key: record.key,
     tokens: record.tokens,
     form(name) {
-      const owner = record.ownResources
-        ? record
-        : records.get(record.ownerKey ?? PAGE_RESOURCES_KEY);
-      const ownerKey = record.ownResources
-        ? record.key
-        : owner?.ownResources
-          ? owner.key
-          : PAGE_RESOURCES_KEY;
-      const resources = record.ownResources
-        ?? (owner?.ownResources ?? page.node.Resources() ?? undefined);
+      const { key: ownerKey, resources } = resourceOwner(record);
       const childKey = `${ownerKey}/${name}`;
       const cached = resolved.get(childKey);
       if (cached !== undefined) return cached;
@@ -189,30 +203,63 @@ export function buildPageStreamTree(pdf: PDFDocument, pageIndex: number): PageSt
     tokensFor(key) {
       return records.get(key)?.tokens ?? null;
     },
-    apply(bytesByKey) {
-      if (failed) return;
+    imageFor(streamKey, name) {
+      const record = records.get(streamKey);
+      if (!record) return null;
+      const owner = resourceOwner(record);
+      const xObjects = owner.resources?.lookupMaybe(XOBJECT, PDFDict);
+      const key = PDFName.of(name);
+      const stream = xObjects?.lookupMaybe(key, PDFStream);
+      if (!stream || stream.dict.get(SUBTYPE) !== PDFName.of('Image')) return null;
+      const raw = xObjects?.get(key);
+      return {
+        resourceKey: owner.key,
+        name,
+        ...(raw instanceof PDFRef ? { ref: raw } : {}),
+      };
+    },
+    apply(bytesByKey, removedImages = []) {
+      if (failed) return [];
+      const removedRefs = removedImages.flatMap((binding) => binding.ref ? [binding.ref] : []);
+      const removals = new Map<string, Set<string>>();
+      for (const binding of removedImages) {
+        const names = removals.get(binding.resourceKey) ?? new Set<string>();
+        names.add(binding.name);
+        removals.set(binding.resourceKey, names);
+      }
       const patches = new Map<string, Map<string, PDFRef>>();
       const deepestFirst = [...records.values()].sort((left, right) => right.depth - left.depth);
       for (const record of deepestFirst) {
         const childPatch = patches.get(record.key);
+        const removedNames = removals.get(record.key);
         const bytes = bytesByKey.get(record.key);
-        if (!bytes && !childPatch) continue;
+        if (!bytes && !childPatch && !removedNames) continue;
         if (record.replace) {
           if (bytes) record.replace(bytes);
           continue;
         }
         if (!record.dict || !record.name || !record.ownerKey) continue;
         const dictionary = record.dict.clone(pdf.context);
-        if (childPatch) dictionary.set(RESOURCES, xObjectsWith(pdf, record.ownResources, childPatch));
+        if (childPatch || removedNames) {
+          dictionary.set(
+            RESOURCES,
+            xObjectsWith(pdf, record.ownResources, childPatch ?? new Map(), removedNames),
+          );
+        }
         const ref = pdf.context.register(rawStream(dictionary, bytes ?? record.originalBytes));
         const owner = patches.get(record.ownerKey) ?? new Map<string, PDFRef>();
         owner.set(record.name, ref);
         patches.set(record.ownerKey, owner);
       }
       const pagePatch = patches.get(PAGE_RESOURCES_KEY);
-      if (pagePatch) {
-        page.node.set(RESOURCES, xObjectsWith(pdf, page.node.Resources() ?? undefined, pagePatch));
+      const pageRemovals = removals.get(PAGE_RESOURCES_KEY);
+      if (pagePatch || pageRemovals) {
+        page.node.set(
+          RESOURCES,
+          xObjectsWith(pdf, page.node.Resources() ?? undefined, pagePatch ?? new Map(), pageRemovals),
+        );
       }
+      return removedRefs;
     },
   };
 }

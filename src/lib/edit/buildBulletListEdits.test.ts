@@ -38,7 +38,7 @@ function markerRun(baselineY: number) {
   };
 }
 
-function fixtureList(textMarkers = false): BulletList {
+function fixtureList(textMarkers = false, imageMarkers = false): BulletList {
   const lines = [line('First item', 100), line('Second item', 88)];
   const block: TextBlock = {
     pageIndex: 0,
@@ -60,6 +60,7 @@ function fixtureList(textMarkers = false): BulletList {
         lines: [lines[0]!],
         markerRect: { x: 20, y: 100, w: 3, h: 10 },
         ...(textMarkers ? { markerRun: markerRun(100) } : {}),
+        ...(imageMarkers ? { markerImage: { kind: 'image' as const, rect: { x: 20, y: 100, w: 3, h: 10 } } } : {}),
       },
       {
         bulletX: 20,
@@ -68,6 +69,7 @@ function fixtureList(textMarkers = false): BulletList {
         lines: [lines[1]!],
         markerRect: { x: 20, y: 88, w: 3, h: 10 },
         ...(textMarkers ? { markerRun: markerRun(88) } : {}),
+        ...(imageMarkers ? { markerImage: { kind: 'image' as const, rect: { x: 20, y: 88, w: 3, h: 10 } } } : {}),
       },
     ],
     bulletX: 20,
@@ -137,6 +139,13 @@ describe('buildBulletListEdits', () => {
     const imageBuilt = buildBulletListEdits(fixtureList(), next, items, 7, 100);
     expect(imageBuilt.covers[0]?.replaces?.map((entry) => entry.text)).toEqual([
       'First item', 'Second item',
+    ]);
+    expect(imageBuilt.covers[0]?.replacesImages).toBeUndefined();
+
+    const detectedImageBuilt = buildBulletListEdits(fixtureList(false, true), next, items, 7, 100);
+    expect(detectedImageBuilt.covers[0]?.replacesImages).toEqual([
+      { kind: 'image', rect: { x: 20, y: 100, w: 3, h: 10 } },
+      { kind: 'image', rect: { x: 20, y: 88, w: 3, h: 10 } },
     ]);
   });
 

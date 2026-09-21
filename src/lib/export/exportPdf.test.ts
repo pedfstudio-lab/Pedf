@@ -674,7 +674,14 @@ describe('exportPdf', () => {
 
   it('removes covered old words from raw extraction while keeping the new and untouched text', async () => {
     const result = await exportPdf(await makeCoveredTextDocument());
-    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.redaction).toEqual({
+      removedItems: 1,
+      skippedPages: 0,
+      removedImages: 0,
+      unmatchedImages: 0,
+      outsideCoverImages: 0,
+      imageSkippedPages: 0,
+    });
     expect(result.warnings).toEqual([]);
 
     const reopened = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
@@ -702,7 +709,14 @@ describe('exportPdf', () => {
       exportPdf(doc),
     ]);
 
-    expect(redacted.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(redacted.redaction).toEqual({
+      removedItems: 1,
+      skippedPages: 0,
+      removedImages: 0,
+      unmatchedImages: 0,
+      outsideCoverImages: 0,
+      imageSkippedPages: 0,
+    });
     expect(redacted.warnings).toEqual([]);
     const raw = await pageText(redacted.bytes, 1);
     expect(raw).not.toContain('EDITOR BUILT OLD NAME');
@@ -745,7 +759,14 @@ describe('exportPdf', () => {
   it('removes covered words painted inside a Form XObject', async () => {
     const result = await exportPdf(await makeFormXObjectDocument());
 
-    expect(result.redaction).toEqual({ removedItems: 1, skippedPages: 0 });
+    expect(result.redaction).toEqual({
+      removedItems: 1,
+      skippedPages: 0,
+      removedImages: 0,
+      unmatchedImages: 0,
+      outsideCoverImages: 0,
+      imageSkippedPages: 0,
+    });
     expect(result.warnings).toEqual([]);
     expect(await pageText(result.bytes, 1)).not.toContain('FORM SECRET');
   });

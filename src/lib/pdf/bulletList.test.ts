@@ -73,6 +73,7 @@ describe('RAHUL résumé bullet detection', () => {
 
     expect(markers).toHaveLength(6);
     expect(markers.every((marker) => marker.markerRun === undefined)).toBe(true);
+    expect(markers.every((marker) => marker.markerImage?.kind === 'image')).toBe(true);
     expect(markers.map((marker) => Number(marker.line.baselineY.toFixed(2)))).toEqual([
       412.92,
       384.12,
@@ -91,6 +92,7 @@ describe('RAHUL résumé bullet detection', () => {
     expect(list).not.toBeNull();
     expect(list?.items).toHaveLength(5);
     expect(list?.items.every((item) => item.markerRun === undefined)).toBe(true);
+    expect(list?.items.every((item) => item.markerImage?.kind === 'image')).toBe(true);
     expect(list?.items.map((item) => item.lines.length)).toEqual([2, 2, 2, 2, 2]);
     expect(list?.items.map((item) => Number(item.baselineY.toFixed(2)))).toEqual([
       205.25,

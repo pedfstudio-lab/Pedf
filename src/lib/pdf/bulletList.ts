@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfRect, TextSpan } from '@/lib/export/types';
+import type { PdfRect, ReplacedImage, TextSpan } from '@/lib/export/types';
 import { normalizeTextSpans, textFromSpans } from '@/lib/edit/richText';
 import type { ImageRegion } from './images';
 import { detectPageGraphicRegions } from './shapeMarkers';
@@ -40,6 +40,8 @@ export interface BulletMarker {
   /** Present only when the marker came from a text run rather than an image. */
   readonly textCharacter?: string;
   readonly markerRun?: TextRun;
+  /** Present only when the marker came from a detected image region. */
+  readonly markerImage?: ReplacedImage;
 }
 
 interface TextBulletMatch {
@@ -55,6 +57,8 @@ export interface BulletListItem {
   readonly markerRect: PdfRect;
   /** Present only for a marker drawn as text; image and shape markers have no run. */
   readonly markerRun?: TextRun;
+  /** Present only for image markers; shape and text markers do not claim an image. */
+  readonly markerImage?: ReplacedImage;
 }
 
 export interface BulletList {
@@ -150,6 +154,7 @@ function markerDistance(line: TextLine, region: ImageRegion): number | undefined
 export function detectBulletMarkers(
   block: TextBlock,
   imageRegions: readonly ImageRegion[],
+  source: 'image' | 'shape' = 'image',
 ): BulletMarker[] {
   const claimedRegions = new Set<number>();
   const markers: BulletMarker[] = [];
@@ -175,6 +180,9 @@ export function detectBulletMarkers(
       rect: match.region.rect,
       centerX: match.region.rect.x + match.region.rect.w / 2,
       centerY: match.region.rect.y + match.region.rect.h / 2,
+      ...(source === 'image' ? {
+        markerImage: { kind: 'image', rect: { ...match.region.rect } },
+      } : {}),
     });
   }
 
@@ -428,6 +436,7 @@ export function buildBulletList(
       lines,
       markerRect: marker.rect,
       ...(marker.markerRun ? { markerRun: marker.markerRun } : {}),
+      ...(marker.markerImage ? { markerImage: marker.markerImage } : {}),
     };
   });
   const itemSpacing = items.slice(0, -1).map((item, index) => {
@@ -465,9 +474,9 @@ export function detectBulletListFromRegions(
   imageRegions: readonly ImageRegion[],
   shapeMarkerRegions: readonly ImageRegion[] = [],
 ): BulletList | null {
-  const imageList = buildBulletList(block, detectBulletMarkers(block, imageRegions));
+  const imageList = buildBulletList(block, detectBulletMarkers(block, imageRegions, 'image'));
   if (imageList) return imageList;
-  const shapeList = buildBulletList(block, detectBulletMarkers(block, shapeMarkerRegions));
+  const shapeList = buildBulletList(block, detectBulletMarkers(block, shapeMarkerRegions, 'shape'));
   if (shapeList) return shapeList;
   return buildBulletList(block, detectTextBulletMarkers(block));
 }

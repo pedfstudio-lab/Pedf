@@ -23,6 +23,7 @@ import { sampleDeleteImageCover, sampleOutsideImage } from '@/lib/images/outside
 import { isRegionCovered } from '@/lib/images/regionCovered';
 import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar';
 import type { ElementSize } from '@/lib/edit/floatingToolbar';
+import { replacedImageFor } from '@/lib/edit/replacedImage';
 import {
   isBackgroundRegion,
   moveScreenRect,
@@ -31,7 +32,7 @@ import {
   useImageRectTransform,
 } from '@/lib/images/useImageRectTransform';
 import { detectImageCandidates } from '@/lib/pdf/images';
-import type { ImageRegion } from '@/lib/pdf/images';
+import type { DrawnImage, ImageRegion } from '@/lib/pdf/images';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 
@@ -45,7 +46,8 @@ interface ImageOverlayProps {
 }
 
 type PendingTarget =
-  | { readonly kind: 'add' | 'replace'; readonly rect: PdfRect }
+  | { readonly kind: 'add'; readonly rect: PdfRect }
+  | { readonly kind: 'replace'; readonly region: ImageRegion }
   | { readonly kind: 'reimage'; readonly editId: string; readonly rect: PdfRect };
 
 interface ImageDraft {
@@ -195,6 +197,7 @@ export function ImageOverlay({
   const { edits, addEdits, removeEdit, replaceEdits, updateEdit } = useEdits();
   const { document: openDocument, getPageCanvas } = useDocumentStore();
   const [regions, setRegions] = useState<ImageRegion[]>([]);
+  const [regionDraws, setRegionDraws] = useState<DrawnImage[]>([]);
   const [drawRect, setDrawRect] = useState<ScreenSelection>();
   const [draft, setDraft] = useState<ImageDraft>();
   const [transformSelection, setTransformSelection] = useState<ImageTransformSelection>();
@@ -281,6 +284,7 @@ export function ImageOverlay({
   useEffect(() => {
     if (!page) {
       setRegions([]);
+      setRegionDraws([]);
       return;
     }
     let cancelled = false;
@@ -307,8 +311,9 @@ export function ImageOverlay({
               richness ? isRasterTextRegion(richness) : false,
             );
           })
-          .map(({ candidate }) => candidate.region);
-        setRegions(next);
+          .map(({ candidate }) => candidate);
+        setRegions(next.map((candidate) => candidate.region));
+        setRegionDraws(next.flatMap((candidate) => candidate.draw ? [candidate.draw] : []));
       })
       .catch((caught: unknown) => {
         if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
@@ -371,7 +376,12 @@ export function ImageOverlay({
   );
 
   const nextZ = () => edits.reduce((maximum, edit) => Math.max(maximum, edit.z), 0) + 1;
-  const makeExistingCover = (rect: PdfRect, prefix: string, z: number): CoverEdit => {
+  const makeExistingCover = (
+    region: ImageRegion,
+    prefix: string,
+    z: number,
+  ): CoverEdit => {
+    const rect = region.rect;
     const registration = getPageCanvas(pageIndex);
     const deleteSample = registration && (
       prefix === 'image-delete-cover' || prefix === 'image-move-cover'
@@ -399,6 +409,7 @@ export function ImageOverlay({
       z,
       color,
       sampleBackground: false,
+      replacesImages: [replacedImageFor(region, regionDraws)],
     };
   };
 
@@ -431,10 +442,10 @@ export function ImageOverlay({
         return;
       }
       const bytes = await capturePdfRegion(page, region.rect, 2);
-      setTransformSelection({
-        kind: 'existing',
-        region,
-        bytes,
+        setTransformSelection({
+          kind: 'existing',
+          region,
+          bytes,
         rect: region.rect,
         warning: RERENDER_WARNING,
       });
@@ -517,7 +528,7 @@ export function ImageOverlay({
       if (edit) updateEdit({ ...edit, rect: selection.rect });
     } else {
       const z = nextZ();
-      const cover = makeExistingCover(selection.region.rect, 'image-move-cover', z);
+      const cover = makeExistingCover(selection.region, 'image-move-cover', z);
       const image: ImageEdit = {
         id: id('image-moved-existing'),
         kind: 'image',
@@ -606,8 +617,9 @@ export function ImageOverlay({
         setDraft({ bytes, rect });
         return;
       }
-      const coverRect = coverImageRect(target.rect, size.width, size.height);
-      const croppedBytes = await cropImageBytes(bytes, coverRect, target.rect);
+      const targetRect = target.kind === 'replace' ? target.region.rect : target.rect;
+      const coverRect = coverImageRect(targetRect, size.width, size.height);
+      const croppedBytes = await cropImageBytes(bytes, coverRect, targetRect);
       if (target.kind === 'reimage') {
         const existing = edits.find(
           (edit): edit is ImageEdit => edit.kind === 'image' && edit.id === target.editId,
@@ -616,18 +628,18 @@ export function ImageOverlay({
         replaceEdits([existing.id], [{
           ...existing,
           id: id('image-replacement'),
-          rect: target.rect,
+          rect: targetRect,
           bytes: croppedBytes,
         }]);
         return;
       }
       const z = nextZ();
-      const cover = makeExistingCover(target.rect, 'image-cover', z);
+      const cover = makeExistingCover(target.region, 'image-cover', z);
       const image: ImageEdit = {
         id: id('image-replacement'),
         kind: 'image',
         pageIndex,
-        rect: target.rect,
+        rect: target.region.rect,
         z: z + 1,
         bytes: croppedBytes,
       };
@@ -751,7 +763,7 @@ export function ImageOverlay({
         if (!page) throw new Error('Cannot crop source content on a blank page.');
         const bytes = await capturePdfRegion(page, cropRect, 3);
         const z = nextZ();
-        const cover = makeExistingCover(cropTarget.region.rect, 'image-crop-cover', z);
+        const cover = makeExistingCover(cropTarget.region, 'image-crop-cover', z);
         const image: ImageEdit = {
           id: id('image-cropped-existing'),
           kind: 'image',
@@ -910,7 +922,11 @@ export function ImageOverlay({
               title="Delete image"
               onClick={(event) => {
                 event.stopPropagation();
-                addEdits([makeExistingCover(region.rect, 'image-delete-cover', nextZ())]);
+                addEdits([makeExistingCover(
+                  region,
+                  'image-delete-cover',
+                  nextZ(),
+                )]);
               }}
               className="absolute -right-3 -top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-red-600 text-sm font-bold leading-none text-white shadow hover:bg-red-500"
             >
@@ -935,7 +951,7 @@ export function ImageOverlay({
                 title="Replace this image"
                 onClick={(event) => {
                   event.stopPropagation();
-                  chooseFile({ kind: 'replace', rect: region.rect });
+                  chooseFile({ kind: 'replace', region });
                 }}
                 className="rounded bg-amber-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-amber-600"
               >

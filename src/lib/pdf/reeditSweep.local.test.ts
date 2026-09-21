@@ -5,6 +5,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { buildTextBlockEdits, coverRectForTextLine } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
+import { imageDrawsFromOperatorList } from './images';
 import type { PageGeometry } from './types';
 import { extractTextRuns, groupRunsIntoBlocks, mergeRunsIntoLines } from './textContent';
 import type { TextBlock, TextLine } from './textContent';
@@ -29,6 +30,11 @@ interface FileResult {
   removedItems: number;
   skippedPages: number;
   redactionFailures: number;
+  removedImages: number;
+  unmatchedImages: number;
+  imageSkippedPages: number;
+  imageRemovalFailures: number;
+  sharedImageRectPages: number;
   reason?: string;
   details: string[];
 }
@@ -161,6 +167,41 @@ function occurrenceCount(haystack: string, needle: string): number {
   return count;
 }
 
+function sameImageRect(
+  left: ReturnType<typeof imageDrawsFromOperatorList>[number],
+  right: ReturnType<typeof imageDrawsFromOperatorList>[number],
+): boolean {
+  const leftRect = left.region.rect;
+  const rightRect = right.region.rect;
+  const leftEdges = [leftRect.x, leftRect.y, leftRect.x + leftRect.w, leftRect.y + leftRect.h];
+  const rightEdges = [rightRect.x, rightRect.y, rightRect.x + rightRect.w, rightRect.y + rightRect.h];
+  return leftEdges.every((edge, index) => Math.abs(edge - (rightEdges[index] ?? edge)) <= 1);
+}
+
+async function reportSharedImageRects(
+  file: string,
+  page: PDFPageProxy,
+  pageIndex: number,
+  result: FileResult,
+): Promise<void> {
+  const draws = imageDrawsFromOperatorList(
+    await page.getOperatorList({ annotationMode: 0 }),
+    page.getViewport({ scale: 1, rotation: 0 }),
+    pageIndex,
+  );
+  const pairs: string[] = [];
+  for (let left = 0; left < draws.length; left += 1) {
+    for (let right = left + 1; right < draws.length; right += 1) {
+      if (sameImageRect(draws[left]!, draws[right]!)) pairs.push(`${left + 1}/${right + 1}`);
+    }
+  }
+  if (pairs.length === 0) return;
+  result.sharedImageRectPages += 1;
+  process.stdout.write(
+    `TASK68 SHARED IMAGE RECT ${file} p.${pageIndex + 1} | draw pairs ${pairs.join(', ')}\n`,
+  );
+}
+
 async function rawPageText(document: PDFDocumentProxy, pageIndex: number): Promise<string> {
   const content = await (await document.getPage(pageIndex + 1)).getTextContent();
   return normalized(content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join(' '));
@@ -209,6 +250,11 @@ async function reeditLine(
       });
       result.removedItems += exported.redaction.removedItems;
       result.skippedPages += exported.redaction.skippedPages;
+      result.removedImages += exported.redaction.removedImages;
+      result.unmatchedImages += exported.redaction.unmatchedImages;
+      result.imageSkippedPages += exported.redaction.imageSkippedPages;
+      result.imageRemovalFailures += exported.redaction.imageSkippedPages
+        + exported.redaction.unmatchedImages;
       bytes = exported.bytes;
       const reopened = await open(bytes);
       const raw = await rawPageText(reopened, pageIndex);
@@ -271,17 +317,23 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
       if (!line) continue;
       const result: FileResult = {
         file, pages: 1, flagged: 0, passed: 0, failed: 0, untouched: 0,
-        textLines: lines.length, removedItems: 0, skippedPages: 0, redactionFailures: 0, details: [],
+        textLines: lines.length, removedItems: 0, skippedPages: 0, redactionFailures: 0,
+        removedImages: 0, unmatchedImages: 0, imageSkippedPages: 0, imageRemovalFailures: 0,
+        sharedImageRectPages: 0, details: [],
       };
 
       await reeditLine(file, originalBytes, document, 0, line, result);
       process.stdout.write(
         `TASK67 TARGET ${file} | ${JSON.stringify(target)} | removed ${result.removedItems}`
-        + ` | skipped ${result.skippedPages} | round trips ${result.passed}/${result.passed + result.failed}\n`,
+        + ` | skipped ${result.skippedPages} | removed images ${result.removedImages}`
+        + ` | unmatched images ${result.unmatchedImages}`
+        + ` | image skipped ${result.imageSkippedPages}`
+        + ` | round trips ${result.passed}/${result.passed + result.failed}\n`,
       );
       expect(result.details).toEqual([]);
       expect(result.failed).toBe(0);
       expect(result.redactionFailures).toBe(0);
+      expect(result.imageRemovalFailures).toBe(0);
       expect(result.skippedPages).toBe(0);
       expect(result.removedItems).toBeGreaterThan(0);
       expect(result.passed).toBe(1);
@@ -297,7 +349,9 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
     for (const file of selected) {
       const result: FileResult = {
         file, pages: 0, flagged: 0, passed: 0, failed: 0, untouched: 0,
-        textLines: 0, removedItems: 0, skippedPages: 0, redactionFailures: 0, details: [],
+        textLines: 0, removedItems: 0, skippedPages: 0, redactionFailures: 0,
+        removedImages: 0, unmatchedImages: 0, imageSkippedPages: 0, imageRemovalFailures: 0,
+        sharedImageRectPages: 0, details: [],
       };
       results.push(result);
       let document: PDFDocumentProxy;
@@ -314,6 +368,7 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
       for (let pageIndex = 0; pageIndex < Math.min(20, document.numPages); pageIndex++) {
         try {
           const page = await document.getPage(pageIndex + 1);
+          await reportSharedImageRects(file, page, pageIndex, result);
           const blocks = groupRunsIntoBlocks(await extractTextRuns(page, pageIndex));
           result.pages += 1;
           const flagged = blocks.filter((block) => pairedLetters(block.text) || gluedRepeat(block.text));
@@ -338,15 +393,18 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
           ? 'no extractable text (scan or outlines)'
           : 'no safe isolated editable line (overlap or line too narrow)';
       }
-      process.stdout.write(`${file} | pages ${result.pages} | flagged ${result.flagged} | round trips ${result.passed}/${result.passed + result.failed} | untouched ${result.untouched} | removed ${result.removedItems} | skipped ${result.skippedPages}${result.reason ? ` | ${result.reason}` : ''}\n`);
+      process.stdout.write(`${file} | pages ${result.pages} | flagged ${result.flagged} | round trips ${result.passed}/${result.passed + result.failed} | untouched ${result.untouched} | removed ${result.removedItems} | skipped ${result.skippedPages} | removed images ${result.removedImages} | unmatched images ${result.unmatchedImages} | image skipped ${result.imageSkippedPages} | shared-image-rect pages ${result.sharedImageRectPages}${result.reason ? ` | ${result.reason}` : ''}\n`);
       for (const detail of result.details) process.stdout.write(`  ${detail}\n`);
       await Promise.all(openDocuments.splice(0).map((opened) => opened.destroy()));
     }
 
-    process.stdout.write(`TASK67 TOTAL files ${results.length}, pages ${results.reduce((sum, result) => sum + result.pages, 0)}, flagged ${results.reduce((sum, result) => sum + result.flagged, 0)}, round trips ${results.reduce((sum, result) => sum + result.passed, 0)} passed / ${results.reduce((sum, result) => sum + result.failed, 0)} failed, untouched ${results.reduce((sum, result) => sum + result.untouched, 0)}, removed ${results.reduce((sum, result) => sum + result.removedItems, 0)}, skipped ${results.reduce((sum, result) => sum + result.skippedPages, 0)}\n`);
+    process.stdout.write(`TASK68 TOTAL files ${results.length}, pages ${results.reduce((sum, result) => sum + result.pages, 0)}, flagged ${results.reduce((sum, result) => sum + result.flagged, 0)}, round trips ${results.reduce((sum, result) => sum + result.passed, 0)} passed / ${results.reduce((sum, result) => sum + result.failed, 0)} failed, untouched ${results.reduce((sum, result) => sum + result.untouched, 0)}, removed text ${results.reduce((sum, result) => sum + result.removedItems, 0)}, text skipped ${results.reduce((sum, result) => sum + result.skippedPages, 0)}, removed images ${results.reduce((sum, result) => sum + result.removedImages, 0)}, unmatched images ${results.reduce((sum, result) => sum + result.unmatchedImages, 0)}, image skipped ${results.reduce((sum, result) => sum + result.imageSkippedPages, 0)}, shared-image-rect pages ${results.reduce((sum, result) => sum + result.sharedImageRectPages, 0)}, image-removal failures ${results.reduce((sum, result) => sum + result.imageRemovalFailures, 0)}\n`);
     expect(results.flatMap((result) => result.details.filter((detail) => detail.includes('expected') || detail.includes('export failed')))).toEqual([]);
     expect(results.reduce((sum, result) => sum + result.failed, 0)).toBe(0);
     expect(results.reduce((sum, result) => sum + result.untouched, 0)).toBe(0);
     expect(results.reduce((sum, result) => sum + result.redactionFailures, 0)).toBe(0);
+    expect(results.reduce((sum, result) => sum + result.imageRemovalFailures, 0)).toBe(0);
+    expect(results.reduce((sum, result) => sum + result.unmatchedImages, 0)).toBe(0);
+    expect(results.reduce((sum, result) => sum + result.imageSkippedPages, 0)).toBe(0);
   }, 600_000);
 });

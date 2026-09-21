@@ -1,4 +1,12 @@
-import type { Edit, PdfRect, ReplacedText, Rgb, TextSpan, TextStyle } from '@/lib/export/types';
+import type {
+  Edit,
+  PdfRect,
+  ReplacedImage,
+  ReplacedText,
+  Rgb,
+  TextSpan,
+  TextStyle,
+} from '@/lib/export/types';
 import type { DocPresent, HistoryState } from '@/state/editsStore';
 import type { PagePlan } from '@/state/pagePlan';
 
@@ -49,6 +57,12 @@ function cloneEdit(edit: Edit): Edit {
     ...(edit.kind === 'cover' && edit.replaces ? {
       replaces: edit.replaces.map((replacement) => ({
         text: replacement.text,
+        rect: { ...replacement.rect },
+      })),
+    } : {}),
+    ...(edit.kind === 'cover' && edit.replacesImages ? {
+      replacesImages: edit.replacesImages.map((replacement) => ({
+        kind: replacement.kind,
         rect: { ...replacement.rect },
       })),
     } : {}),
@@ -142,6 +156,13 @@ function isReplacedText(value: unknown): value is ReplacedText {
     && isRect(value.rect);
 }
 
+function isReplacedImage(value: unknown): value is ReplacedImage {
+  return isRecord(value)
+    && (value.objectId === undefined || typeof value.objectId === 'string')
+    && (value.kind === 'image' || value.kind === 'inline' || value.kind === 'mask')
+    && isRect(value.rect);
+}
+
 function isStyle(value: unknown): value is TextStyle {
   return isRecord(value)
     && typeof value.fontName === 'string'
@@ -179,6 +200,9 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
       && (value.color === undefined || isRgb(value.color))
       && (value.replaces === undefined || (
         Array.isArray(value.replaces) && value.replaces.every(isReplacedText)
+      ))
+      && (value.replacesImages === undefined || (
+        Array.isArray(value.replacesImages) && value.replacesImages.every(isReplacedImage)
       ));
   }
   if (value.kind === 'image') return value.bytes instanceof Uint8Array;
