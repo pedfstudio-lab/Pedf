@@ -95,14 +95,23 @@ function matches(left: DrawnImage, right: DrawnImage): boolean {
 
 function coverClaims(draw: DrawnImage, edits: readonly CoverEdit[]): boolean {
   return edits.some((edit) => edit.replacesImages?.some((replacement) => (
-    draw.kind === replacement.kind && sameRect(draw.region.rect, replacement.rect)
+    draw.kind === replacement.kind && (
+      (draw.visibleRect ? sameRect(draw.visibleRect, replacement.rect) : false)
+      || sameRect(draw.region.rect, replacement.rect)
+    )
   )) ?? false);
 }
 
-function rawCoverClaims(draw: ContentImageDraw, edits: readonly CoverEdit[]): boolean {
-  return edits.some((edit) => edit.replacesImages?.some((replacement) => (
-    replacement.kind === 'image' && sameRect(draw.rect, replacement.rect)
-  )) ?? false);
+function rawCoverClaims(
+  raw: ContentImageDraw,
+  pageDraws: readonly DrawnImage[],
+  edits: readonly CoverEdit[],
+): boolean {
+  return pageDraws.some((draw) => (
+    draw.kind === 'image'
+    && sameRect(raw.rect, draw.region.rect)
+    && coverClaims(draw, edits)
+  ));
 }
 
 function coverFor(
@@ -271,8 +280,26 @@ async function verifyRun(
     process.stdout.write(`TASK68 IMAGE SWEEP PROGRESS ${result.file} | ${spec.label} start\n`);
   }
   const document: EditDocument = { originalBytes, pages, edits: [...spec.edits] };
+  const sourcePage = await cache.reader.getPage(spec.pageIndex + 1);
+  let sourceState = cache.pages.get(spec.pageIndex);
+  if (!sourceState) {
+    const [operators, text] = await Promise.all([
+      sourcePage.getOperatorList({ annotationMode: 0 }),
+      sourcePage.getTextContent(),
+    ]);
+    sourceState = {
+      draws: imageDrawsFromOperatorList(
+        operators,
+        sourcePage.getViewport({ scale: 1, rotation: 0 }),
+        spec.pageIndex,
+      ),
+      text: textSnapshot(text.items),
+    };
+    cache.pages.set(spec.pageIndex, sourceState);
+  }
+  sourcePage.cleanup();
   const affectedRefs = new Set((cache.rawPages[spec.pageIndex] ?? []).flatMap((draw) => (
-    rawCoverClaims(draw, spec.edits) && draw.ref ? [draw.ref.tag] : []
+    rawCoverClaims(draw, sourceState.draws, spec.edits) && draw.ref ? [draw.ref.tag] : []
   )));
   const renderPages = new Set<number>([spec.pageIndex]);
   for (const [pageIndex, draws] of cache.rawPages.entries()) {
@@ -435,7 +462,7 @@ async function verifyRun(
     draws.flatMap((draw) => draw.ref ? [draw.ref.tag] : [])
   )));
   const claimedRefs = new Set((baselineRaw[spec.pageIndex] ?? []).flatMap((draw) => (
-    rawCoverClaims(draw, spec.edits) && draw.ref ? [draw.ref.tag] : []
+    rawCoverClaims(draw, sourceState.draws, spec.edits) && draw.ref ? [draw.ref.tag] : []
   )));
   for (const ref of claimedRefs) {
     if (outputDrawnRefs.has(ref) && !stored.has(ref)) {
@@ -540,10 +567,11 @@ function printResult(result: SweepResult): void {
             const groups = stackedGroups(scan.allDraws);
             for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
               const group = groups[groupIndex]!;
-              const candidate = scan.candidates.find((entry) => (
-                entry.draw?.kind === group[0]?.kind
-                && sameRect(entry.region.rect, group[0]!.region.rect)
-              ));
+              const candidate = scan.candidates.find((entry) => {
+                if (!entry.draw) return false;
+                return entry.draw.kind === group[0]?.kind
+                  && sameRect(entry.draw.region.rect, group[0]!.region.rect);
+              });
               if (!candidate) {
                 failure(
                   result,
@@ -581,7 +609,9 @@ function printResult(result: SweepResult): void {
             const pageIndex = Math.min(...usedPages);
             const raw = sourceRaw[pageIndex]?.find((draw) => draw.ref?.tag === ref);
             const scan = scans[pageIndex];
-            const candidate = raw && scan?.candidates.find((entry) => sameRect(entry.region.rect, raw.rect));
+            const candidate = raw && scan?.candidates.find((entry) => (
+              entry.draw && sameRect(entry.draw.region.rect, raw.rect)
+            ));
             if (!raw || !scan || !candidate) {
               failure(
                 result,

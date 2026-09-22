@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import type { PageViewport } from 'pdfjs-dist';
+import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import {
   detectImageCandidates,
   detectImages,
   filterTextBackedRegions,
+  imageDrawsFromOperatorList,
   imageRegionsFromOperatorList,
   PARAGRAPH_TEXT,
   TEXT_RUN_INSIDE_RATIO,
@@ -16,6 +17,8 @@ import type { TextRun } from './textContent';
 function viewport(height = 400): PageViewport {
   return {
     transform: [1, 0, 0, -1, 0, height],
+    width: 400,
+    height,
     convertToPdfPoint: (x: number, y: number) => [x, height - y],
   } as unknown as PageViewport;
 }
@@ -111,6 +114,163 @@ describe('imageRegionsFromOperatorList', () => {
       { pageIndex: 0, rect: { x: 15, y: 26, w: 40, h: 30 } },
       { pageIndex: 0, rect: { x: 2, y: 3, w: 20, h: 10 } },
     ]);
+  });
+});
+
+describe('visible image rectangles', () => {
+  const imageOperators = (
+    prefixFn: readonly number[],
+    prefixArgs: readonly unknown[],
+    transform = [100, 0, 0, 100, 0, 20],
+  ): OperatorListLike => ({
+    fnArray: [...prefixFn, OPS.transform, OPS.paintImageXObject],
+    argsArray: [...prefixArgs, transform, ['img']],
+  });
+  const path = (bounds?: readonly number[]): [number, unknown] => [
+    OPS.constructPath,
+    [[], [], bounds],
+  ];
+
+  it('keeps an untrimmed image visible rectangle exactly equal to its placed rectangle', () => {
+    const draw = imageDrawsFromOperatorList(
+      imageOperators([], []),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.visibleRect).toEqual(draw.region.rect);
+    expect(draw.region.rect).toEqual({ x: 0, y: 20, w: 100, h: 100 });
+    expect(draw.widthPt).toBe(100);
+    expect(draw.heightPt).toBe(100);
+  });
+
+  it('clips the visible rectangle while preserving the placed box and drawn dimensions', () => {
+    const [construct, constructArgs] = path([20, 40, 80, 100]);
+    const draw = imageDrawsFromOperatorList(
+      imageOperators(
+        [construct, OPS.clip, OPS.endPath],
+        [constructArgs, [], []],
+      ),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.region.rect).toEqual({ x: 0, y: 20, w: 100, h: 100 });
+    expect(draw.visibleRect).toEqual({ x: 20, y: 40, w: 60, h: 60 });
+    expect(draw.widthPt).toBe(100);
+    expect(draw.heightPt).toBe(100);
+  });
+
+  it('restores the previous clip after restore', () => {
+    const [construct, constructArgs] = path([0, 0, 50, 50]);
+    const operators: OperatorListLike = {
+      fnArray: [
+        OPS.save,
+        construct, OPS.clip, OPS.endPath,
+        OPS.transform, OPS.paintImageXObject,
+        OPS.restore,
+        OPS.transform, OPS.paintImageXObject,
+      ],
+      argsArray: [
+        [],
+        constructArgs, [], [],
+        [100, 0, 0, 100, 0, 0], ['first'],
+        [],
+        [100, 0, 0, 100, 100, 0], ['second'],
+      ],
+    };
+    const draws = imageDrawsFromOperatorList(operators, viewport(), 0);
+
+    expect(draws[0]?.visibleRect).toEqual({ x: 0, y: 0, w: 50, h: 50 });
+    expect(draws[1]?.visibleRect).toEqual(draws[1]?.region.rect);
+    expect(draws[1]?.region.rect).toEqual({ x: 100, y: 0, w: 100, h: 100 });
+  });
+
+  it('clips an image to its Form XObject BBox', () => {
+    const operators: OperatorListLike = {
+      fnArray: [OPS.paintFormXObjectBegin, OPS.paintImageXObject, OPS.paintFormXObjectEnd],
+      argsArray: [
+        [[100, 0, 0, 100, 20, 30], [0.25, 0.2, 0.75, 0.8]],
+        ['img'],
+        [],
+      ],
+    };
+    const draw = imageDrawsFromOperatorList(operators, viewport(), 0)[0]!;
+
+    expect(draw.region.rect).toEqual({ x: 20, y: 30, w: 100, h: 100 });
+    expect(draw.visibleRect).toEqual({ x: 45, y: 50, w: 50, h: 60 });
+  });
+
+  it('intersects nested clipping paths', () => {
+    const [first, firstArgs] = path([0, 0, 90, 90]);
+    const [second, secondArgs] = path([20, 30, 80, 70]);
+    const draw = imageDrawsFromOperatorList(
+      imageOperators(
+        [first, OPS.clip, OPS.endPath, second, OPS.eoClip, OPS.endPath],
+        [firstArgs, [], [], secondArgs, [], []],
+        [100, 0, 0, 100, 0, 0],
+      ),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.visibleRect).toEqual({ x: 20, y: 30, w: 60, h: 40 });
+  });
+
+  it('clips a partly off-page image to the page edge', () => {
+    const draw = imageDrawsFromOperatorList(
+      imageOperators([], [], [100, 0, 0, 80, -20, 350]),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.region.rect).toEqual({ x: -20, y: 350, w: 100, h: 80 });
+    expect(draw.visibleRect).toEqual({ x: 0, y: 350, w: 80, h: 50 });
+  });
+
+  it('omits the visible rectangle and editor candidate when clipping hides the image', async () => {
+    const [construct, constructArgs] = path([200, 200, 250, 250]);
+    const operators = imageOperators(
+      [construct, OPS.clip, OPS.endPath],
+      [constructArgs, [], []],
+      [100, 0, 0, 100, 0, 0],
+    );
+    expect(imageDrawsFromOperatorList(operators, viewport(), 0)[0]).not.toHaveProperty('visibleRect');
+    const page = {
+      getOperatorList: async () => operators,
+      getViewport: () => viewport(),
+      getTextContent: async () => ({ items: [], styles: {} }),
+    } as unknown as PDFPageProxy;
+    expect(await detectImageCandidates(page, 0)).toEqual([]);
+  });
+
+  it('does not narrow the clip when constructPath has no usable bounds', () => {
+    const [construct, constructArgs] = path();
+    const draw = imageDrawsFromOperatorList(
+      imageOperators(
+        [construct, OPS.clip, OPS.endPath],
+        [constructArgs, [], []],
+      ),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.visibleRect).toEqual(draw.region.rect);
+  });
+
+  it('uses a circular clipping path bounding square as the visible rectangle', () => {
+    const [construct, constructArgs] = path([25, 25, 75, 75]);
+    const draw = imageDrawsFromOperatorList(
+      imageOperators(
+        [construct, OPS.clip, OPS.endPath],
+        [constructArgs, [], []],
+        [100, 0, 0, 100, 0, 0],
+      ),
+      viewport(),
+      0,
+    )[0]!;
+
+    expect(draw.visibleRect).toEqual({ x: 25, y: 25, w: 50, h: 50 });
   });
 });
 

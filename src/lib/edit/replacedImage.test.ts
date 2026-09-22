@@ -11,6 +11,7 @@ describe('replacedImageFor', () => {
   it('records the matching draw kind and rectangle without its temporary PDF.js id', () => {
     const draw: DrawnImage = {
       region: { pageIndex: 2, rect: { ...region.rect } },
+      visibleRect: { ...region.rect },
       widthPt: 80,
       heightPt: 40,
       objectId: 'img_p2_9',
@@ -19,6 +20,21 @@ describe('replacedImageFor', () => {
 
     expect(replacedImageFor(region, [draw])).toEqual({
       kind: 'mask',
+      rect: region.rect,
+    });
+  });
+
+  it('records a trimmed draw by its visible rectangle', () => {
+    const draw: DrawnImage = {
+      region: { pageIndex: 2, rect: { x: 20, y: 0, w: 80, h: 100 } },
+      visibleRect: { ...region.rect },
+      widthPt: 80,
+      heightPt: 100,
+      kind: 'image',
+    };
+
+    expect(replacedImageFor(region, [draw])).toEqual({
+      kind: 'image',
       rect: region.rect,
     });
   });

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
   concatTransformationMatrix,
+  clip,
   drawObject,
+  endPath,
   PDFDocument,
   PDFName,
   PDFNumber,
@@ -11,6 +13,7 @@ import {
   PDFStream,
   popGraphicsState,
   pushGraphicsState,
+  rectangle,
   degrees,
   StandardFonts,
 } from 'pdf-lib';
@@ -149,6 +152,72 @@ async function renderPage(bytes: Uint8Array, pageNumber: number): Promise<ImageD
   }
 }
 
+function cropImageData(image: ImageData, rect: PdfRect, pageHeight: number): ImageData {
+  const scale = 150 / 72;
+  const left = Math.max(0, Math.floor(rect.x * scale));
+  const top = Math.max(0, Math.floor((pageHeight - rect.y - rect.h) * scale));
+  const right = Math.min(image.width, Math.ceil((rect.x + rect.w) * scale));
+  const bottom = Math.min(image.height, Math.ceil((pageHeight - rect.y) * scale));
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceStart = ((top + y) * image.width + left) * 4;
+    data.set(image.data.subarray(sourceStart, sourceStart + width * 4), y * width * 4);
+  }
+  return { data, width, height, colorSpace: 'srgb' } as ImageData;
+}
+
+async function textSnapshot(bytes: Uint8Array): Promise<unknown[]> {
+  const reader = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const content = await (await reader.getPage(1)).getTextContent();
+    return content.items.flatMap((item) => 'str' in item ? [[
+      item.str,
+      item.transform[4] ?? 0,
+      item.transform[5] ?? 0,
+    ]] : []);
+  } finally {
+    await reader.destroy();
+  }
+}
+
+function overlapArea(left: PdfRect, right: PdfRect): number {
+  const width = Math.max(
+    0,
+    Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x),
+  );
+  const height = Math.max(
+    0,
+    Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y),
+  );
+  return width * height;
+}
+
+async function trimmedPhotoBytes(): Promise<Uint8Array> {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const page = source.addPage([700, 800]);
+  const photo = rawPhoto(source, 60, 88);
+  const name = page.node.newXObject('TrimmedPhoto', photo);
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(50, 100, 600, 628),
+    clip(),
+    endPath(),
+    concatTransformationMatrix(600, 0, 0, 880, 50, -26),
+    drawObject(name),
+    popGraphicsState(),
+  );
+  const font = await source.embedFont(StandardFonts.Helvetica);
+  page.drawText('PARAGRAPH ABOVE THE VISIBLE PHOTO', {
+    x: 80,
+    y: 760,
+    size: 14,
+    font,
+  });
+  return source.save({ useObjectStreams: false });
+}
+
 async function editorDetectedPhotoDocument(
   rotation: 0 | 90 | 180 | 270 = 0,
 ): Promise<EditDocument> {
@@ -187,6 +256,91 @@ async function editorDetectedPhotoDocument(
 }
 
 describe('covered image export', () => {
+  it('deletes a trimmed photo without covering text in its hidden placed area', async () => {
+    const originalBytes = await trimmedPhotoBytes();
+    const reader = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+    let edit: CoverEdit;
+    let paragraphRect: PdfRect;
+    try {
+      const page = await reader.getPage(1);
+      await page.getOperatorList({ annotationMode: 2 });
+      const candidates = await detectImageCandidates(page, 0);
+      expect(candidates).toHaveLength(1);
+      const candidate = candidates[0]!;
+      const paragraph = (await extractTextRuns(page, 0)).find((run) => (
+        run.text.includes('PARAGRAPH ABOVE THE VISIBLE PHOTO')
+      ));
+      expect(paragraph).toBeDefined();
+      if (!paragraph) throw new Error('paragraph fixture was not detected');
+      paragraphRect = paragraph.rect;
+      const draws = candidates.flatMap((entry) => entry.draw ? [entry.draw] : []);
+      edit = {
+        id: 'trimmed-photo-cover',
+        kind: 'cover',
+        pageIndex: 0,
+        rect: { ...candidate.region.rect },
+        z: 1,
+        color: { r: 1, g: 1, b: 1 },
+        sampleBackground: false,
+        replacesImages: [replacedImageFor(candidate.region, draws)],
+      };
+      expect(edit.rect).toEqual({ x: 50, y: 100, w: 600, h: 628 });
+      expect(overlapArea(edit.rect, paragraphRect)).toBe(0);
+    } finally {
+      await reader.destroy();
+    }
+
+    const exported = await exportPdf({
+      originalBytes,
+      pages: [geometry(0, 700, 800)],
+      edits: [edit],
+    });
+    expect(exported.redaction).toMatchObject({
+      removedImages: 1,
+      unmatchedImages: 0,
+      outsideCoverImages: 0,
+      imageSkippedPages: 0,
+    });
+    expect(exported.warnings).toEqual([]);
+    const reopened = await PDFDocument.load(exported.bytes, { updateMetadata: false });
+    expect(imageDrawsInContent(reopened, 0)).toEqual([]);
+    expect(imageObjects(reopened)).toHaveLength(0);
+    expect(await textSnapshot(exported.bytes)).toEqual(await textSnapshot(originalBytes));
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderPage(originalBytes, 1),
+        renderPage(exported.bytes, 1),
+      ]);
+      expect(worstBlockDiff(
+        cropImageData(before, paragraphRect, 800),
+        cropImageData(after, paragraphRect, 800),
+      ).meanError).toBeLessThan(0.01);
+    }
+  });
+
+  it('still removes a trimmed photo when a legacy cover records its placed rectangle', async () => {
+    const originalBytes = await trimmedPhotoBytes();
+    const placedRect = { x: 50, y: -26, w: 600, h: 880 };
+    const exported = await exportPdf({
+      originalBytes,
+      pages: [geometry(0, 700, 800)],
+      edits: [{
+        id: 'legacy-placed-photo-cover',
+        kind: 'cover',
+        pageIndex: 0,
+        rect: placedRect,
+        z: 1,
+        color: { r: 1, g: 1, b: 1 },
+        sampleBackground: false,
+        replacesImages: [{ kind: 'image', rect: placedRect }],
+      }],
+    });
+    expect(exported.redaction).toMatchObject({ removedImages: 1, unmatchedImages: 0 });
+    const reopened = await PDFDocument.load(exported.bytes, { updateMetadata: false });
+    expect(imageDrawsInContent(reopened, 0)).toEqual([]);
+    expect(imageObjects(reopened)).toHaveLength(0);
+  });
+
   it('removes editor-detected photos after the screen has already evaluated the page', async () => {
     const doc = await editorDetectedPhotoDocument();
     const [baseline, removed] = await Promise.all([

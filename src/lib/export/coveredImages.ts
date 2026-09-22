@@ -176,26 +176,16 @@ function rectsAgree(left: PdfRect, right: PdfRect): boolean {
 }
 
 export function imageMatchesReplacement(draw: DrawnImage, replacement: ReplacedImage): boolean {
-  return draw.kind === replacement.kind && rectsAgree(draw.region.rect, replacement.rect);
+  return draw.kind === replacement.kind && (
+    (draw.visibleRect ? rectsAgree(draw.visibleRect, replacement.rect) : false) ||
+    rectsAgree(draw.region.rect, replacement.rect)
+  );
 }
 
 function claimed(draw: DrawnImage, covers: readonly ImageRemovalCover[]): boolean {
   return covers.some((cover) => cover.replacesImages?.some((replacement) => (
     imageMatchesReplacement(draw, replacement)
   )) ?? false);
-}
-
-function clippedToViewBox(rect: PdfRect, viewBox: readonly number[]): PdfRect | null {
-  const [firstX = 0, firstY = 0, secondX = 0, secondY = 0] = viewBox;
-  const left = Math.min(firstX, secondX);
-  const bottom = Math.min(firstY, secondY);
-  const right = Math.max(firstX, secondX);
-  const top = Math.max(firstY, secondY);
-  const x = Math.max(rect.x, left);
-  const y = Math.max(rect.y, bottom);
-  const farX = Math.min(rect.x + rect.w, right);
-  const farY = Math.min(rect.y + rect.h, top);
-  return farX <= x || farY <= y ? null : { x, y, w: farX - x, h: farY - y };
 }
 
 function coverContains(rect: PdfRect, cover: PdfRect): boolean {
@@ -250,7 +240,7 @@ export function planCoveredImageRemoval(
         );
       }
       if (!claimed(draw, covers)) continue;
-      const visibleRect = clippedToViewBox(draw.region.rect, viewport.viewBox);
+      const visibleRect = draw.visibleRect;
       if (visibleRect && !covers.some((cover) => coverContains(visibleRect, cover.rect))) {
         outsideCoverImages += 1;
         continue;

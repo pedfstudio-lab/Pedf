@@ -26,6 +26,8 @@ export interface ImageRegionTextSignals {
 
 export interface DrawnImage {
   readonly region: ImageRegion;
+  /** The part of the placed image that remains visible after page, path, and Form clipping. */
+  readonly visibleRect?: PdfRect;
   readonly widthPt: number;
   readonly heightPt: number;
   readonly objectId?: string;
@@ -38,12 +40,14 @@ export interface OperatorListLike {
 }
 
 export type GraphicsMatrix = readonly [number, number, number, number, number, number];
+export type GraphicsClipRect = readonly [number, number, number, number];
 
 export type GraphicsStateVisitor = (
   operation: number,
   args: readonly unknown[],
   transform: GraphicsMatrix,
   index: number,
+  clip?: GraphicsClipRect,
 ) => void;
 
 function matrix(value: unknown): GraphicsMatrix | undefined {
@@ -63,6 +67,18 @@ function numberValues(value: unknown): number[] | undefined {
     return Array.from(value as unknown as ArrayLike<number>);
   }
   return undefined;
+}
+
+function clipBounds(value: unknown): GraphicsClipRect | undefined {
+  const values = numberValues(value);
+  if (values?.length !== 4 || values.some((item) => !Number.isFinite(item))) return undefined;
+  const [firstX = 0, firstY = 0, secondX = 0, secondY = 0] = values;
+  return [
+    Math.min(firstX, secondX),
+    Math.min(firstY, secondY),
+    Math.max(firstX, secondX),
+    Math.max(firstY, secondY),
+  ];
 }
 
 /** PDF/canvas affine multiplication: applying `right` inside the current `left` transform. */
@@ -88,22 +104,56 @@ export function transformGraphicsPoint(
   };
 }
 
-function imageRect(transform: GraphicsMatrix, viewport: PageViewport): PdfRect {
+function transformedBounds(
+  bounds: GraphicsClipRect,
+  transform: GraphicsMatrix,
+): GraphicsClipRect {
+  const [left, top, right, bottom] = bounds;
   const corners = [
-    transformGraphicsPoint(transform, 0, 0),
-    transformGraphicsPoint(transform, 1, 0),
-    transformGraphicsPoint(transform, 0, 1),
-    transformGraphicsPoint(transform, 1, 1),
+    transformGraphicsPoint(transform, left, top),
+    transformGraphicsPoint(transform, right, top),
+    transformGraphicsPoint(transform, left, bottom),
+    transformGraphicsPoint(transform, right, bottom),
   ];
-  const left = Math.min(...corners.map((corner) => corner.x));
-  const top = Math.min(...corners.map((corner) => corner.y));
-  const right = Math.max(...corners.map((corner) => corner.x));
-  const bottom = Math.max(...corners.map((corner) => corner.y));
+  return [
+    Math.min(...corners.map((corner) => corner.x)),
+    Math.min(...corners.map((corner) => corner.y)),
+    Math.max(...corners.map((corner) => corner.x)),
+    Math.max(...corners.map((corner) => corner.y)),
+  ];
+}
+
+function intersectBounds(left: GraphicsClipRect, right: GraphicsClipRect): GraphicsClipRect {
+  const minX = Math.max(left[0], right[0]);
+  const minY = Math.max(left[1], right[1]);
+  const maxX = Math.min(left[2], right[2]);
+  const maxY = Math.min(left[3], right[3]);
+  return [minX, minY, Math.max(minX, maxX), Math.max(minY, maxY)];
+}
+
+function sameBounds(left: GraphicsClipRect, right: GraphicsClipRect): boolean {
+  return left.every((value, index) => value === right[index]);
+}
+
+function imageBounds(transform: GraphicsMatrix): GraphicsClipRect {
+  return transformedBounds([0, 0, 1, 1], transform);
+}
+
+function boundsToPdfRect(bounds: GraphicsClipRect, viewport: PageViewport): PdfRect {
   return screenRectToPdfRect(
-    { left, top, width: right - left, height: bottom - top },
+    {
+      left: bounds[0],
+      top: bounds[1],
+      width: bounds[2] - bounds[0],
+      height: bounds[3] - bounds[1],
+    },
     viewport,
     1,
   );
+}
+
+function imageRect(transform: GraphicsMatrix, viewport: PageViewport): PdfRect {
+  return boundsToPdfRect(imageBounds(transform), viewport);
 }
 
 /** Walk a flattened PDF.js operator list while reproducing its graphics-state CTM. */
@@ -115,7 +165,12 @@ export function walkOperatorListGraphicsState(
   const viewportMatrix = matrix(viewport.transform);
   if (!viewportMatrix) throw new Error('PDF viewport has an invalid transform');
   let current = viewportMatrix;
-  const stack: GraphicsMatrix[] = [];
+  let currentClip: GraphicsClipRect = [0, 0, viewport.width, viewport.height];
+  const stack: Array<{
+    readonly transform: GraphicsMatrix;
+    readonly clip: GraphicsClipRect;
+  }> = [];
+  let pathBounds: GraphicsClipRect | undefined;
 
   for (let index = 0; index < operatorList.fnArray.length; index += 1) {
     const operation = operatorList.fnArray[index];
@@ -123,20 +178,38 @@ export function walkOperatorListGraphicsState(
     const rawArgs = operatorList.argsArray[index];
     const args = Array.isArray(rawArgs) ? rawArgs : [];
     if (operation === OPS.save) {
-      stack.push(current);
+      stack.push({ transform: current, clip: currentClip });
     } else if (operation === OPS.restore) {
-      current = stack.pop() ?? current;
+      const restored = stack.pop();
+      if (restored) {
+        current = restored.transform;
+        currentClip = restored.clip;
+      }
     } else if (operation === OPS.transform) {
       const next = matrix(args);
       if (next) current = multiply(current, next);
     } else if (operation === OPS.paintFormXObjectBegin) {
-      stack.push(current);
+      stack.push({ transform: current, clip: currentClip });
       const formMatrix = matrix(args[0]);
       if (formMatrix) current = multiply(current, formMatrix);
+      const formBounds = clipBounds(args[1]);
+      if (formBounds) currentClip = intersectBounds(currentClip, transformedBounds(formBounds, current));
     } else if (operation === OPS.paintFormXObjectEnd) {
-      current = stack.pop() ?? current;
+      const restored = stack.pop();
+      if (restored) {
+        current = restored.transform;
+        currentClip = restored.clip;
+      }
+    } else if (operation === OPS.constructPath) {
+      const bounds = clipBounds(args[2]);
+      pathBounds = bounds ? transformedBounds(bounds, current) : undefined;
+    } else if (operation === OPS.clip || operation === OPS.eoClip) {
+      if (pathBounds) currentClip = intersectBounds(currentClip, pathBounds);
+      pathBounds = undefined;
+    } else if (operation === OPS.endPath) {
+      pathBounds = undefined;
     }
-    visit(operation, args, current, index);
+    visit(operation, args, current, index, currentClip);
   }
 }
 
@@ -220,11 +293,23 @@ export function imageDrawsFromOperatorList(
 ): DrawnImage[] {
   const draws: DrawnImage[] = [];
 
-  const add = (transform: GraphicsMatrix, kind: DrawnImage['kind'], objectId?: unknown) => {
+  const add = (
+    transform: GraphicsMatrix,
+    clip: GraphicsClipRect,
+    kind: DrawnImage['kind'],
+    objectId?: unknown,
+  ) => {
+    const placedBounds = imageBounds(transform);
     const rect = imageRect(transform, viewport);
     if (rect.w <= 0.1 || rect.h <= 0.1) return;
+    const visibleBounds = intersectBounds(placedBounds, clip);
+    const visible = sameBounds(placedBounds, visibleBounds)
+      ? rect
+      : boundsToPdfRect(visibleBounds, viewport);
+    const visibleRect = visible.w > 0.1 && visible.h > 0.1 ? visible : undefined;
     draws.push({
       region: { pageIndex, rect },
+      ...(visibleRect ? { visibleRect } : {}),
       widthPt: Math.hypot(transform[0], transform[1]),
       heightPt: Math.hypot(transform[2], transform[3]),
       ...(typeof objectId === 'string' ? { objectId } : {}),
@@ -233,21 +318,23 @@ export function imageDrawsFromOperatorList(
   };
   const addNested = (
     current: GraphicsMatrix,
+    clip: GraphicsClipRect,
     nested: unknown,
     kind: DrawnImage['kind'],
     objectId?: unknown,
   ) => {
     const nestedMatrix = matrix(nested);
-    if (nestedMatrix) add(multiply(current, nestedMatrix), kind, objectId);
+    if (nestedMatrix) add(multiply(current, nestedMatrix), clip, kind, objectId);
   };
 
-  walkOperatorListGraphicsState(operatorList, viewport, (operation, args, current) => {
+  walkOperatorListGraphicsState(operatorList, viewport, (operation, args, current, _index, clip) => {
+    if (!clip) return;
     if (operation === OPS.paintImageXObject) {
-      add(current, 'image', args[0]);
+      add(current, clip, 'image', args[0]);
     } else if (operation === OPS.paintInlineImageXObject) {
-      add(current, 'inline');
+      add(current, clip, 'inline');
     } else if (operation === OPS.paintImageMaskXObject) {
-      add(current, 'mask', args[0]);
+      add(current, clip, 'mask', args[0]);
     } else if (operation === OPS.paintImageXObjectRepeat) {
       const scaleX = Number(args[1]);
       const scaleY = Number(args[2]);
@@ -256,6 +343,7 @@ export function imageDrawsFromOperatorList(
         for (let offset = 0; offset + 1 < values.length; offset += 2) {
           addNested(
             current,
+            clip,
             [scaleX, 0, 0, scaleY, values[offset] ?? 0, values[offset + 1] ?? 0],
             'image',
             args[0],
@@ -272,6 +360,7 @@ export function imageDrawsFromOperatorList(
         for (let offset = 0; offset + 1 < values.length; offset += 2) {
           addNested(
             current,
+            clip,
             [
               scaleX,
               skewY,
@@ -288,12 +377,12 @@ export function imageDrawsFromOperatorList(
     } else if (operation === OPS.paintInlineImageXObjectGroup) {
       const entries = Array.isArray(args[1]) ? args[1] : [];
       for (const entry of entries) {
-        addNested(current, (entry as { transform?: unknown }).transform, 'inline');
+        addNested(current, clip, (entry as { transform?: unknown }).transform, 'inline');
       }
     } else if (operation === OPS.paintImageMaskXObjectGroup) {
       const entries = Array.isArray(args[0]) ? args[0] : [];
       for (const entry of entries) {
-        addNested(current, (entry as { transform?: unknown }).transform, 'mask');
+        addNested(current, clip, (entry as { transform?: unknown }).transform, 'mask');
       }
     }
   });
@@ -320,9 +409,15 @@ export async function detectImageCandidates(
     page.getViewport({ scale: 1 }),
     pageIndex,
   );
-  const uniqueDraws = draws.filter((draw, index) => (
-    draws.findIndex((candidate) => sameRect(candidate.region.rect, draw.region.rect)) === index
+  const visibleDraws = draws.filter((draw): draw is DrawnImage & { visibleRect: PdfRect } => (
+    draw.visibleRect !== undefined
   ));
-  return filterTextBackedRegions(uniqueDraws.map((draw) => draw.region), textRuns)
+  const uniqueDraws = visibleDraws.filter((draw, index) => (
+    visibleDraws.findIndex((candidate) => sameRect(candidate.visibleRect, draw.visibleRect)) === index
+  ));
+  return filterTextBackedRegions(uniqueDraws.map((draw) => ({
+    pageIndex: draw.region.pageIndex,
+    rect: draw.visibleRect,
+  })), textRuns)
     .map((signals, index) => ({ ...signals, draw: uniqueDraws[index] }));
 }

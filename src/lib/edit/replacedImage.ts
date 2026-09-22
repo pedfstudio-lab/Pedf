@@ -12,9 +12,11 @@ export function replacedImageFor(
   region: ImageRegion,
   draws: readonly DrawnImage[],
 ): ReplacedImage {
-  const draw = draws.find((candidate) => sameRect(candidate.region.rect, region.rect));
+  const draw = draws.find((candidate) => (
+    candidate.visibleRect && sameRect(candidate.visibleRect, region.rect)
+  ));
   return {
     kind: draw?.kind ?? 'image',
-    rect: { ...(draw?.region.rect ?? region.rect) },
+    rect: { ...(draw?.visibleRect ?? region.rect) },
   };
 }

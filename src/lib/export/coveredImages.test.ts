@@ -17,6 +17,8 @@ const decoder = new TextDecoder('latin1');
 
 function viewport(height = 200): PageViewport {
   return {
+    width: 200,
+    height,
     transform: [1, 0, 0, -1, 0, height],
     viewBox: [0, 0, 200, height],
     convertToPdfPoint: (x: number, y: number) => [x, height - y],
@@ -50,7 +52,8 @@ function namedOperators(transforms: readonly number[][], objectId = 'img_p0_1'):
 
 describe('covered image matching', () => {
   const draw = {
-    region: { pageIndex: 0, rect: { x: 20, y: 30, w: 80, h: 40 } },
+    region: { pageIndex: 0, rect: { x: 20, y: 10, w: 80, h: 80 } },
+    visibleRect: { x: 20, y: 30, w: 80, h: 40 },
     widthPt: 80,
     heightPt: 40,
     objectId: 'img_p0_1',
@@ -59,13 +62,16 @@ describe('covered image matching', () => {
 
   it('matches by image kind and file-space edges without consulting the PDF.js object id', () => {
     expect(imageMatchesReplacement(draw, {
+      kind: 'image', rect: draw.visibleRect,
+    })).toBe(true);
+    expect(imageMatchesReplacement(draw, {
       kind: 'image', rect: draw.region.rect,
     })).toBe(true);
     expect(imageMatchesReplacement(draw, {
       kind: 'inline', rect: draw.region.rect,
     })).toBe(false);
     expect(imageMatchesReplacement(draw, {
-      kind: 'image', rect: { ...draw.region.rect, x: 22 },
+      kind: 'image', rect: { x: 22, y: 32, w: 76, h: 36 },
     })).toBe(false);
     expect(imageMatchesReplacement(draw, {
       kind: 'image', rect: { x: 20.5, y: 29.5, w: 79.5, h: 40.5 },
