@@ -10789,3 +10789,206 @@ one clears the frame, as Task 68 already did for stacks.
 **Still open, outside Task 69:** overlapping cut-out photos — a solid patch drawn on top covers part of a neighbouring
 photo; the real fix is drawing no patch once removal succeeds and redrawing the page in the editor (large; the user
 chose to leave it for now). Also crop's lossless snapshot, vector bullet dots, the Varanasi two-colour patch.
+
+### Task 70 — Each table cell is its own box: editing one number no longer rewrites the whole row  ✅ MERGED to `main` (`7180d26`, 2026-09-23; branch `table-cells`)   *(Medium · 1 day)*
+
+**What the user hit.** In `Fraction Chart.pdf`, clicking `50.00%` opens the whole row — `50.00% 100.00% … 450.00%` —
+as one edit box. Pressing **Done** redraws the row as one line of text with one long patch over it: the numbers leave
+their cells and the patch covers the cell borders. The user wants every cell to be its own box, in every table.
+
+**Why — measured on the user's files, not assumed.**
+- `Fraction Chart.pdf`: 218 text items, and **each cell is already its own item** (`50.00%`, `100.00%`, …). Font
+  11 pt. The gap between cells is **8.8 pt** (a few are 11.6 and 14.4).
+- `mergeRunsIntoLines` (`src/lib/pdf/textContent.ts:146`) splits a row only on a gap above
+  `max(18, 1.75 × font)` = **19.3 pt** here (`:179`), or between two "standalone numbers" (`:183`) — and
+  `isStandaloneNumber` (`:110`, `/^[\d.,/-]{1,6}$/`) rejects `50.00%` (the `%`) and `100.00%` (7 characters). Both
+  rules miss, so the row merges. The row label `1/2` does split off: its gap is 23.8 pt.
+- The grid is drawn as lines, and `detectRuleLines` (`src/lib/pdf/ruleLines.ts:408`) already finds them:
+  **11 vertical and 21 horizontal** on this page. The editor already loads them, two lines before it builds the boxes
+  (`src/components/OverlayLayer.tsx:363–367`), but never passes them on.
+- Rows are 21 pt apart; `canJoinBlock` (`:240`) would join lines up to 1.85 × font = **20.35 pt** apart. Cells stay
+  out of a tall "column box" today only because a single cell is not paragraph-like (`:262`) — a 0.65 pt margin.
+
+**This completes an earlier decision rather than changing one.** Task 10B Fix H and Task 10C step 5 (`TASKS.md`
+around line 1203) required: *"Keep short/standalone items (separate table numbers/cells, different columns, large
+vertical gaps) as separate blocks."* The rough gap and number thresholds were how that was built; they miss tables
+like this. Task 10C's locked decisions stay: a paragraph is one box, a longer value shrinks to fit its original
+space (`src/lib/edit/textLayout.ts:254`), one patch per line.
+
+**Simulated before writing this** — the three rules below run against the real files, with no code changed:
+
+| File | Rule 1 (vertical line splits a row) | Rule 2 (number split) | Rule 3 (row line stops a paragraph) |
+|---|---|---|---|
+| `Fraction Chart.pdf` | **152** splits — every value cell | the same **152** | 0 |
+| `Firgun_QT-H4SNASRX_SriLanka.pdf`, page 1 | 0 — **its table is drawn as boxes, so no lines are found**; its cells are already separate boxes today | 0 | 0 |
+| same file, pages 2–3 | **3** splits — see below | 0 | 0 |
+| same file, pages 4–6 | 0 | 0 | 0 |
+
+The three Sri Lanka splits fix a bug that exists today: in the Daily Itinerary, the route under the day name is glued
+to the first line of the description in the next column, as one box — `Nuwara Eliya – Ella After breakfast, proceed
+to Ambewela Railway Station…` (Day 3), `Bentota – Colombo After breakfast, proceed to Colombo…` (Day 6),
+`Colombo – Airport One last Sri Lankan breakfast…` (Day 7). The table border between the columns separates them.
+
+**What the user gets:** click a cell → only that cell opens; edit it and press Done → only that cell changes, every
+other value and every border stays exactly where it was; export → only that cell's old value is removed. Paragraphs,
+bullets, headings, single fields, and everything the chat, dates and places features read are unchanged.
+
+Steps 0 → 6 in order.
+
+**Step 0 — Record today's behaviour before changing any code.**
+Copies of the user's two files are in `tmp/tables/` (gitignored). On the untouched branch, write a one-off script
+that saves `tmp/tables/baseline.json`: for every readable file in the picture sweep's roots plus `tmp/image-removal/`
+and `tmp/tables/`, per page, (a) the text of every line `mergeRunsIntoLines(runs)` returns and (b) the text of every
+block `groupRunsIntoBlocks(runs)` returns. Steps 6's checks compare against this file. Do not commit it.
+
+**Step 1 — An editor-only switch.**
+`mergeRunsIntoLines` and `groupRunsIntoBlocks` gain an optional second argument,
+`options?: { readonly ruleLines: readonly RuleLine[] }`. **Only when it is passed** do Rules 1–3 apply. Called
+without it, both functions must return **exactly** what they return today. That keeps these callers unchanged, and
+they must not be edited:
+- `src/lib/pdf/documentText.ts:58` — the text the chat and voice read. It puts each line on its own row of text; if
+  cells split there, a table would reach the chat as loose numbers instead of rows.
+- `src/lib/smart/dateDetect.ts:274` and `src/lib/smart/locationDetect.ts:186, 237`.
+
+**Step 2 — Rule 1: a drawn vertical line splits a row.**
+In `mergeRunsIntoLines`, between two neighbouring runs `a` and `b` on a row (sorted by x), start a new line when a
+rule line on the same page satisfies all of: `orientation === 'vertical'`; its x (the mean of `x1` and `x2`) lies
+strictly between `a`'s right edge − 0.5 pt and `b`'s left edge + 0.5 pt; and its vertical extent covers both runs'
+text — its lower end at or below the lower of their bottoms + 0.5 pt, its upper end at or above the higher of their
+tops − 0.5 pt. Rule lines and text runs are in the same PDF-point space; the simulation above used them directly.
+
+**Step 3 — Rule 2: numbers as they appear in tables.**
+Add `isTableNumber(text)`: true when `isStandaloneNumber(text)` is true, **or** the trimmed text is at most 20
+characters and matches an optional leading `(`, `-`, `−` or `+`; an optional currency — `₹`, `$`, `€`, `£` or `Rs.` /
+`Rs` — with an optional space; a digit, then digits and commas (Western or Indian grouping); an optional decimal part;
+an optional `%`; an optional closing `)`. When the switch is on, `isTableNumber` replaces `isStandaloneNumber` in the
+number split (`:183–186` — **both** runs must be numbers, gap rule unchanged) and in `canJoinBlock`'s number check
+(`:243`).
+Must be numbers: `50.00%`, `100.00%`, `₹1,250`, `₹ 1,00,000`, `$99.99`, `-4.5`, `(1,200)`, `Rs. 500`.
+Must not be: `Day 1`, `4:45`, `PM`, `Adults,`, `Introduction`, `1st`. A numbered-list marker next to a word — `1.` then
+`Introduction` — never splits, because both sides must be numbers.
+
+**Step 4 — Rule 3: a drawn horizontal line stops a paragraph.**
+In `groupRunsIntoBlocks`, a line never joins the block above it when a rule line on the same page satisfies all of:
+`orientation === 'horizontal'`; its y lies strictly between the lower line's top − 0.5 pt and the upper line's
+bottom + 0.5 pt; and it spans the horizontal overlap of the two lines, within 1 pt at each end (if they do not overlap,
+the narrower line's width). Text wrapping inside one cell has no rule between its lines, so it still joins.
+
+**Step 5 — Wire the editor.**
+`OverlayLayer.tsx:363–367` already awaits `detectRuleLines(page, pageIndex)` alongside the runs: pass those rule lines
+as `{ ruleLines }` to `groupRunsIntoBlocks`. If the overlay builds editor blocks anywhere else, pass the same rule lines
+there too; nothing else in the overlay changes. `src/lib/pdf/reeditSweep.local.test.ts` builds blocks the way the
+editor does, so it must pass `detectRuleLines` output as well.
+
+**Step 6 — Tests.**
+
+*Unit* (`src/lib/pdf/textContent.test.ts`):
+- Without options, a table row and a justified paragraph produce the same lines and blocks as today.
+- Rule 1: a row of four **word** cells (`Name`, `City`, `Role`, `Team`) 8.8 pt apart with vertical rules between them
+  → four lines with the switch, one line without it. A vertical rule that stops above the row, or one that passes
+  through a word rather than a gap → no split.
+- Rule 2: `50.00%` then `100.00%` 8.8 pt apart → split with the switch, merged without it; `₹1,250` then `₹2,500` →
+  split; `1.` then `Introduction` → not split; `4:45` then `PM` → not split. Every "must be" and "must not be" example
+  above as a direct `isTableNumber` case.
+- Rule 2 in joining: `50.00%` above `33.33%`, 20 pt apart → never one block with the switch.
+- Rule 3: two paragraph-length lines 18 pt apart that join today → two blocks when a horizontal rule lies between
+  them; still one block with no rule, and with a rule that covers only half their overlap.
+
+*Export* (`src/lib/export/exportPdf.test.ts`): on a generated bordered table, edit one cell through
+`buildTextBlockEdits` using the switched-on blocks → export → the old value is gone, the new one appears once, every
+other cell's value appears exactly once as before, and at 150 dpi the page is identical outside that cell's patch —
+the borders included.
+
+*The user's files and every test file* — new `src/lib/pdf/tableCells.local.test.ts`, enabled by `TASK70_TABLES=1`,
+over the same files as the Step 0 baseline, using `detectRuleLines` for each page:
+- **Chat, dates and places cannot change:** `mergeRunsIntoLines(runs)` without options returns exactly the baseline
+  lines, for every page of every file.
+- **Editor boxes:** `groupRunsIntoBlocks(runs, { ruleLines })` compared with the baseline blocks. Print one line per
+  file — `boxes before -> after`, and each changed box's text (first 60 characters).
+- `Fraction Chart.pdf`: every text item containing `%` is in a block of its own, with no other value in it, and no
+  block contains two `%` values.
+- `Firgun_QT-H4SNASRX_SriLanka.pdf`: **exactly three** blocks change — the Day 3, 6 and 7 route/description splits
+  above — and every other block on all six pages equals the baseline.
+- **A file with no table must show zero changed boxes.** Any other file that changes must be listed with its changed
+  boxes for the reviewer; a change is acceptable only where a real table border or a pair of numbers is split.
+
+*Run and report:* the full suite; `TASK70_TABLES=1`; `TASK66_SWEEP=1` — every round trip must pass, with **0
+untouched lines changed**, **0 redaction failures**, **0 skipped** (report the round-trip total: it may differ from 121,
+because table files now offer smaller boxes); typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + `textContent.test.ts` | Steps 1–4. Without the switch, output must be identical. |
+| `src/components/OverlayLayer.tsx` | Step 5 — pass the rule lines it already loads. |
+| `src/lib/pdf/reeditSweep.local.test.ts` | Step 5 — build blocks the way the editor does. |
+| `src/lib/export/exportPdf.test.ts` | Step 6 — the one-cell export test. |
+| `src/lib/pdf/tableCells.local.test.ts` | **New** — Step 6 corpus and real-file checks. |
+
+**Files that must not change:** `src/lib/pdf/ruleLines.ts` (how lines are found, including `MIN_RULE_LENGTH_PT`);
+`documentText.ts`, `dateDetect.ts`, `locationDetect.ts`; `buildTextEdits.ts` (cover geometry) and `textLayout.ts`
+(shrink-to-fit); `bulletList.ts`, `hiddenText.ts`, `images.ts`; all export and picture code; saved projects; voice and
+chat.
+
+**Guardrails:** without the switch, line and block output is identical to today on every file; no paragraph, bullet
+list or heading may change in a file without a table; a line splits only at a real drawn vertical line or between two
+numbers; nothing slows down — the rule lines are already loaded.
+
+**Verify (user):** hard-refresh `http://127.0.0.1:5173` (**Ctrl+Shift+R**) → open `Fraction Chart.pdf` → click
+`50.00%` in the 1/2 row: only that cell opens → change it → **Done**: only that cell changes, the borders and every
+other number stay put → change a value that appears only once, such as `233.33%` → **Export PDF** → Ctrl+F the old value
+in Chrome: not found, and the rest of that row is intact. Then open the Sri Lanka itinerary → Day 3: click
+`Nuwara Eliya – Ella` → only the route opens; click the description beside it → only the paragraph. Finally open a
+résumé and a brochure: paragraphs, bullets and headings open exactly as before, and ask the chat about the fraction
+table to confirm it still reads it by rows.
+
+**Known limits:**
+- Tables drawn as **boxes** rather than lines — like page 1 of the Sri Lanka itinerary — are not seen by
+  `detectRuleLines`, so Rule 1 cannot split them; they are fine when their columns are well apart, as there. Reading
+  box edges as borders was considered and left out: a coloured highlight behind part of a line has edges too, and would
+  split `Price:` from `₹45,000`.
+- `detectRuleLines` ignores lines shorter than 72 pt (`MIN_RULE_LENGTH_PT`), so a very small table whose borders are
+  short is not split by Rule 1; Rule 2 still splits its numbers.
+- Borderless tables of **words** (names, cities) are not split: a gap in such a table cannot be told from a wide word
+  space in justified text without detecting columns across many rows.
+- Short two-line cells such as `Kandy – Nuwara` / `Eliya` stay two boxes, as today.
+
+**Land:** branch `table-cells` from `main`. Commit: `Each table cell is its own box (Task 70)`. Commit only after the
+numbers above and the user's check have passed.
+
+**Review of Task 70 (2026-09-23):** accepted, no revision; merged as `7180d26`.
+
+Built as specified: the optional `{ ruleLines }` argument gates all three rules, so `documentText.ts`,
+`dateDetect.ts` and `locationDetect.ts` — none of them edited — keep today's output; Rule 1 requires the vertical line
+to sit in the gap **and** span both runs; Rule 3 requires the horizontal line to lie between the lines **and** span
+their overlap; `isTableNumber` covers `50.00%`, `₹1,250`, `Rs. 500`, `(1,200)`, `-4.5` and rejects `Day 1`, `4:45`,
+`PM`, `1st`. `OverlayLayer.tsx` passes the rule lines it already loads (one line), and `reeditSweep.local.test.ts`
+builds blocks the way the editor does.
+
+**Two assertion-model corrections Codex raised, both accepted** (the counting in this spec was imprecise, the
+behaviour is right): the Fraction Chart is counted as **66 → 218** boxes (19 row boxes becoming 171 cells = the 152
+extra), and the Sri Lanka comparison shows **4 old / 7 new** blocks rather than 3, because Day 3's newly separated
+description correctly rejoins its own wrapped continuation line. The assertions were tightened to those exact numbers,
+not loosened.
+
+Verified:
+- Full suite **1,192 passed / 11 skipped (1,203)**; typecheck, lint, build clean.
+- `TASK70_TABLES=1` over 45 files, against `tmp/tables/baseline.json` recorded before any code change: **every page of
+  every file returns identical unswitched lines and blocks**, so the chat, voice, date and place features cannot
+  change. Fraction Chart **66 → 218** with every `%` value in a box of its own; Sri Lanka **160 → 163** separating the
+  Day 3, 6 and 7 routes; `crop-offset.pdf` unchanged.
+- The **15 files** whose boxes changed are 6 distinct documents, each a genuine separation, reviewed one by one:
+  `BBA | Tourism and Travel` split from `WORK EXPERIENCE` (Rahul résumé), two education entries and their date columns
+  split (Utkarsh CV, Rishi CV), a garbled duplicate Canva title split (Ladakh), the Sri Lanka routes, the Fraction
+  Chart cells. Ziro, Healing, Delhi, GOA, Vietnam, the 1,075-box corporate document, the forms and the scans are
+  untouched.
+- `TASK66_SWEEP=1`: **121 / 121**, **0 untouched lines changed**, 807 removed, 0 skipped — unchanged, with the sweep
+  now building boxes the way the editor does.
+- Export: editing one bordered-table cell removes only that value, leaves every neighbouring value exactly once, and
+  keeps the patch inside the cell.
+
+**Not covered, by the user's choice (option A):** tables drawn as boxes rather than lines — page 1 of the Sri Lanka
+itinerary is one, and its cells are already separate because its columns are far apart. Reading box edges was left out
+because a highlight behind part of a line would split a label from its value. Also unchanged: borders shorter than
+`MIN_RULE_LENGTH_PT` (72 pt), and borderless tables of words.
