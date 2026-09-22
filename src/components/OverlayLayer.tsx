@@ -364,7 +364,7 @@ export function OverlayLayer({
     ]).then(([nextRuns, nextGraphicRegions, nextRuleLines]) => {
       if (!cancelled) {
         setRuns(nextRuns);
-        setBlocks(groupRunsIntoBlocks(nextRuns));
+        setBlocks(groupRunsIntoBlocks(nextRuns, { ruleLines: nextRuleLines }));
         setImageRegions([...nextGraphicRegions.imageRegions]);
         setShapeMarkerRegions([...nextGraphicRegions.shapeMarkerRegions]);
         setRuleLines(nextRuleLines);

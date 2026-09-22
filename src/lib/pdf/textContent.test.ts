@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
 import type { PageGeometry } from './types';
+import type { RuleLine } from './ruleLines';
 import type { TextRun } from './textContent';
 import {
   classifyFontStyle,
@@ -16,6 +17,7 @@ import {
   fontStyleFromProgram,
   groupRunsIntoBlocks,
   hitTestRun,
+  isTableNumber,
   mergeRunsIntoLines,
 } from './textContent';
 
@@ -471,6 +473,174 @@ describe('natural text blocks', () => {
       '2',
       'This descriptive row must not absorb the number above it',
       '3',
+    ]);
+  });
+});
+
+describe('editor table cell grouping', () => {
+  const style = {
+    fontName: 'Helvetica',
+    fontSizePt: 11,
+    bold: false,
+    italic: false,
+    color: { r: 0, g: 0, b: 0 },
+  };
+  const run = (text: string, x: number, y: number, w: number): TextRun => ({
+    pageIndex: 0,
+    text,
+    rect: { x, y, w, h: 11 },
+    style,
+  });
+  const rule = (
+    orientation: RuleLine['orientation'],
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ): RuleLine => ({
+    pageIndex: 0,
+    orientation,
+    x1,
+    y1,
+    x2,
+    y2,
+    thicknessPt: 1,
+    color: { r: 0, g: 0, b: 0 },
+  });
+
+  it('keeps today’s table row and justified paragraph output without options', () => {
+    const table = [
+      run('50.00%', 10, 500, 40),
+      run('100.00%', 58.8, 500, 45),
+    ];
+    const paragraph = [
+      run('This justified paragraph has a first line', 10, 450, 220),
+      run('This justified paragraph has a second line', 10, 432, 225),
+    ];
+    const ignoredRules = [
+      rule('vertical', 54, 495, 54, 516),
+      rule('horizontal', 10, 447, 235, 447),
+    ];
+
+    expect(mergeRunsIntoLines(table).map((line) => line.text)).toEqual([
+      '50.00% 100.00%',
+    ]);
+    expect(groupRunsIntoBlocks(paragraph).map((block) => block.text)).toEqual([
+      'This justified paragraph has a first line\nThis justified paragraph has a second line',
+    ]);
+    expect(mergeRunsIntoLines(table)).toEqual(mergeRunsIntoLines(table, undefined));
+    expect(groupRunsIntoBlocks(paragraph)).toEqual(groupRunsIntoBlocks(paragraph, undefined));
+    expect(ignoredRules).toHaveLength(2);
+  });
+
+  it('splits four word cells at vertical rules only when the editor switch is on', () => {
+    const cells = [
+      run('Name', 10, 500, 30),
+      run('City', 48.8, 500, 25),
+      run('Role', 82.6, 500, 25),
+      run('Team', 116.4, 500, 28),
+    ];
+    const rules = [
+      rule('vertical', 44.4, 498, 44.4, 513),
+      rule('vertical', 78.2, 498, 78.2, 513),
+      rule('vertical', 112, 498, 112, 513),
+    ];
+
+    expect(mergeRunsIntoLines(cells).map((line) => line.text)).toEqual([
+      'Name City Role Team',
+    ]);
+    expect(mergeRunsIntoLines(cells, { ruleLines: rules }).map((line) => line.text)).toEqual([
+      'Name', 'City', 'Role', 'Team',
+    ]);
+  });
+
+  it('does not split at a vertical rule above the row or through a word', () => {
+    const cells = [run('Name', 10, 500, 30), run('City', 48.8, 500, 25)];
+    expect(mergeRunsIntoLines(cells, {
+      ruleLines: [rule('vertical', 44.4, 512, 44.4, 530)],
+    }).map((line) => line.text)).toEqual(['Name City']);
+    expect(mergeRunsIntoLines(cells, {
+      ruleLines: [rule('vertical', 25, 498, 25, 513)],
+    }).map((line) => line.text)).toEqual(['Name City']);
+  });
+
+  it.each([
+    '50.00%',
+    '100.00%',
+    '₹1,250',
+    '₹ 1,00,000',
+    '$99.99',
+    '-4.5',
+    '(1,200)',
+    'Rs. 500',
+  ])('recognizes %s as a table number', (value) => {
+    expect(isTableNumber(value)).toBe(true);
+  });
+
+  it.each([
+    'Day 1',
+    '4:45',
+    'PM',
+    'Adults,',
+    'Introduction',
+    '1st',
+  ])('does not recognize %s as a table number', (value) => {
+    expect(isTableNumber(value)).toBe(false);
+  });
+
+  it('splits percentages and currency pairs only with the editor switch', () => {
+    const percentages = [
+      run('50.00%', 10, 500, 40),
+      run('100.00%', 58.8, 500, 45),
+    ];
+    const currencies = [
+      run('₹1,250', 10, 470, 40),
+      run('₹2,500', 58.8, 470, 40),
+    ];
+    expect(mergeRunsIntoLines(percentages).map((line) => line.text)).toEqual(['50.00% 100.00%']);
+    expect(mergeRunsIntoLines(percentages, { ruleLines: [] }).map((line) => line.text)).toEqual([
+      '50.00%', '100.00%',
+    ]);
+    expect(mergeRunsIntoLines(currencies, { ruleLines: [] }).map((line) => line.text)).toEqual([
+      '₹1,250', '₹2,500',
+    ]);
+  });
+
+  it('does not split a numbered-list marker or a time from its word', () => {
+    expect(mergeRunsIntoLines([
+      run('1.', 10, 500, 10),
+      run('Introduction', 28.8, 500, 60),
+    ], { ruleLines: [] }).map((line) => line.text)).toEqual(['1. Introduction']);
+    expect(mergeRunsIntoLines([
+      run('4:45', 10, 470, 22),
+      run('PM', 40.8, 470, 15),
+    ], { ruleLines: [] }).map((line) => line.text)).toEqual(['4:45 PM']);
+  });
+
+  it('never joins vertically adjacent table percentages into one block', () => {
+    const blocks = groupRunsIntoBlocks([
+      run('50.00%', 10, 500, 40),
+      run('33.33%', 10, 480, 40),
+    ], { ruleLines: [] });
+    expect(blocks.map((block) => block.text)).toEqual(['50.00%', '33.33%']);
+  });
+
+  it('uses a spanning horizontal rule to stop a paragraph block', () => {
+    const paragraph = [
+      run('This paragraph-length line belongs above', 20, 500, 210),
+      run('This paragraph-length line belongs below', 20, 482, 200),
+    ];
+    const spanning = rule('horizontal', 20, 496, 220, 496);
+    const halfWidth = rule('horizontal', 20, 496, 110, 496);
+
+    expect(groupRunsIntoBlocks(paragraph).map((block) => block.text)).toEqual([
+      'This paragraph-length line belongs above\nThis paragraph-length line belongs below',
+    ]);
+    expect(groupRunsIntoBlocks(paragraph, { ruleLines: [] })).toHaveLength(1);
+    expect(groupRunsIntoBlocks(paragraph, { ruleLines: [halfWidth] })).toHaveLength(1);
+    expect(groupRunsIntoBlocks(paragraph, { ruleLines: [spanning] }).map((block) => block.text)).toEqual([
+      'This paragraph-length line belongs above',
+      'This paragraph-length line belongs below',
     ]);
   });
 });

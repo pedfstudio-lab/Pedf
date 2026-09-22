@@ -6,6 +6,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { buildTextBlockEdits, coverRectForTextLine } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
 import { imageDrawsFromOperatorList } from './images';
+import { detectRuleLines } from './ruleLines';
 import type { PageGeometry } from './types';
 import { extractTextRuns, groupRunsIntoBlocks, mergeRunsIntoLines } from './textContent';
 import type { TextBlock, TextLine } from './textContent';
@@ -369,7 +370,11 @@ describe.skipIf(!enabled)('Task 66 local re-edit sweep', () => {
         try {
           const page = await document.getPage(pageIndex + 1);
           await reportSharedImageRects(file, page, pageIndex, result);
-          const blocks = groupRunsIntoBlocks(await extractTextRuns(page, pageIndex));
+          const [runs, ruleLines] = await Promise.all([
+            extractTextRuns(page, pageIndex),
+            detectRuleLines(page, pageIndex),
+          ]);
+          const blocks = groupRunsIntoBlocks(runs, { ruleLines });
           result.pages += 1;
           const flagged = blocks.filter((block) => pairedLetters(block.text) || gluedRepeat(block.text));
           result.flagged += flagged.length;

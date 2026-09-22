@@ -17,7 +17,11 @@ import {
   StandardFonts,
 } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
-import { buildBulletListEdits, buildTextEdits } from '@/lib/edit/buildTextEdits';
+import {
+  buildBulletListEdits,
+  buildTextBlockEdits,
+  buildTextEdits,
+} from '@/lib/edit/buildTextEdits';
 import { detectBulletListFromRegions, formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
@@ -52,6 +56,26 @@ async function renderFirstPage(bytes: Uint8Array): Promise<ImageData> {
   } finally {
     await document.destroy();
   }
+}
+
+function maskPdfRect(
+  before: ImageData,
+  after: ImageData,
+  rect: PdfRect,
+  pageHeightPt: number,
+): ImageData {
+  const data = new Uint8ClampedArray(after.data);
+  const scale = 150 / 72;
+  const left = Math.max(0, Math.floor(rect.x * scale) - 1);
+  const top = Math.max(0, Math.floor((pageHeightPt - rect.y - rect.h) * scale) - 1);
+  const right = Math.min(after.width, Math.ceil((rect.x + rect.w) * scale) + 1);
+  const bottom = Math.min(after.height, Math.ceil((pageHeightPt - rect.y) * scale) + 1);
+  for (let y = top; y < bottom; y += 1) {
+    const start = (y * after.width + left) * 4;
+    const end = (y * after.width + right) * 4;
+    data.set(before.data.subarray(start, end), start);
+  }
+  return { data, width: after.width, height: after.height, colorSpace: 'srgb' } as ImageData;
 }
 
 async function makeCoveredTextDocument(): Promise<EditDocument> {
@@ -699,6 +723,95 @@ describe('exportPdf', () => {
       expect(runs.some((run) => run.text === 'UNCHANGED LINE')).toBe(true);
     } finally {
       await reopened.destroy();
+    }
+  });
+
+  it('edits one bordered-table cell without changing neighboring values or borders', async () => {
+    const source = await PDFDocument.create({ updateMetadata: false });
+    const page = source.addPage([220, 240]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    const columns = [30, 80, 130, 180];
+    const rows = [70, 120, 170];
+    for (const x of columns) {
+      page.drawLine({ start: { x, y: 70 }, end: { x, y: 170 }, thickness: 1 });
+    }
+    for (const y of rows) {
+      page.drawLine({ start: { x: 30, y }, end: { x: 180, y }, thickness: 1 });
+    }
+    const values = [
+      ['50.00%', 35, 142],
+      ['100.00%', 85, 142],
+      ['150.00%', 135, 142],
+      ['200.00%', 35, 92],
+      ['250.00%', 85, 92],
+      ['300.00%', 135, 92],
+    ] as const;
+    for (const [value, x, y] of values) page.drawText(value, { x, y, size: 11, font });
+    const originalBytes = await source.save({ useObjectStreams: false });
+
+    const reader = await getDocument({ data: originalBytes.slice(), verbosity: 0 }).promise;
+    let edits: EditDocument['edits'];
+    let patch: PdfRect;
+    try {
+      const sourcePage = await reader.getPage(1);
+      const [runs, ruleLines] = await Promise.all([
+        extractTextRuns(sourcePage, 0),
+        detectRuleLines(sourcePage, 0),
+      ]);
+      const blocks = groupRunsIntoBlocks(runs, { ruleLines });
+      expect(blocks.map((block) => block.text)).toEqual(values.map(([value]) => value));
+      const target = blocks.find((block) => block.text === '50.00%');
+      expect(target).toBeDefined();
+      if (!target) throw new Error('The first generated table cell was not detected.');
+      const replacement = '55.55%';
+      const built = buildTextBlockEdits(target, {
+        text: replacement,
+        style: target.style,
+        width: target.rect.w,
+        height: target.rect.h,
+        dx: 0,
+        dy: 0,
+        align: 'left',
+      }, [replacement], 1);
+      expect(built.covers).toHaveLength(1);
+      patch = built.covers[0]!.rect;
+      expect(patch.x).toBeGreaterThan(30);
+      expect(patch.y).toBeGreaterThan(120);
+      expect(patch.x + patch.w).toBeLessThan(80);
+      expect(patch.y + patch.h).toBeLessThan(170);
+      edits = [...built.covers, ...built.texts];
+    } finally {
+      await reader.destroy();
+    }
+
+    const exported = await exportPdf({
+      originalBytes,
+      pages: [{
+        pageIndex: 0,
+        widthPt: 220,
+        heightPt: 240,
+        rotation: 0,
+        boxOffset: { x: 0, y: 0 },
+      }],
+      edits,
+      sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+    });
+    expect(exported.redaction).toMatchObject({ removedItems: 1, skippedPages: 0 });
+    expect(exported.warnings).toEqual([]);
+    const raw = await pageText(exported.bytes, 1);
+    const exportedValues = raw.split(/\s+/).filter(Boolean);
+    expect(exportedValues.filter((value) => value === '50.00%')).toHaveLength(0);
+    expect(exportedValues.filter((value) => value === '55.55%')).toHaveLength(1);
+    for (const [value] of values.slice(1)) {
+      expect(exportedValues.filter((exportedValue) => exportedValue === value)).toHaveLength(1);
+    }
+
+    if (optionalCanvas) {
+      const [before, after] = await Promise.all([
+        renderFirstPage(originalBytes),
+        renderFirstPage(exported.bytes),
+      ]);
+      expect(worstBlockDiff(before, maskPdfRect(before, after, patch, 240)).meanError).toBeLessThan(0.01);
     }
   });
 

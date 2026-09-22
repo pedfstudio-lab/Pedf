@@ -4,6 +4,7 @@ import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
 import { dropCoveredTextRuns } from './hiddenText';
+import type { RuleLine } from './ruleLines';
 
 export interface TextRun {
   readonly pageIndex: number;
@@ -111,6 +112,41 @@ function isStandaloneNumber(text: string): boolean {
   return /^[\d.,/-]{1,6}$/.test(text.trim());
 }
 
+/** Recognize compact numeric values commonly printed in table cells. */
+export function isTableNumber(text: string): boolean {
+  const value = text.trim();
+  if (isStandaloneNumber(value)) return true;
+  if (value.length === 0 || value.length > 20) return false;
+  const currency = String.raw`(?:₹|\$|€|£|Rs\.?)?\s*`;
+  const number = String.raw`\d[\d,]*(?:\.\d+)?%?`;
+  return new RegExp(`^(?:\\(${currency}${number}\\)|[-−+]?${currency}${number})$`).test(value);
+}
+
+export interface TextGroupingOptions {
+  readonly ruleLines: readonly RuleLine[];
+}
+
+function verticalRuleSeparates(
+  left: TextRun,
+  right: TextRun,
+  ruleLines: readonly RuleLine[],
+): boolean {
+  const leftEdge = left.rect.x + left.rect.w;
+  const rightEdge = right.rect.x;
+  const lowerBottom = Math.min(left.rect.y, right.rect.y);
+  const higherTop = Math.max(left.rect.y + left.rect.h, right.rect.y + right.rect.h);
+  return ruleLines.some((rule) => {
+    if (rule.pageIndex !== left.pageIndex || rule.orientation !== 'vertical') return false;
+    const x = (rule.x1 + rule.x2) / 2;
+    const bottom = Math.min(rule.y1, rule.y2);
+    const top = Math.max(rule.y1, rule.y2);
+    return x > leftEdge - 0.5
+      && x < rightEdge + 0.5
+      && bottom <= lowerBottom + 0.5
+      && top >= higherTop - 0.5;
+  });
+}
+
 /** Infer a line's alignment against the horizontal content bounds of its page. */
 export function detectTextAlignment(
   rect: PdfRect,
@@ -143,7 +179,10 @@ export function detectTextAlignment(
 }
 
 /** Merge PDF.js fragments first by baseline and then by natural horizontal gaps. */
-export function mergeRunsIntoLines(runs: readonly TextRun[]): TextLine[] {
+export function mergeRunsIntoLines(
+  runs: readonly TextRun[],
+  options?: TextGroupingOptions,
+): TextLine[] {
   const rows: Array<{ pageIndex: number; baselineY: number; runs: TextRun[] }> = [];
   const sorted = [...runs].sort(
     (left, right) =>
@@ -180,11 +219,15 @@ export function mergeRunsIntoLines(runs: readonly TextRun[]): TextLine[] {
         18,
         Math.max(previous?.style.fontSizePt ?? 0, run.style.fontSizePt) * 1.75,
       );
+      const numberCheck = options ? isTableNumber : isStandaloneNumber;
       const separateNumbers = previous &&
-        isStandaloneNumber(previous.text) &&
-        isStandaloneNumber(run.text) &&
+        numberCheck(previous.text) &&
+        numberCheck(run.text) &&
         gap > Math.max(3, run.style.fontSizePt * 0.4);
-      if (previous && (gap > columnGap || separateNumbers)) {
+      const separateAtRule = previous
+        ? verticalRuleSeparates(previous, run, options?.ruleLines ?? [])
+        : false;
+      if (previous && (gap > columnGap || separateNumbers || separateAtRule)) {
         lines.push(makeLine(segment));
         segment = [];
       }
@@ -237,14 +280,49 @@ function median(values: readonly number[]): number {
   return ((ordered[middle - 1] ?? 0) + (ordered[middle] ?? 0)) / 2;
 }
 
-function canJoinBlock(lines: readonly TextLine[], line: TextLine): boolean {
+function horizontalRuleSeparates(
+  upper: TextLine,
+  lower: TextLine,
+  ruleLines: readonly RuleLine[],
+): boolean {
+  const upperLeft = upper.rect.x;
+  const upperRight = upper.rect.x + upper.rect.w;
+  const lowerLeft = lower.rect.x;
+  const lowerRight = lower.rect.x + lower.rect.w;
+  const overlapLeft = Math.max(upperLeft, lowerLeft);
+  const overlapRight = Math.min(upperRight, lowerRight);
+  const narrower = upper.rect.w <= lower.rect.w ? upper.rect : lower.rect;
+  const targetLeft = overlapRight > overlapLeft ? overlapLeft : narrower.x;
+  const targetRight = overlapRight > overlapLeft ? overlapRight : narrower.x + narrower.w;
+  const lowerTop = lower.rect.y + lower.rect.h;
+  const upperBottom = upper.rect.y;
+
+  return ruleLines.some((rule) => {
+    if (rule.pageIndex !== upper.pageIndex || rule.orientation !== 'horizontal') return false;
+    const y = (rule.y1 + rule.y2) / 2;
+    const left = Math.min(rule.x1, rule.x2);
+    const right = Math.max(rule.x1, rule.x2);
+    return y > lowerTop - 0.5
+      && y < upperBottom + 0.5
+      && left <= targetLeft + 1
+      && right >= targetRight - 1;
+  });
+}
+
+function canJoinBlock(
+  lines: readonly TextLine[],
+  line: TextLine,
+  options?: TextGroupingOptions,
+): boolean {
   const previous = lines.at(-1);
   if (!previous || previous.pageIndex !== line.pageIndex) return false;
-  if (isStandaloneNumber(previous.text) || isStandaloneNumber(line.text)) return false;
+  const numberCheck = options ? isTableNumber : isStandaloneNumber;
+  if (numberCheck(previous.text) || numberCheck(line.text)) return false;
 
   const verticalGap = previous.baselineY - line.baselineY;
   const size = Math.max(previous.style.fontSizePt, line.style.fontSizePt);
   if (verticalGap <= 0.5 || verticalGap > size * 1.85) return false;
+  if (horizontalRuleSeparates(previous, line, options?.ruleLines ?? [])) return false;
   if (Math.abs(previous.style.fontSizePt - line.style.fontSizePt) > Math.max(1.5, size * 0.22)) {
     return false;
   }
@@ -287,11 +365,14 @@ function canJoinBlock(lines: readonly TextLine[], line: TextLine): boolean {
 }
 
 /** Group natural wrapped lines into editable paragraph blocks while keeping short fields standalone. */
-export function groupRunsIntoBlocks(runs: readonly TextRun[]): TextBlock[] {
+export function groupRunsIntoBlocks(
+  runs: readonly TextRun[],
+  options?: TextGroupingOptions,
+): TextBlock[] {
   const lineGroups: TextLine[][] = [];
-  for (const line of mergeRunsIntoLines(runs)) {
+  for (const line of mergeRunsIntoLines(runs, options)) {
     const candidates = lineGroups
-      .filter((group) => canJoinBlock(group, line))
+      .filter((group) => canJoinBlock(group, line, options))
       .sort((left, right) => {
         const leftLast = left.at(-1);
         const rightLast = right.at(-1);
