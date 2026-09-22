@@ -10574,3 +10574,218 @@ Verified:
 Still open, outside Task 68: crop stores a lossless 3× snapshot instead of cutting the original photo (Vietnam:
 432 KB became 3,325 KB); bullet dots drawn as vector shapes stay under the patch; the two-colour patch on the
 Varanasi page; `coveredFraction` in `coveredGlyphs.ts` unused since Task 67 Rev 2.
+
+### Task 69 — The picture box is the part you can see: deleting a trimmed photo no longer covers the text around it  ✅ MERGED to `main` (`20f440b`, 2026-09-22; branch `visible-image-box`)   *(Medium · 1 day)*
+
+**What the user hit.** In the Vietnam brochure the orange box around a photo reaches far past the photo — over the
+paragraph above the group photo, the strip under the Golden Bridge, the text beside the café — so deleting the photo
+paints the patch over that text. The text stays in the file, but on the page it looks deleted.
+
+**Why — measured on the user's file, not assumed.** Design tools (Canva, and any tool that puts a photo in a frame)
+often place a photo **larger than its frame** and trim it with a clipping path. Our code measures where the photo is
+**placed** and ignores the trimming, so the box — and every cover built from it — spans the hidden parts too. On
+page 3 of `Vietnam Sept'26.pdf`, one photo is **placed** at x 92–718, y −41–840 (**626 × 881 pt**) but **visible**
+only at y 85–714 (**626 × 628 pt**): 127 pt hidden above and 126 pt below.
+
+The cause is in `walkOperatorListGraphicsState` (`src/lib/pdf/images.ts:110`). It tracks the drawing position — `save`,
+`restore`, `transform`, and each Form XObject's matrix — but **not** clipping paths, and not a Form XObject's own
+`BBox`, which trims its contents too. `imageDrawsFromOperatorList` (`:216`) therefore builds `region.rect` from the
+placed position alone (`imageRect`, `:91`).
+
+**How many photos it affects — every readable test PDF, measured independently.** "Trimmed by a frame" means the
+visible part is at least 1 pt smaller than the placed part on some side; "cut only by the page edge" means the photo
+runs off the page and nothing else trims it.
+
+| File | Photos | Box unchanged | Cut only by page edge | Trimmed by a frame (worst) |
+|---|---:|---:|---:|---:|
+| `bullets/` Rahul résumé ×3, `text-doubling/rahul-rajput-edited`, `rahul-source` | 21 each | 21 each | 0 | 0 |
+| `compress-tests/cv-signed`, `cv-signed-compressed`, `rishi-ilovepdf`, `rishi-signed`; `text-doubling/rishi-edited` | 1 each | 1 each | 0 | 0 |
+| `compress-tests/images__2_` ×4 | 14 each | 14 each | 0 | 0 |
+| `compress-tests/images__3_` ×4, `image-removal/images (3).pdf` | 6 each | 6 each | 0 | 0 |
+| `text-doubling/corporate-edited-3.pdf` | 33 | 33 | 0 | 0 |
+| `compress-tests/healing.pdf`, `text-doubling/healing.pdf` | 88 each | 69 | 9 | 10 (179 pt) |
+| `text-doubling/ziro.pdf`, `image-removal/Ziro Festival Firgun-edited-edited (1).pdf` | 110 each | 92 | 7 | 11 (179 pt) |
+| `compress-tests/ladakh.pdf`, `ladakh-original.pdf` | 124 each | 87 | 17 | 20 (205 pt) |
+| `text-doubling/delhi-tour.pdf` | 62 | 47 | 7 | 8 (138 pt) |
+| `repair-tests/1-healthy-GOA.pdf` | 66 | 45 | 9 | 12 (382 pt) |
+| `pdfs/task52-merge-qa/sample-goa-merged.pdf` | 80 | 59 | 9 | 12 (382 pt) |
+| `pdfs/task53-split-qa/GOA 2026-pages-1-8.pdf` | 32 | 27 | 0 | 5 (382 pt) |
+| `pdfs/task53-split-qa/GOA 2026-pages-9-16.pdf` | 34 | 18 | 9 | 7 (179 pt) |
+| `image-removal/Vietnam Sept'26.pdf` | 91 | 21 | 32 | **38 (490 pt)** |
+
+**Every photo in every non-brochure file keeps exactly the box it has today.** Only trimmed photos change.
+
+**What the user gets:** the box, the delete patch, the crop area, the move and the replace all fit **the part of the
+photo you can actually see**. Deleting a trimmed photo leaves the text around it visible. Photos that are not trimmed
+behave exactly as today. A few real photos that the editor currently ignores as "backgrounds" — because their
+**hidden** parts overlap paragraphs — may become clickable; that is expected, and it is reported below.
+
+Steps 1 → 5 in order. **Write Step 5's regression test first and watch it fail on today's code.**
+
+**Step 1 — The walker tracks the trimming, as extra information nobody else has to read.**
+In `walkOperatorListGraphicsState`:
+1. Keep a **clip rectangle** alongside the current matrix, in the **same device space** the walker already works in
+   (it starts from `viewport.transform`). It starts as the whole page: `[0, 0, viewport.width, viewport.height]`.
+2. `save` pushes the matrix **and** the clip; `restore` pops both. `paintFormXObjectBegin` pushes both, applies the form
+   matrix, then — when `args[1]` is a valid four-number `BBox` — intersects the clip with that box's four corners
+   transformed by the new matrix (take their bounding rectangle). `paintFormXObjectEnd` pops both.
+3. `constructPath`: remember the path's bounds. In pdf.js 4.10, `args[2]` is `[minX, minY, maxX, maxY]` in the path's
+   own space; transform its four corners by the current matrix and take their bounding rectangle. If `args[2]` is
+   missing or not four finite numbers, remember "unknown".
+4. `clip` / `eoClip`: intersect the clip with the remembered bounds. **If the bounds are unknown, leave the clip as it
+   is — never narrow on a guess.**
+5. Pass the clip to the visitor as a new **fifth** argument, after `index`. Extend `GraphicsStateVisitor` with it as an
+   optional parameter. `hiddenText.ts:179` and `shapeMarkers.ts:117` ignore it and must behave **byte for byte** as
+   before; do not edit them.
+
+A non-rectangular path — a circle, a rounded frame — clips to its bounding rectangle. Text used as a stencil and soft
+masks are not considered; the clip is simply not narrowed for them.
+
+**Step 2 — Each drawn image gets its visible rectangle.**
+In `imageDrawsFromOperatorList`, `add()` also computes the placed box in device space (the same corners `imageRect`
+uses), intersects it with the current clip, and converts the result with the **same** `screenRectToPdfRect(…, viewport,
+1)` call `imageRect` uses. `DrawnImage` gains `readonly visibleRect?: PdfRect` — absent when the intersection is
+empty or thinner than 0.1 pt, because nothing of the image can be seen.
+
+**`region.rect`, `widthPt`, `heightPt` and `objectId` do not change.** Compression (`src/lib/compress/analyze.ts:346`)
+needs the placed size to judge resolution, and bullet detection (`imageRegionsFromOperatorList`, used by
+`shapeMarkers.ts:165`) keeps using placed rects. Both must behave exactly as today.
+
+For a draw that nothing trims — no narrowing clip, fully on the page — `visibleRect` must **equal `region.rect`
+exactly**, not approximately: the same corners go through the same conversion.
+
+**Step 3 — The editor offers and records the visible rectangle.**
+1. `detectImageCandidates` (`images.ts:310`): offer only draws that have a `visibleRect`; the candidate `region.rect`
+   **is** the `visibleRect`; dedupe by it; run `filterTextBackedRegions` on it; attach the draw as today.
+2. `replacedImageFor` (`src/lib/edit/replacedImage.ts`): find the draw whose `visibleRect` matches the region within
+   0.01, and record `{ kind, rect: draw.visibleRect }` (falling back to the region's rect, as today).
+3. `src/components/ImageOverlay.tsx`: **expected to need no change** — the box, all four covers (delete, move, replace,
+   crop), the crop target and the move selection already read `region.rect`. Confirm it; change a line only if
+   something reads a draw's placed rect directly.
+
+**Step 4 — The export recognises the visible rectangle, and still accepts the placed one.**
+In `src/lib/export/coveredImages.ts`:
+1. `imageMatchesReplacement`: the kinds must match, and the recorded rect must agree within 1 pt on all four edges with
+   **either** `draw.visibleRect` **or** `draw.region.rect`. The placed-rect alternative is **permanent**, not a
+   migration: projects saved before this task recorded placed rects, and bullet image markers (`bulletList.ts`
+   `markerImage`) still record placed rects.
+2. The Revision 2 safety rule uses `draw.visibleRect` as the visible part, in place of
+   `clippedToViewBox(draw.region.rect, viewport.viewBox)`. A claimed draw with no `visibleRect` has nothing visible and
+   is removed, as Revision 2 already does for a draw entirely off the page.
+3. Nothing else changes: removal still deletes the whole paint, hidden parts included, and the image object only when
+   nothing else reaches it.
+
+**Step 5 — Tests.**
+
+*The regression — write this first; it must fail today.* In `coveredImagesExport.test.ts`: a page with a photo placed
+600 × 880 pt, trimmed by a rectangular clip to 600 × 628 pt, and a paragraph drawn in its **hidden** area just above the
+visible frame. Delete it through `detectImageCandidates` → `replacedImageFor` → a cover whose rect is the candidate's
+rect → `exportPdf`. Assert: the cover rect does **not** overlap the paragraph; the photo is gone from the draws and
+from storage; the paragraph's text items are identical; and at 150 dpi the paragraph's area is pixel-identical to the
+original — it stays visible. A second case: a cover recorded with the **placed** 600 × 880 rect still removes the photo.
+
+*Walker and images* (`src/lib/pdf/images.test.ts`):
+- No clip → `visibleRect` equals `region.rect` exactly (`toEqual`).
+- A rectangular clip smaller than the image → `visibleRect` is the clipped area; `region.rect`, `widthPt`, `heightPt`
+  unchanged.
+- A clip inside `save`/`restore` does not trim an image drawn after the `restore`.
+- A Form XObject's `BBox` trims an image inside the form.
+- Nested clips intersect.
+- An image partly off the page → `visibleRect` stops at the page edge.
+- An image clipped away entirely → no `visibleRect`, and `detectImageCandidates` does not offer it.
+- A clip path with missing bounds → no narrowing.
+- A circular clip → `visibleRect` is the circle's bounding square.
+
+*Editor path* (`replacedImage.test.ts`): a trimmed photo's candidate region is its visible rect, and that is the rect
+recorded.
+
+*The guarantee across every file* — new `src/lib/pdf/visibleImageBoxes.local.test.ts`, enabled by `TASK69_BOXES=1`,
+over the picture sweep's roots plus `tmp/image-removal/`. For every image draw on every page:
+- `visibleRect` is **never larger** than `region.rect` on any side.
+- A draw nothing trims gets `visibleRect` **exactly equal** to `region.rect`.
+- Classify each draw with the same 1 pt threshold as the table: unchanged / cut only by the page edge / trimmed by a
+  frame. Print one line per file with those counts, the worst trim in points, and **candidates offered before → after**
+  (compute "before" by running `filterTextBackedRegions` on the placed rects).
+- The counts must match the table above. Counts may differ only by draws `imageDrawsFromOperatorList` already
+  ignores (thinner than 0.1 pt); any other difference must be explained in the report, not accepted silently.
+
+*The user's file* — in `coveredImagesReal.local.test.ts`, under `TASK68_REAL=1`, using
+`tmp/image-removal/Vietnam Sept'26.pdf` (already copied there): the page-3 photo placed at x 92–718, y −41–840 is
+offered with a box of **626 × 628 pt at y 85–714** (±1 pt). Delete it through the editor path and export: page 3's text
+items are identical, page 3 renders identically outside the visible rect at 150 dpi, and the photo's image object is
+gone unless another page draws it. `images (3).pdf` still offers its 6 photos with exactly today's boxes.
+
+*Run and report:* the full suite; `TASK66_SWEEP=1` — hidden-text detection shares the walker, so this must stay at
+**121 / 121**, **0 untouched lines changed**, **0 redaction failures**, **0 skipped**; `TASK68_REAL=1`; `TASK69_BOXES=1`;
+and the picture sweep on **two files only** — `TASK68_IMAGE_SWEEP_FILE=tmp/compress-tests/images__3_.pdf` (nothing
+trimmed) and `TASK68_IMAGE_SWEEP_FILE=tmp/compress-tests/healing.pdf` (10 trimmed) — each with **0 failures**. Then
+typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/images.ts` + `images.test.ts` | Steps 1–3: clip tracking in the walker, `visibleRect`, `detectImageCandidates`. |
+| `src/lib/edit/replacedImage.ts` + test | Step 3.2. |
+| `src/lib/export/coveredImages.ts` + `coveredImages.test.ts` | Step 4 — matching and the safety rule only. |
+| `src/lib/export/coveredImagesExport.test.ts` | Step 5 — the regression and the placed-rect case. |
+| `src/lib/export/coveredImagesReal.local.test.ts` | Step 5 — the Vietnam case. |
+| `src/lib/pdf/visibleImageBoxes.local.test.ts` | **New** — the guarantee across every file. |
+| `src/components/ImageOverlay.tsx` | Expected **no change**; confirm. |
+
+**Files that must not change:** `hiddenText.ts`, `shapeMarkers.ts`, `bulletList.ts`, everything under
+`src/lib/compress/`, and their tests; the values of `region.rect`, `widthPt`, `heightPt` and `objectId`; text removal;
+colour sampling (`sampleDeleteImageCover`, `sampleOutsideImage`) and how covers are drawn; saved projects — a rect is
+still a rect, so there is no new field to save; page operations, voice and chat.
+
+**Guardrails:** a photo nothing trims must get exactly today's box — one difference fails the task; no box may ever
+be bigger than today's; never narrow on a guess; hidden-text and bullet detection must not change; no extra page reads
+or renders — the walker only carries one more rectangle.
+
+**Verify (user):** hard-refresh `http://127.0.0.1:5173` (**Ctrl+Shift+R**) → open `Vietnam Sept'26.pdf` → the group
+photo, the Golden Bridge and the café from the screenshots: each box hugs the photo, not the text → delete each → the
+text around it stays → **Export PDF** → the text is still there in Chrome, and the photos are gone in iLovePDF. Then
+open `images (3).pdf` and a résumé: every box looks exactly as before. Finally crop a trimmed photo: the crop area
+starts from the visible photo only.
+
+**Known limits:** a round or odd-shaped frame gets its bounding rectangle, so the patch's corners can still reach text
+placed very close to it; text used as a stencil and soft masks do not narrow the box — it stays as today, never
+bigger; PDFs exported before this keep whatever they had.
+
+**Land:** branch `visible-image-box` from `main`. Commit: `Picture box hugs the part you can see (Task 69)`. Commit
+only after the numbers above and the user's check have passed.
+
+**Review of Task 69 (2026-09-22):** accepted, no revision; merged as `20f440b`. The user confirmed it in the app
+("task 69 is working fine").
+
+Built as specified: the walker carries a clip rectangle (saved and restored with the matrix, narrowed by Form `BBox`
+and by `clip`/`eoClip` path bounds, never narrowed when bounds are unknown) and passes it as an optional fifth visitor
+argument — `hiddenText.ts` and `shapeMarkers.ts` are untouched. `visibleRect` reuses `region.rect`'s exact numbers when
+nothing trims the photo (`sameBounds`), so untrimmed boxes cannot drift. `region.rect`, `widthPt`, `heightPt` and
+`objectId` are unchanged, so compression and bullets are unaffected. `ImageOverlay.tsx` needed no change.
+
+**Deviation, accepted:** `imageDeletionSweep.local.test.ts` was also changed — it mirrors the export's matching, so
+it needed the same visible-or-placed rule and now looks raw draws up by their placed rect. Test code only.
+
+**Two reporting gaps, not defects:** the box check's "candidates before → after" counts unique boxes, not the photos
+`shouldKeepImageRegion` actually lets the user click; and the box check asserts "never larger" on every real draw but
+leaves "exactly equal when untrimmed" to the unit tests (`images.test.ts:134`, `:185`, `:258`) and to the code's
+construction.
+
+Verified:
+- Full suite **1,170 passed / 10 skipped (1,180)** across 160 files; typecheck, lint, build clean.
+- `TASK69_BOXES=1`, 43 readable files: every count equals the table above, including Vietnam 91 / 21 / 32 / **38**
+  (worst 490 pt); every simple file 100 % unchanged; no box larger than before on any edge.
+- `TASK68_REAL=1`, 4 / 4: Vietnam page-3 photo **placed 626.2 × 881.2 → visible 626.2 × 628.5**, deleted with no text
+  or pixel change outside its frame and the image object removed; `images (3).pdf` 4 / 4 / 5,780 KB; Ziro 110 → 109
+  drawn, 85 → 84 stored.
+- `TASK66_SWEEP=1`: **121 / 121**, 0 untouched lines changed, 807 removed, 0 skipped — unchanged.
+- Picture sweep on `images__3_.pdf` (6 removed) and `healing.pdf` (122 removed, 13 stacked, 9 shared): **0 failures**.
+
+**Visible effect on brochures:** pictures stacked inside one frame now share that frame's box, so there are fewer
+separate boxes — Vietnam 91 → 77, Ziro 109 → 91, Ladakh 123 → 97, Healing 88 → 75, Delhi 60 → 44 — and deleting
+one clears the frame, as Task 68 already did for stacks.
+
+**Still open, outside Task 69:** overlapping cut-out photos — a solid patch drawn on top covers part of a neighbouring
+photo; the real fix is drawing no patch once removal succeeds and redrawing the page in the editor (large; the user
+chose to leave it for now). Also crop's lossless snapshot, vector bullet dots, the Varanasi two-colour patch.
