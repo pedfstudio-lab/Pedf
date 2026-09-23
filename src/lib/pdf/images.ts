@@ -28,6 +28,8 @@ export interface DrawnImage {
   readonly region: ImageRegion;
   /** The part of the placed image that remains visible after page, path, and Form clipping. */
   readonly visibleRect?: PdfRect;
+  /** The PDF.js placement matrix, including the page viewport transform. */
+  readonly placement?: GraphicsMatrix;
   readonly widthPt: number;
   readonly heightPt: number;
   readonly objectId?: string;
@@ -310,6 +312,7 @@ export function imageDrawsFromOperatorList(
     draws.push({
       region: { pageIndex, rect },
       ...(visibleRect ? { visibleRect } : {}),
+      placement: transform,
       widthPt: Math.hypot(transform[0], transform[1]),
       heightPt: Math.hypot(transform[2], transform[3]),
       ...(typeof objectId === 'string' ? { objectId } : {}),

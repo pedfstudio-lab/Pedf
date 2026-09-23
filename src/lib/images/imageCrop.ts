@@ -1,6 +1,8 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { pdfRectToScreenRect } from '@/lib/export/coordinates';
 import type { PdfRect } from '@/lib/export/types';
+import { encodeJpeg, type DecodedImagePixels } from '@/lib/compress/recode';
+import type { GraphicsMatrix } from '@/lib/pdf/images';
 import { imageMimeType } from './imageFile';
 
 export interface PixelCrop {
@@ -18,6 +20,73 @@ function assertRect(rect: PdfRect, name: string): void {
   ) {
     throw new RangeError(`${name} must be a positive finite rectangle.`);
   }
+}
+
+function intersection(rects: readonly PdfRect[]): PdfRect | undefined {
+  const left = Math.max(...rects.map((rect) => rect.x));
+  const bottom = Math.max(...rects.map((rect) => rect.y));
+  const right = Math.min(...rects.map((rect) => rect.x + rect.w));
+  const top = Math.min(...rects.map((rect) => rect.y + rect.h));
+  return right > left && top > bottom
+    ? { x: left, y: bottom, w: right - left, h: top - bottom }
+    : undefined;
+}
+
+function pixelInterval(
+  start: number,
+  end: number,
+  size: number,
+): { readonly start: number; readonly end: number } {
+  const first = Math.max(0, Math.min(size - 1, Math.floor(start * size + 1e-9)));
+  const last = Math.max(first + 1, Math.min(size, Math.ceil(end * size - 1e-9)));
+  return { start: first, end: last };
+}
+
+/**
+ * Map an axis-aligned PDF crop back into the original image samples. PDF rectangles are
+ * bottom-left based while decoded image rows are top-left based. The placement signs retain
+ * horizontal/vertical flips; skew or rotation deliberately returns null for the render fallback.
+ */
+export function sourcePixelCrop(
+  placedRect: PdfRect,
+  visibleRect: PdfRect,
+  cropRect: PdfRect,
+  pixelSize: { readonly width: number; readonly height: number },
+  placement?: GraphicsMatrix,
+): PixelCrop | null {
+  try {
+    assertRect(placedRect, 'Placed image rectangle');
+    assertRect(visibleRect, 'Visible image rectangle');
+    assertRect(cropRect, 'Crop rectangle');
+  } catch {
+    return null;
+  }
+  if (
+    !placement ||
+    placement.some((value) => !Number.isFinite(value)) ||
+    Math.abs(placement[1]) > 0.01 ||
+    Math.abs(placement[2]) > 0.01 ||
+    Math.abs(placement[0]) <= 0.01 ||
+    Math.abs(placement[3]) <= 0.01 ||
+    !Number.isFinite(pixelSize.width) ||
+    !Number.isFinite(pixelSize.height) ||
+    pixelSize.width <= 0 ||
+    pixelSize.height <= 0
+  ) return null;
+
+  const clipped = intersection([placedRect, visibleRect, cropRect]);
+  if (!clipped) return null;
+  const left = (clipped.x - placedRect.x) / placedRect.w;
+  const right = (clipped.x + clipped.w - placedRect.x) / placedRect.w;
+  const bottom = (clipped.y - placedRect.y) / placedRect.h;
+  const top = (clipped.y + clipped.h - placedRect.y) / placedRect.h;
+  const x = placement[0] > 0
+    ? pixelInterval(left, right, pixelSize.width)
+    : pixelInterval(1 - right, 1 - left, pixelSize.width);
+  const y = placement[3] < 0
+    ? pixelInterval(1 - top, 1 - bottom, pixelSize.height)
+    : pixelInterval(bottom, top, pixelSize.height);
+  return { left: x.start, top: y.start, width: x.end - x.start, height: y.end - y.start };
 }
 
 /** Map a bottom-left PDF crop rectangle into top-left source-image pixels. */
@@ -103,6 +172,18 @@ async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+function canvasPixels(canvas: HTMLCanvasElement, originalBytes: number): DecodedImagePixels {
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('2D canvas context unavailable for image crop.');
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    data: new Uint8ClampedArray(image.data),
+    width: canvas.width,
+    height: canvas.height,
+    originalBytes,
+  };
+}
+
 /** Crop from the user's original encoded file, avoiding any screen-resolution resampling. */
 export async function cropImageBytes(
   bytes: Uint8Array,
@@ -128,7 +209,11 @@ export async function cropImageBytes(
       crop.width,
       crop.height,
     );
-    return await canvasPngBytes(canvas);
+    const pixels = canvasPixels(canvas, bytes.byteLength);
+    const transparent = pixels.data.some((value, index) => index % 4 === 3 && value < 255);
+    return transparent
+      ? await canvasPngBytes(canvas)
+      : await encodeJpeg(pixels, { width: pixels.width, height: pixels.height }, 0.9);
   } finally {
     decoded.dispose();
   }

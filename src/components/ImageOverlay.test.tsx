@@ -16,6 +16,8 @@ const harness = vi.hoisted(() => ({
   extract: vi.fn(),
   capture: vi.fn(),
   cropBytes: vi.fn(),
+  sourceCrop: vi.fn(),
+  prepareCrops: vi.fn(),
   getPageCanvas: vi.fn(),
   sampleDelete: vi.fn(),
 }));
@@ -50,6 +52,11 @@ vi.mock('@/lib/images/imageCrop', () => ({
   cropImageBytes: harness.cropBytes,
 }));
 
+vi.mock('@/lib/images/cropSourceImage', () => ({
+  cropSourceImage: harness.sourceCrop,
+  prepareSourceImageCrops: harness.prepareCrops,
+}));
+
 vi.mock('@/lib/images/imageRichness', () => ({
   isRasterTextRegion: () => false,
   sampleImageRichness: () => undefined,
@@ -67,9 +74,11 @@ const PNG = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3);
 const REGION = { pageIndex: 0, rect: { x: 20, y: 40, w: 80, h: 40 } };
 const DRAW = {
   region: REGION,
+  visibleRect: REGION.rect,
   widthPt: 80,
   heightPt: 40,
   objectId: 'img_p0_1',
+  placement: [80, 0, 0, -40, 20, 360],
   kind: 'image' as const,
 };
 
@@ -127,6 +136,8 @@ beforeEach(() => {
   harness.extract.mockReset().mockReturnValue({ bytes: PNG, mime: 'image/png' });
   harness.capture.mockReset();
   harness.cropBytes.mockReset().mockResolvedValue(PNG);
+  harness.sourceCrop.mockReset().mockResolvedValue(undefined);
+  harness.prepareCrops.mockReset().mockResolvedValue(undefined);
   harness.getPageCanvas.mockReset().mockReturnValue(undefined);
   harness.sampleDelete.mockReset().mockReturnValue(undefined);
 });
@@ -366,6 +377,12 @@ describe('ImageOverlay move and resize', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm crop' }));
 
     await waitFor(() => expect(harness.addEdits).toHaveBeenCalledTimes(1));
+    expect(harness.sourceCrop).toHaveBeenCalledWith(
+      harness.originalBytes,
+      DRAW,
+      expect.any(Object),
+    );
+    expect(harness.capture).toHaveBeenCalledWith(page, expect.any(Object), 3);
     const [cover] = harness.addEdits.mock.calls[0]![0] as Edit[];
     expect(cover).toMatchObject({
       kind: 'cover',
@@ -373,6 +390,28 @@ describe('ImageOverlay move and resize', () => {
     });
     expect(cover && cover.kind === 'cover' ? cover.replacesImages?.[0] : undefined)
       .toEqual({ kind: 'image', rect: REGION.rect });
+  });
+
+  it('uses source pixels without also rendering the page', async () => {
+    const cropped = Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+    harness.sourceCrop.mockResolvedValue(cropped);
+    renderOverlay();
+    fireEvent.click(await screen.findByRole('button', { name: /Crop existing image 1/ }));
+    const surface = screen.getByLabelText(/Draw crop region on existing image/);
+    surface.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 80, bottom: 40, width: 80, height: 40,
+      toJSON: () => ({}),
+    });
+    surface.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 21, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 21, clientX: 60, clientY: 30 });
+    fireEvent.pointerUp(window, { pointerId: 21, clientX: 60, clientY: 30 });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm crop' }));
+
+    await waitFor(() => expect(harness.addEdits).toHaveBeenCalledTimes(1));
+    expect(harness.capture).not.toHaveBeenCalled();
+    const [, image] = harness.addEdits.mock.calls[0]![0] as Edit[];
+    expect(image).toMatchObject({ kind: 'image', bytes: cropped });
   });
 
   it('does nothing and explains when extraction and the canvas fallback both fail', async () => {

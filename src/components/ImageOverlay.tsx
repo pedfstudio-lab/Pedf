@@ -12,6 +12,7 @@ import { pdfRectToScreenRect, screenRectToPdfRect } from '@/lib/export/coordinat
 import type { ScreenRect } from '@/lib/export/coordinates';
 import type { CoverEdit, ImageEdit, PdfRect } from '@/lib/export/types';
 import { capturePdfRegion, cropImageBytes } from '@/lib/images/imageCrop';
+import { cropSourceImage, prepareSourceImageCrops } from '@/lib/images/cropSourceImage';
 import { extractImageBytes } from '@/lib/images/extractImage';
 import { coverImageRect, fitImageRect, imageMimeType } from '@/lib/images/imageFile';
 import {
@@ -87,7 +88,7 @@ interface PendingDirectDrag {
 
 type CropTarget =
   | { readonly kind: 'added'; readonly edit: ImageEdit }
-  | { readonly kind: 'existing'; readonly region: ImageRegion };
+  | { readonly kind: 'existing'; readonly region: ImageRegion; readonly draw?: DrawnImage };
 
 interface ScreenSelection {
   readonly left: number;
@@ -184,6 +185,12 @@ function ImagePreview({
 
 function targetRect(target: CropTarget): PdfRect {
   return target.kind === 'added' ? target.edit.rect : target.region.rect;
+}
+
+function sameRect(left: PdfRect | undefined, right: PdfRect): boolean {
+  return !!left && ['x', 'y', 'w', 'h'].every((key) => (
+    Math.abs(left[key as keyof PdfRect] - right[key as keyof PdfRect]) <= 0.01
+  ));
 }
 
 export function ImageOverlay({
@@ -320,6 +327,11 @@ export function ImageOverlay({
       });
     return () => { cancelled = true; };
   }, [getPageCanvas, page, pageIndex]);
+
+  useEffect(() => {
+    if (!imageMode || !openDocument) return;
+    void prepareSourceImageCrops(openDocument.loaded.originalBytes).catch(() => undefined);
+  }, [imageMode, openDocument]);
 
   useEffect(() => {
     if (imageMode) return;
@@ -761,7 +773,14 @@ export function ImageOverlay({
         updateEdit({ ...cropTarget.edit, rect: cropRect, bytes });
       } else {
         if (!page) throw new Error('Cannot crop source content on a blank page.');
-        const bytes = await capturePdfRegion(page, cropRect, 3);
+        const sourceBytes = openDocument && cropTarget.draw
+          ? await cropSourceImage(
+              openDocument.loaded.originalBytes,
+              cropTarget.draw,
+              cropRect,
+            )
+          : undefined;
+        const bytes = sourceBytes ?? await capturePdfRegion(page, cropRect, 3);
         const z = nextZ();
         const cover = makeExistingCover(cropTarget.region, 'image-crop-cover', z);
         const image: ImageEdit = {
@@ -939,7 +958,11 @@ export function ImageOverlay({
                 title="Crop image"
                 onClick={(event) => {
                   event.stopPropagation();
-                  startCrop({ kind: 'existing', region });
+                  startCrop({
+                    kind: 'existing',
+                    region,
+                    draw: regionDraws.find((candidate) => sameRect(candidate.visibleRect, region.rect)),
+                  });
                 }}
                 className="rounded bg-amber-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-amber-600"
               >

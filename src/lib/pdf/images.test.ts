@@ -140,6 +140,7 @@ describe('visible image rectangles', () => {
 
     expect(draw.visibleRect).toEqual(draw.region.rect);
     expect(draw.region.rect).toEqual({ x: 0, y: 20, w: 100, h: 100 });
+    expect(draw.placement).toEqual([100, 0, 0, -100, 0, 380]);
     expect(draw.widthPt).toBe(100);
     expect(draw.heightPt).toBe(100);
   });
