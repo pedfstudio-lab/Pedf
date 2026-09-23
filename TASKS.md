@@ -10992,3 +10992,150 @@ Verified:
 itinerary is one, and its cells are already separate because its columns are far apart. Reading box edges was left out
 because a highlight behind part of a line would split a label from its value. Also unchanged: borders shorter than
 `MIN_RULE_LENGTH_PT` (72 pt), and borderless tables of words.
+
+### Task 71 — Crop cuts the original photo instead of photographing the page  ✅ MERGED to `main` (`324edfa`, 2026-09-24; branch `crop-scissors`)   *(Medium · 1 day)*
+
+**What the user hit.** Cropping a photo makes the file **bigger**. On `Vietnam Sept'26.pdf` the user cropped the
+page-5 train-street photo and deleted two other photos; the file went from **61,977 KB to 63,458 KB**. Measured
+directly in both files:
+
+| | Bytes |
+|---|---:|
+| The original photo (object 79, 663 × 883, `DCTDecode`) | **431,942** |
+| The cropped piece the editor stored (object 2941, 823 × 1560, `FlateDecode`) | **3,325,302** |
+
+The cropped piece shows **less** of the picture and weighs **7.7 ×** the whole original. Task 68 removed 1.58 MB of
+originals from that export; this one crop put 3.3 MB back.
+
+**Why.** In `confirmCrop` (`src/components/ImageOverlay.tsx`), the branch for a picture already in the document calls
+`capturePdfRegion(page, cropRect, 3)` — a **3 × render of that area of the page**, stored losslessly. It is a
+photograph of the page, not a cut of the photo, so it also bakes in whatever is drawn on top (text, stamps) and is
+limited to render resolution. The other branch, for a picture the user added, calls `cropImageBytes`
+(`src/lib/images/imageCrop.ts:107`), which does cut the original file but always encodes **PNG** (`:100`).
+
+**The two hard parts already exist — reuse them, build nothing new.** The Compress tool already links a drawn picture
+to its object in the file and decodes it:
+- `src/lib/compress/analyze.ts` walks each page with `imageDrawsFromOperatorList` and gives every drawn picture its
+  PDF image object (`CompressImageAnalysis.ref`).
+- `src/lib/compress/decode.ts`: `decodeCompressImage(document, reader, image, signal)` returns the original pixels
+  (the embedded JPEG first, a PDF.js decode as fallback); `decodeCompressSoftMask(...)` returns the transparency
+  layer.
+- `src/lib/compress/recode.ts`: `encodeJpeg`, `recodeImage(pixels, target, quality, encode)`, `resizeSoftMask`.
+
+**What the user gets:** cropping a straight photo stores a **small, sharp JPEG** — roughly 200–300 KB instead of
+3.3 MB for the Vietnam photo — with nothing drawn on top baked in. A tilted photo, or one whose pixels cannot be
+read, keeps **exactly today's behaviour**. Crop never fails and never produces a blank or broken picture.
+
+Steps 1 → 6 in order.
+
+**Step 1 — Prove the original pixels are reachable, before writing anything else.**
+A local test (`TASK71_REAL=1`) that, for the page-5 photo of `tmp/image-removal/Vietnam Sept'26.pdf`, runs `analyze`
+and `decodeCompressImage` and asserts the decoded pixel size equals that image object's `/Width` × `/Height`
+(**663 × 883**). Report, for every photo in `tmp/image-removal/` and `tmp/compress-tests/`, whether it decodes. A
+photo that does not decode is the fallback case, not a failure.
+
+**Step 2 — A pure mapping function, unit-tested with exact numbers.**
+`src/lib/images/imageCrop.ts` gains `sourcePixelCrop(...)`: given the picture's **placed rect**, its Task 69
+**`visibleRect`**, the user's **crop rect** (all in PDF points) and the source **pixel size**, return the pixel box
+`{ left, top, width, height }` to cut, clamped to the image. It must handle the page's y-up origin against the
+image's y-down origin, and return **null** when the placement is not axis-aligned.
+To know that, `DrawnImage` gains `readonly placement?: GraphicsMatrix` in `src/lib/pdf/images.ts` — the matrix
+`add()` already holds, carried as extra information exactly as `visibleRect` was in Task 69. Axis-aligned means the
+matrix's `b` and `c` terms are within 0.01 of zero. `region.rect`, `visibleRect`, `widthPt`, `heightPt` and
+`objectId` keep their values, so compression, bullets and Tasks 68–70 are unaffected.
+
+**Step 3 — Cut the original photo.**
+New `src/lib/images/cropSourceImage.ts`: find the picture's image object through `analyze`, decode its pixels and its
+soft mask through `decode.ts`, cut both with the Step 2 box, and encode —
+- **no transparency** → JPEG through `encodeJpeg` at quality **0.9**;
+- **transparency** → PNG, with the mask cut to the same box (`resizeSoftMask` when the sizes differ).
+
+Return `undefined` — never a partial result — when the object cannot be found, the pixels cannot be decoded, the
+placement is not axis-aligned, or the crop box is empty.
+
+**Step 4 — Wire it into crop, with today's path as the fallback.**
+In `confirmCrop`, try `cropSourceImage` first; when it returns `undefined`, use `capturePdfRegion` exactly as today.
+Never both. Everything else about crop stays as it is: the same cover (`image-crop-cover`), the same placement rect,
+and Task 68 still removes the original picture from the exported file.
+
+**Step 5 — The same saving for pictures the user added.**
+`cropImageBytes` always encodes PNG. Encode **JPEG at 0.9 when the source has no transparency**, PNG otherwise.
+Nothing else on that path changes.
+
+**Step 6 — Tests.**
+- *Mapping* (`imageCrop.test.ts`): exact pixel boxes for a plain photo, for a photo trimmed by a frame (Task 69's
+  `visibleRect`), and for a flipped placement; `null` for a rotated or skewed placement; clamping when the crop box
+  runs past the photo's edge.
+- *Scissors path*: a generated PDF holding a JPEG photo, cropped through the real path → the stored bytes begin with
+  the JPEG marker, the pixel size matches Step 2's box within a pixel, the bytes are **under a quarter** of what
+  `capturePdfRegion` produces for the same area, and the exported page renders that area within `meanError < 0.05`
+  of today's method (`worstBlockDiff`, `@napi-rs/canvas`).
+- *Transparency*: a photo with an alpha mask → the output keeps its transparency, and the mask is cut to the same box.
+- *Tilted*: a photo placed at 15° → `cropSourceImage` returns `undefined`, and the export matches today's
+  `capturePdfRegion` bytes exactly.
+- *The user's file* (`TASK71_REAL=1`): crop the Vietnam page-5 photo to roughly its left half → the stored image is a
+  JPEG **under 600 KB** (today 3,325,302 bytes), the exported file is **smaller** than the same crop made the old way,
+  and the crop area renders within `meanError < 0.05` of it.
+- *Nothing else moved*: the full suite; `TASK66_SWEEP=1` unchanged at **121 / 121** with **0 untouched lines
+  changed**; `TASK68_REAL=1` unchanged; the picture sweep on `tmp/compress-tests/images__3_.pdf` and
+  `tmp/compress-tests/healing.pdf` with **0 failures**; typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/images/imageCrop.ts` + test | Steps 2 and 5. |
+| `src/lib/images/cropSourceImage.ts` + test | **New.** Step 3. |
+| `src/lib/pdf/images.ts` + test | Step 2 — `placement` only, additive. |
+| `src/components/ImageOverlay.tsx` | Step 4 — try scissors, fall back. Nothing else in crop changes. |
+| `src/lib/images/imageCrop.local.test.ts` | **New** — Steps 1 and 6's real-file checks. |
+
+**Files that must not change:** everything under `src/lib/compress/` (reused, never edited) and the results the
+Compress tool produces; Task 68 and 69 removal code; covers and colour sampling; text, tables, bullets, export
+handlers; saved projects; voice and chat.
+
+**Guardrails:** crop must never produce a blank, broken or wrongly-sized picture — on any doubt, use today's path;
+the cropped area must look the same or better; no new dependency; the Compress tool's own output must not change; a
+crop must not take more than a second longer than today on the Vietnam photo.
+
+**Verify (user):** open `Vietnam Sept'26.pdf` → crop the page-5 train-street photo → **Export PDF** → the exported
+file is **smaller** than the original, not larger → extract the images with iLovePDF: the cropped piece is a **JPEG of
+a few hundred KB** and looks as sharp as the original. Then crop a photo that has text printed over it: the text must
+**not** be baked into the cropped piece. Finally crop a photo in a résumé and in a Canva brochure and confirm both
+still look right.
+
+**Known limits:** a tilted or skewed photo keeps today's heavier snapshot, as does any photo whose pixels cannot be
+decoded; PDFs exported before this keep the snapshots they already contain; cropping still stores a new picture
+rather than adjusting the original's visible area.
+
+**Land:** branch `crop-scissors` from `main`. Commit: `Crop cuts the original photo (Task 71)`. Commit only after the
+numbers above and the user's check have passed.
+
+**Review of Task 71 (2026-09-24):** accepted, no revision; merged as `324edfa`.
+
+Built as specified, reusing `src/lib/compress/` without editing it. `sourcePixelCrop` intersects the crop with the
+placed **and** visible rectangles, flips the page's bottom-left origin to the image's top-left, keeps horizontal and
+vertical flips from the placement signs, clamps to at least one pixel, and returns `null` on rotation or skew.
+`DrawnImage.placement` is additive, exactly as `visibleRect` was in Task 69. `cropSourceImage` returns `undefined`
+for a stencil, an explicit mask, an unresolved object, a failed decode or any error, and `confirmCrop` then uses
+`capturePdfRegion` as before — a test proves the page is **not** also rendered when the cut succeeds. The analysis is
+warmed while the user drags the crop box. Step 5's bonus landed: `cropImageBytes` encodes JPEG when the source has no
+transparency.
+
+Verified:
+- Full suite **1,201 passed / 13 skipped (1,214)**; typecheck, lint, build clean.
+- The user's Vietnam page-five photo, cut from its **663 × 883** source: **117,763 bytes of JPEG** against
+  **1,397,969** the old way (**≈ 12 × lighter**); the export **62,888,964** against **64,858,523** bytes
+  (**1.9 MB smaller**); the crop area renders within **0.02326** mean error (limit 0.05); the cut takes **398 ms**.
+- Decode coverage across the whole local corpus: **455 of 467 photos (97 %)**; the other **13** are reported as
+  fallbacks, not failures — exactly what Step 1 asked for.
+- `TASK66_SWEEP=1`: **121 / 121**, **0 untouched lines changed**, 807 removed, 0 skipped — unchanged.
+  `TASK68_REAL=1`: 4 / 4 unchanged, including the Vietnam page-three deletion.
+
+**Noted, harmless:** two images in `healing.pdf` declare `/Width` `/Height` of 1 × 1 but decode to their real sizes
+(925 × 243, 674 × 104). The mapping uses the **decoded** size, so those crop correctly.
+
+**Still open after Task 71:** overlapping cut-out photos, where a solid patch drawn on top covers part of a
+neighbouring photo — the real fix is drawing no patch once removal succeeds and redrawing the page in the editor;
+bullet dots drawn as vector shapes; the two-colour patch on the Varanasi page; `coveredFraction` in
+`coveredGlyphs.ts`, unused since Task 67 Revision 2.
