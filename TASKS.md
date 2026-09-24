@@ -11139,3 +11139,223 @@ Verified:
 neighbouring photo — the real fix is drawing no patch once removal succeeds and redrawing the page in the editor;
 bullet dots drawn as vector shapes; the two-colour patch on the Varanasi page; `coveredFraction` in
 `coveredGlyphs.ts`, unused since Task 67 Revision 2.
+
+### Task 72 — An untouched edit changes nothing, and editing a paragraph re-flows it  🟡 BUILT on branch `paragraph-reflow` (`105bca6`, 2026-09-25; includes Revision 1), reviewed, **not merged to `main`** — held for Task 73   *(Medium · 1 day)*
+
+**What the user hit.** Editing a long paragraph does not re-flow. In `Corporate-Governance-edited (25).pdf`, page 3,
+the user typed into the third and fourth lines of the "A number of Postgraduate Departments…" paragraph: each line
+kept its own length, a short line was left with a gap, and no words moved up from the line below.
+
+**Why — measured on that file, not assumed.**
+1. `mergeRunsIntoLines` groups the paragraph correctly: page 3 holds it as **one 6-line block**. The page has **0**
+   rule lines, and grouping is identical with and without Task 70's rules (7 blocks either way) — so **Tasks 66–71
+   are not involved**. The behaviour dates from `5a3cf1a` (2026-08-03, "Complete text editing tasks 9–10E").
+2. A block's text is built as `lines.map((line) => line.text).join('\n')` (`src/lib/pdf/textContent.ts:405`), and
+   `TextEditOverlay.tsx:168–171` seeds the box with that. `textLayout.ts:91–92` then splits on `\n` and wraps **each
+   line separately**, so the PDF's line endings act as line breaks the user never typed.
+3. After a first edit it already works: `buildTextEdits.ts:193, 252` store `boxText`, the unwrapped value, and
+   `TextEditOverlay.tsx:168` prefers it. So only the **first** open of a source paragraph is affected.
+
+**A second problem found while investigating, and the user's explicit requirement.** There is **no unchanged check**
+anywhere: `onDone` (`src/components/OverlayLayer.tsx:1194`) always commits. Because alignment supports only
+left / centre / right (`src/lib/export/types.ts:44`), a **justified** paragraph loses its stretched spacing the
+moment it is redrawn — so today, merely opening a paragraph and pressing **Done** changes the page. The user's words:
+*"if a user clicks on edit text but cancels it or clicks done without editing it should be like the original text
+only — no change in font, no change in layout, size or anything."*
+
+**What the user gets:**
+- Opening any text and pressing **Done** or **Cancel** without editing leaves the document **byte-for-byte as it
+  was** — no patch, no redraw, no change to spacing, font or layout, and nothing added to undo history or the saved
+  change count.
+- Editing a paragraph makes it **flow**: delete a word and the text below slides up; type a sentence and the words
+  push down, as in any word processor.
+
+Part A first — it is the safety net that makes Part B acceptable.
+
+**Part A — Step 1: an untouched edit writes nothing.**
+`TextEditOverlay` already computes what it opened with (`initialText`, `initialStyle`, `initialSpans`,
+`initialAlign`, `initialAlignLeftPt`, `initialAlignWidthPt`, plus the box height and position). Compare the committed
+value against those, and when **all** of them are equal, close the editor **without dispatching anything**:
+- no new edits, and for an already-edited block **no rebuild** — the existing edits keep their ids, `z` and bytes;
+- no history entry, so Task 65's change count and the Save prompt are untouched;
+- `Cancel` already does this (`OverlayLayer.tsx:1189`); confirm it stays that way.
+
+Compare text after stripping **one** trailing newline the editor may add, and compare rich spans by value. Any real
+difference — one character, a font, a size, bold, italic, colour, alignment, the box width or height, or the box
+having been moved — commits exactly as today.
+
+**Part B — Step 2: a paragraph opens as flowing text.**
+New `src/lib/edit/paragraphSeed.ts` exporting `paragraphSeedText(block: TextBlock): string`:
+- one space between consecutive lines, and runs of spaces collapsed to one;
+- when a line ends with `-` or `‑` **and** the next line starts with a lowercase letter, drop the hyphen and join with
+  **no** space (`Postgra-` + `duate` → `Postgraduate`);
+- a single-line block returns its own text unchanged.
+
+Use it **only** in `TextEditOverlay.tsx:171`, in place of `block.text`. **Do not change `textContent.ts:405`**:
+`block.text` is read by the bullet code and is the baseline Task 70's table check compares against.
+
+Bullet lists keep their own seed (`formatBulletEditorText`), and re-editing keeps using `boxText`.
+
+**Step 3 — Tests.**
+- *`paragraphSeed.test.ts`*: a three-line paragraph becomes one line with single spaces; a hyphen split across lines
+  is rejoined; a lowercase-after-hyphen rule is not applied when the next line starts with a capital (`Delhi-` +
+  `Mumbai` keeps its hyphen); double spaces collapse; a single-line block is returned unchanged; a line already
+  ending in a space does not produce two.
+- *`TextEditOverlay.test.tsx`*: opening a multi-line source block seeds text with **no** `\n`; opening a bullet list
+  is unchanged; re-opening an edited block still seeds from `boxText`.
+- *The unchanged guard* (`OverlayLayer.test.tsx` or the overlay's test): Done with nothing altered dispatches
+  **nothing** — no `addEdits`, no `replaceEdits`, no history entry; Done after changing one character commits; Done
+  after changing only the font, only the alignment, only the width, or only the position commits; Cancel dispatches
+  nothing; and for a block that was already edited, an unchanged Done leaves the existing edit ids untouched.
+- *The user's file* — copy `Corporate-Governance-edited (25).pdf` into `tmp/paragraphs/` (gitignored); a local test
+  (`TASK72_REAL=1`) asserts: page 3's "A number of Postgraduate Departments…" block seeds as one string equal to its
+  six lines joined with single spaces and containing no `\n`; and **exporting after an unchanged Done leaves page 3's
+  text items identical to the source**, with no cover edits added.
+- *Nothing else moved*: the full suite; `TASK66_SWEEP=1` unchanged at **121 / 121** with **0 untouched lines
+  changed**; `TASK70_TABLES=1` unchanged (the baseline compares `block.text`, which this task does not touch);
+  typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/edit/paragraphSeed.ts` + test | **New.** Step 2. |
+| `src/components/TextEditOverlay.tsx` + test | Step 2's seed, and report the opened value so the guard can compare. |
+| `src/components/OverlayLayer.tsx` + test | Step 1's guard at `onDone`. |
+| `src/lib/edit/paragraphReflow.local.test.ts` | **New** — Step 3's real-file checks. |
+
+**Files that must not change:** `textContent.ts` (including `block.text`), `textLayout.ts`'s wrapping, shrink-to-fit,
+`buildTextEdits.ts` geometry and covers, the export, tables (Task 70), bullets, pictures (Tasks 68–71), saved
+projects, voice and chat.
+
+**Guardrails:** opening text and closing it — by Done or Cancel — must never alter the document in any way; a
+paragraph that is genuinely edited keeps its own box and shrink-to-fit; no change to how committed text is drawn; the
+text sweep and the table baseline must not move.
+
+**Verify (user):** open `Corporate-Governance-edited (25).pdf` → page 3 → click the "A number of Postgraduate
+Departments…" paragraph → press **Done** without typing → **nothing changes**: the same spacing, the same layout, and
+exporting gives the same text. Press **Cancel** → the same. Then delete `twenty-eight` → the words after it slide up
+and the paragraph closes its gap; type a long sentence in the middle → the words push down. Finally check a bullet
+list, a table cell and a heading still behave as before.
+
+**Known limits:** a paragraph that mixes bold or italic **within** it still opens in one style on the first edit, as
+today — the per-word styles are only retained once it has been edited; a justified paragraph that is genuinely edited
+comes back with an even, ragged-right edge, because alignment has no "justified" option; PDFs exported before this
+keep whatever they already contain.
+
+**Land:** branch `paragraph-reflow` from `main`. Commit: `An untouched edit changes nothing; editing a paragraph
+re-flows it (Task 72)`. Commit only after the numbers above and the user's check have passed.
+
+#### Task 72 — Revision 1  ✅ DONE by Codex, reviewed, committed in `105bca6` on `paragraph-reflow`, **not merged** — the edit box keeps the paragraph's own width   *(Easy · half a day)*
+
+**What the user hit.** After Task 72, clicking a paragraph opens a box that stretches to the **edge of the page**
+instead of matching the paragraph. In `Corporate-Governance-edited (25).pdf` page 3, the six-line paragraph opens as
+three or four very long lines reaching past the document's text column. Worse than the look: editing and pressing
+**Done** would then wrap the paragraph at that wider width, so it would come out **wider than its column**.
+
+**Why — read from the code, and it is Task 72's own side effect.**
+`TextEditOverlay.tsx:204` sizes the box with
+`measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle)`, and `measureWidestInitialLine`
+(`:118–127`) splits that text on `\n` and takes the widest line. `calculateInitialEditorWidth`
+(`src/lib/edit/textEditSession.ts:118–131`) then takes
+`desired = max(blockWidthPt, existingWidthPt, measuredLineWidthPt + pad)` capped by
+`pageBound = pageWidthPt − blockXPt − margin`.
+
+Before Task 72 the box received the paragraph **line by line**, so the widest line was about the paragraph's own
+width. Task 72 changed `initialText` to `paragraphSeedText(block)` — deliberately **one long line** — so the measured
+"widest line" became the whole paragraph, `desired` became enormous, and the result is the page bound.
+
+The same fault already existed on a **re-edit**, because `initialText` is then `boxText`, which is also unwrapped.
+This revision fixes both.
+
+**What the user gets:** clicking a paragraph opens a box the width of that paragraph, showing the same lines as the
+page; editing still re-flows the text, and pressing Done keeps the paragraph inside its original column.
+
+**Step 1 — Measure the lines as they are displayed, not the seed.**
+Keep `initialText` exactly as Task 72 built it — it is what makes re-flow work. Feed the **width measurement** a
+different string, the text as the reader currently sees it:
+1. a previous edit → the **wrapped** line texts, `existing.map((edit) => edit.text).join('\n')` — **not** `boxText`;
+2. otherwise → `block.text`, which still carries one line per PDF line and is unchanged by Task 72;
+3. bullet mode is untouched: that branch (`TextEditOverlay.tsx:195–196`) never uses the measurement.
+
+Put the choice in one small exported helper next to the seed — `editorWidthMeasurementText(block, existing)` — so it
+can be unit-tested without a browser. `calculateInitialEditorWidth`'s formula does **not** change.
+
+**Step 2 — Make the measurement testable.**
+Split `measureWidestInitialLine` into a pure `widestLineWidth(text, measure)` plus the canvas-backed measurer it uses
+today, and let the overlay accept an optional measurer so tests can supply a fake. This matters: in the test
+environment `canvas.getContext('2d')` returns null, `measureWidestInitialLine` returns **0**, and the bug is
+invisible — which is why the full suite passed while the editor was visibly wrong.
+
+**Step 3 — Tests.**
+- `editorWidthMeasurementText`: a six-line block with no existing edit returns `block.text` with **five** newlines
+  while `paragraphSeedText` returns the same words with **none**; with existing edits it returns their wrapped texts
+  joined by `\n` and never `boxText`; a single-line block is unchanged.
+- `widestLineWidth` with a fake measurer (say six units per character): the widest of several lines, not their sum.
+- The overlay with a fake measurer: a six-line paragraph 300 pt wide on a 612 pt page opens at **about 300 pt**, not
+  at the page bound; a single long line still gets its small padding; the alignment-column and bullet paths are
+  unchanged.
+- Re-edit: a block whose `boxText` is one long line still opens at the width of its **wrapped** lines.
+- Extend `src/lib/edit/paragraphReflow.local.test.ts` (`TASK72_REAL=1`): for the page-3 paragraph of
+  `tmp/paragraphs/Corporate-Governance-edited (25).pdf`, the measurement text equals `block.text`, the seed contains
+  no `\n`, and with the fake measurer the initial width stays within **`block.rect.w` + one character** rather than
+  reaching the page bound.
+- *Nothing else moved:* the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0 untouched lines changed**;
+  `TASK70_TABLES=1` unchanged; typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/components/TextEditOverlay.tsx` + test | Steps 1 and 2 — the measurement source and an injectable measurer. |
+| `src/lib/edit/paragraphSeed.ts` + test | Step 1's helper, beside `paragraphSeedText`. |
+| `src/lib/edit/textEditSession.ts` + test | Only if `widestLineWidth` lands here; the width formula itself stays. |
+| `src/lib/edit/paragraphReflow.local.test.ts` | Step 3's real-file checks. |
+
+**Files that must not change:** `paragraphSeedText`'s output, the unchanged-edit guard (`sameTextEditSession`),
+`calculateInitialEditorWidth`'s formula, `textContent.ts`, wrapping and shrink-to-fit, `buildTextEdits.ts`, the
+export, tables, bullets, pictures, saved projects.
+
+**Guardrails:** the box must never open wider than the paragraph unless a single unbroken word needs it; re-flow must
+still work; an untouched Done must still write nothing; no change to how committed text is drawn.
+
+**Verify (user):** open `Corporate-Governance-edited (25).pdf` → page 3 → click the "A number of Postgraduate
+Departments…" paragraph → the box hugs the paragraph and shows the same lines as the page → delete `twenty-eight` →
+the words flow up **within the same width** → **Done** → the paragraph stays inside its column, no wider than before.
+Then open the "ABOUT THE UNIVERSITY COURSE" paragraph above it and confirm the same, and check a heading, a bullet
+list and a table cell still open as before.
+
+**Known limit:** a paragraph containing one unbroken very long word or URL can still open slightly wider, because the
+box must fit that word — the same rule as today.
+
+**Land:** same branch. Task 72 and this revision are committed together, only after the numbers above and the user's
+check have passed.
+
+**Review of Task 72 and Revision 1 (2026-09-25):** accepted, no further revision; committed as `105bca6` on
+`paragraph-reflow` and **deliberately not merged** — see "held for Task 73" below.
+
+Built as specified. `paragraphSeedText` joins display lines with single spaces, rejoins a hyphenated word only when
+the next line starts lowercase, and returns a single-line block unchanged; `textContent.ts`'s `block.text` is
+untouched. Part A turned out to be a **tightening**, not a new guard: `sameTextEditSession` already existed — the
+review's earlier claim that no guard existed was wrong — and it now ignores exactly one trailing newline, normalizes
+rich spans before comparing, and requires an exact height instead of ±0.5 pt. Revision 1 added
+`editorWidthMeasurementText` (the wrapped lines of a previous edit, or `block.text`, never the unwrapped value) and
+made `widestLineWidth` pure with a measurer seam, because canvas text measurement does not exist in the test
+environment — the suite had passed 1,218 tests while the box was visibly stretching to the page bound.
+
+Verified:
+- Full suite **1,226 passed / 14 skipped (1,240)**; typecheck, lint, build clean.
+- `TASK72_REAL=1` on `tmp/paragraphs/Corporate-Governance-edited (25).pdf` page 3: the 6 lines seed to **576
+  characters with no newline**; the box opens at **447.6 pt** — the paragraph's own width, within one character —
+  instead of the page bound; an unchanged **Done** yields **0 edits**; the exported page keeps its **25 text items
+  identical**.
+- `TASK70_TABLES=1`: **45 files, 15 changed** — identical to Task 70's own run, so no table box moved.
+  `TASK66_SWEEP=1`: **121 / 121**, **0 untouched lines changed**, 807 removed, 0 skipped — unchanged.
+
+**Held for Task 73, on purpose.** For a **justified paragraph in a side column** the alignment detector labels the
+block `right` (its lines are flush with the page's right edge and far from its left) and the editor then uses the
+page-wide alignment column — 736.9 pt of an 810 pt page on Bhutan page 8 — so the re-flowed text spreads across it.
+Measured across 45 files: **4,587 blocks, 728 labelled non-left, 663 opening with a box more than 1.5 × their own
+width, 289 justified-looking paragraphs** (Bhutan 26, Ladakh 25, Ziro 21, Vietnam 19, Sri Lanka 14). Re-flow makes
+that case look worse than before, so Task 72 must not reach `main` on its own. Task 73 — judge text by its column
+instead of the whole page — lands with it in one merge.
