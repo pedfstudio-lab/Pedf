@@ -32,10 +32,43 @@ describe('finishTextEdit', () => {
 
     expect(finishTextEdit(
       initial,
-      { ...initial, height: 16.4 },
+      { ...initial },
       (next) => completed.push(next),
       () => { cancellations += 1; },
     )).toBe('cancelled');
+    expect(completed).toEqual([]);
+    expect(cancellations).toBe(1);
+  });
+
+  it('ignores exactly one trailing newline added by the editor', () => {
+    const completed: TextEditSessionValue[] = [];
+    let cancellations = 0;
+
+    finishTextEdit(
+      initial,
+      { ...initial, text: `${initial.text}\n` },
+      (next) => completed.push(next),
+      () => { cancellations += 1; },
+    );
+
+    expect(completed).toEqual([]);
+    expect(cancellations).toBe(1);
+  });
+
+  it('ignores the same trailing newline in rich spans', () => {
+    const completed: TextEditSessionValue[] = [];
+    let cancellations = 0;
+    const spans = initial.spans?.map((span, index, values) => (
+      index === values.length - 1 ? { ...span, text: `${span.text}\n` } : span
+    ));
+
+    finishTextEdit(
+      initial,
+      { ...initial, text: `${initial.text}\n`, spans },
+      (next) => completed.push(next),
+      () => { cancellations += 1; },
+    );
+
     expect(completed).toEqual([]);
     expect(cancellations).toBe(1);
   });
@@ -48,9 +81,10 @@ describe('finishTextEdit', () => {
     ['color', { ...initial, style: { ...initial.style, color: { ...initial.style.color, r: 0.4 } } }],
     ['spans', { ...initial, spans: initial.spans?.map((span, index) => index === 0 ? { ...span, italic: true } : span) }],
     ['width', { ...initial, width: 151 }],
-    ['height', { ...initial, height: 16.6 }],
+    ['height', { ...initial, height: 16.1 }],
     ['horizontal position', { ...initial, dx: 1 }],
     ['vertical position', { ...initial, dy: -1 }],
+    ['alignment', { ...initial, align: 'center' as const }],
   ])('commits when only %s changes', (_label, current) => {
     const completed: TextEditSessionValue[] = [];
     let cancellations = 0;

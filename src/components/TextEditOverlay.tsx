@@ -25,6 +25,11 @@ import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar';
 import type { ElementSize } from '@/lib/edit/floatingToolbar';
+import {
+  editorWidthMeasurementText,
+  paragraphSeedText,
+  widestLineWidth,
+} from '@/lib/edit/paragraphSeed';
 import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
@@ -114,15 +119,17 @@ function wrapSelectionWithStyle(
   return selectWrappedRange(wrapper);
 }
 
-function measureWidestInitialLine(text: string, style: TextStyle): number {
+function measureWidestInitialLine(
+  text: string,
+  style: TextStyle,
+  measure?: (line: string) => number,
+): number {
+  if (measure) return widestLineWidth(text, measure);
   const canvas = window.document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) return 0;
   context.font = textStyleToCanvasFont(style);
-  return Math.max(
-    0,
-    ...text.replace(/\r\n?/g, '\n').split('\n').map((line) => context.measureText(line).width),
-  );
+  return widestLineWidth(text, (line) => context.measureText(line).width);
 }
 
 interface TextEditOverlayProps {
@@ -142,6 +149,8 @@ interface TextEditOverlayProps {
     readonly items: readonly string[];
     readonly maxHeightPt: number;
   };
+  /** Test seam for deterministic line-width measurements; production uses canvas. */
+  readonly measureTextWidth?: (line: string) => number;
   readonly externalError?: string;
   onMoveStateChange(state: MoveGuideState | null): void;
   onDone(next: NextTextEdit): void;
@@ -160,6 +169,7 @@ export function TextEditOverlay({
   verticalTargets,
   horizontalTargets,
   bulletMode,
+  measureTextWidth,
   externalError,
   onMoveStateChange,
   onDone,
@@ -168,7 +178,7 @@ export function TextEditOverlay({
   const initialText = existing?.[0]?.boxText ??
     (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
-    block.text;
+    paragraphSeedText(block);
   // Re-opening a bullet list must seed its font from a body line, not the "•" marker
   // (whose style deliberately drops fontRef); recover a lost fontRef from the block so a
   // list damaged by an earlier re-edit heals its embedded font on the next edit.
@@ -191,6 +201,7 @@ export function TextEditOverlay({
     family: classifyFontFamily(initialStyle.fontName) as FamilyKey,
   });
   const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
+  const widthMeasurementText = editorWidthMeasurementText(block, existing);
   const [initialWidth] = useState(() => bulletMode
     ? Math.max(naturalWidth, existing?.[0]?.rect.w ?? 0)
     : usesAlignmentColumn
@@ -200,7 +211,11 @@ export function TextEditOverlay({
         blockXPt: block.rect.x,
         existingWidthPt: existing?.[0]?.rect.w,
         fontSizePt: initialStyle.fontSizePt,
-        measuredLineWidthPt: measureWidestInitialLine(initialText, initialStyle),
+        measuredLineWidthPt: measureWidestInitialLine(
+          widthMeasurementText,
+          initialStyle,
+          measureTextWidth,
+        ),
         pageWidthPt,
       }));
   const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);

@@ -13,8 +13,6 @@ export interface TextEditSessionValue {
   readonly alignWidthPt?: number;
 }
 
-const HEIGHT_EPSILON_PT = 0.5;
-
 /** Upward screen movement increases the PDF-point room available below a bullet list. */
 export function calculateBulletRoomPt(
   maxHeightPt: number,
@@ -25,7 +23,7 @@ export function calculateBulletRoomPt(
 }
 
 function normalizeText(text: string): string {
-  return text.replace(/\r\n?/g, '\n');
+  return text.replace(/\r\n?/g, '\n').replace(/\n$/, '');
 }
 
 export function sameStyle(left: TextStyle, right: TextStyle): boolean {
@@ -46,8 +44,22 @@ export function sameSpans(
   right?: readonly TextSpan[],
 ): boolean {
   if (!left || !right) return left === right;
-  return left.length === right.length && left.every((span, index) => {
-    const other = right[index];
+  const normalize = (spans: readonly TextSpan[]): TextSpan[] => {
+    const result = spans.map((span) => ({
+      ...span,
+      text: span.text.replace(/\r\n?/g, '\n'),
+    }));
+    let last = result.length - 1;
+    while (last >= 0 && result[last]!.text.length === 0) last -= 1;
+    if (last >= 0 && result[last]!.text.endsWith('\n')) {
+      result[last] = { ...result[last]!, text: result[last]!.text.slice(0, -1) };
+    }
+    return result.filter((span) => span.text.length > 0);
+  };
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((span, index) => {
+    const other = normalizedRight[index];
     return Boolean(
       other &&
       span.text === other.text &&
@@ -72,7 +84,7 @@ export function sameTextEditSession(
     initial.alignLeftPt === current.alignLeftPt &&
     initial.alignWidthPt === current.alignWidthPt &&
     initial.width === current.width &&
-    Math.abs(initial.height - current.height) <= HEIGHT_EPSILON_PT &&
+    initial.height === current.height &&
     current.dx === 0 &&
     current.dy === 0
   );
