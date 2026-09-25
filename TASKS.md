@@ -11359,3 +11359,550 @@ Measured across 45 files: **4,587 blocks, 728 labelled non-left, 663 opening wit
 width, 289 justified-looking paragraphs** (Bhutan 26, Ladakh 25, Ziro 21, Vietnam 19, Sri Lanka 14). Re-flow makes
 that case look worse than before, so Task 72 must not reach `main` on its own. Task 73 — judge text by its column
 instead of the whole page — lands with it in one merge.
+
+### Task 73 — Judge text by the column it sits in, not by the whole page  ⛔ DROPPED (2026-09-25, user: "throw it away") — superseded by **Task 74**, which deletes column detection entirely. Built and reviewed on `text-columns`, never committed; the code was removed from the working tree. Kept below as the record of what column-based judgement cost us. Its only surviving piece is `neighbourBoxWidth` from Revision 1   *(Large · 1.5–2 days)*
+
+**Three faults, one cause.** Every judgement about a line — is it centred, how wide is its box, is that wide gap a
+column break — is made against the **whole page**. On a two-column brochure that is the wrong frame of reference.
+
+| # | What the user sees | Measured |
+|---|---|---|
+| 1 | A justified paragraph in a side column is pushed right and its box spans the page | Bhutan page 8: block x 435.1 **w 340.1**, lines 1–3 **all exactly 340.1** wide (justified), labelled `align right`, `alignLeftPt 38.3`, `alignWidthPt 736.9` on an 810 pt page |
+| 2 | A centred heading in a column would re-centre across the whole page when reworded | same `alignWidthPt 736.9`; the editor uses it as the box width (`TextEditOverlay.tsx:184, 198`) |
+| 3 | One line of a paragraph breaks into separate boxes | Bhutan page 6: the stretched first line has word gaps of **36.4 pt** against a threshold of `max(18, 1.75 × 19.07) = 33.4 pt`, so `After` / `breakfast,` / `we` / `leave` become four boxes while the paragraph's other lines stay whole. The page has **0** rule lines and grouping is identical with and without Task 70's rules |
+
+**How widespread — surveyed over 45 files, 4,587 blocks:** **728** labelled non-left, **663** opening with a box more
+than 1.5 × their own width, **289** justified-looking paragraphs (Bhutan 26, Ladakh 25, Ziro 21, Vietnam 19, Sri Lanka
+14, Corporate Governance 32). Fault 1 is common in the user's brochures; fault 3 appears wherever a line is stretched.
+
+**None of this is new.** Alignment detection and the gap threshold date from August. Task 72 only makes fault 1
+**visible**, because the re-flowed text now fills that page-wide box.
+
+**What the user gets:** a justified paragraph in a column opens at its own width and edits like ordinary text; a
+centred or right-aligned heading stays centred or right **within its column**; a stretched line stays one line; and
+real tables keep splitting into cells exactly as Task 70 made them.
+
+Steps 1 → 5 in order. Step 1 is the foundation the other three use.
+
+**Step 1 — Find the columns on a page.**
+New `src/lib/pdf/textColumns.ts` exporting `detectTextColumns(runs: readonly TextRun[]): readonly TextColumn[]`,
+where a column is `{ pageIndex, left, right }` in PDF points:
+1. Merge runs into rows by baseline exactly as `mergeRunsIntoLines` does today, **before** any gap splitting, and take
+   each row's left edge and right edge.
+2. Cluster the left edges with a tolerance of `max(2, font × 0.2)`. A cluster supported by **three or more rows** is a
+   column candidate; its `left` is the cluster's median and its `right` is the **90th percentile** of those rows'
+   right edges, so one over-long row cannot stretch a column.
+3. Drop a candidate that is contained inside another with the same left edge; keep the narrowest columns that together
+   cover the rows. A page whose rows all share one left edge yields exactly **one** column — the behaviour for a plain
+   document must not change.
+4. `columnFor(rect, columns)` returns the **narrowest** column containing the rect's horizontal span, or `undefined`.
+Pure functions, no PDF.js, unit-tested with fixed numbers.
+
+**Step 2 — Recognise justified text.**
+In `textContent.ts`, a block is **justified** when it has three or more lines and every line except the last has the
+same width within **1 %**. A justified block is treated as `align: 'left'` with **no alignment column**
+(`alignLeftPt` and `alignWidthPt` absent), so the editor uses the block's own width. Record it on the block as
+`readonly justified?: true` for tests and for the report in Step 5.
+
+**Step 3 — Align against the column, not the page.**
+`detectTextAlignment` takes the line's **column** bounds (Step 1) instead of the page's content bounds; `alignLeftPt`
+and `alignWidthPt` become that column's `left` and `right − left`. When no column is found, fall back to today's page
+content bounds so nothing regresses on odd pages. A centred heading inside a column therefore centres within the
+column, and Bhutan page 8's paragraph — justified by Step 2 — comes out `left` at its own 340.1 pt.
+
+**Step 4 — A wide gap splits a line only with column evidence.**
+In `mergeRunsIntoLines`, the existing `columnGap` rule alone no longer splits. Split at a gap when **any** of these
+hold:
+1. a drawn vertical rule crosses it — Task 70 Rule 1, unchanged, and only with the editor switch;
+2. both sides are table numbers — Task 70 Rule 2, unchanged, and only with the editor switch;
+3. the gap is wider than `columnGap` **and** the runs on either side sit in **different columns** from Step 1 — so an
+   evenly spaced table row still splits, because its cells line up down the page and form columns;
+4. the gap is wider than `columnGap` **and** no column contains the whole row — the old behaviour, kept for pages
+   where columns cannot be found.
+A gap inside one column is word spacing: Bhutan's 36.4 pt stretched spaces no longer split. Columns are computed once
+per page and passed in; `mergeRunsIntoLines` must stay a pure function of its inputs.
+
+**Step 5 — Tests, and account for every box that moves.**
+- *Columns* (`textColumns.test.ts`): a one-column page yields one column; a two-column page yields two with the right
+  edges; a single stray wide row does not stretch a column (the 90th-percentile rule); fewer than three rows sharing a
+  left edge is not a column; `columnFor` picks the narrowest containing column and returns `undefined` outside them.
+- *Justified* (`textContent.test.ts`): four lines of equal width plus a shorter last line → `justified`, `align left`,
+  no alignment column; a genuinely centred three-line block → still `center`, with its **column's** width; a
+  right-aligned date column → still `right`.
+- *Gap splitting*: a stretched line with uniform 36.4 pt gaps inside one column → **one** line; the same gaps where
+  the two sides fall in different columns → split; a bordered table row → split by Rule 1 as before; a number row →
+  split by Rule 2 as before; a page with no detectable columns → today's behaviour.
+- *The user's files*, local (`TASK73_REAL=1`), from `tmp/`:
+  - Bhutan page 6 — copy `Bhutan December'26.pdf` into `tmp/paragraphs/` — the first line is **one** box reading
+    `After breakfast, we leave Phuntsholing…`, not four.
+  - Bhutan page 8 — the Black-Necked Crane paragraph is `justified`, `align left`, and the editor opens it at
+    **340.1 pt ± 1**, not 736.9.
+  - `Corporate-Governance-edited (25).pdf` page 3 — unchanged from Task 72: one 6-line block, seeds with no newline,
+    an unchanged Done writes nothing.
+  - `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 — the accommodation row **still splits into its four cells**.
+  - `Fraction Chart.pdf` — still 218 boxes, every `%` value its own box.
+- *Account for every change*: re-run `TASK70_TABLES=1` against `tmp/tables/baseline.json`. The count **will** move,
+  because Step 4 changes `mergeRunsIntoLines` for stretched lines. Print every changed box per file and classify each
+  one in the report as **(a)** a stretched line now kept whole, **(b)** an alignment change from Steps 2–3, or
+  **(c)** unexplained. **Any (c) fails the task.** No table box may change.
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0 untouched lines changed**, 0
+  redaction failures, 0 skipped; `TASK72_REAL=1` unchanged; typecheck, lint, build.
+- *Where committed text lands*: `align`, `alignLeftPt` and `alignWidthPt` decide where edited text is drawn, so for
+  three real blocks — a centred heading, a right-aligned date, and Bhutan page 8's paragraph — assert the committed
+  text's first-line x position, and that a re-edit reproduces it.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textColumns.ts` + test | **New.** Step 1. |
+| `src/lib/pdf/textContent.ts` + test | Steps 2–4: the `justified` flag, alignment against the column, the gap rule. Keep both functions pure; `block.text` unchanged. |
+| `src/components/OverlayLayer.tsx` | Pass the page's columns in beside the rule lines it already loads. |
+| `src/lib/pdf/tableCells.local.test.ts` | Step 5's classification of every changed box. |
+| `src/lib/edit/paragraphReflow.local.test.ts` | Step 5's Bhutan cases. |
+| `src/components/TextEditOverlay.tsx` | **No change expected** — it reads `align` and the alignment column; confirm. |
+
+**Files that must not change:** `ruleLines.ts`; `documentText.ts`, `dateDetect.ts`, `locationDetect.ts` — their
+output must stay byte-identical, so columns must not alter unswitched line output except where Step 4 keeps a
+stretched line whole, and that exception must be listed per file; `buildTextEdits.ts` geometry; `textLayout.ts`;
+bullets; pictures (Tasks 68–71); the export; saved projects; voice and chat.
+
+**Guardrails:** a plain one-column document must behave exactly as today; no table cell may merge; a stretched line
+must never split; a centred heading must stay centred within its column; every changed box in the corpus must be
+explained; no page is read twice — columns are computed from runs already extracted.
+
+**Verify (user):** open `Bhutan December'26.pdf` → page 6 → click the first line of the paragraph: the whole line
+opens, including `breakfast, we leave`, and editing it removes the old words → page 8 → click the Black-Necked Crane
+paragraph: the box hugs the paragraph instead of spanning the page, and the text is not pushed right. Then check the
+Sri Lanka accommodation table still opens one cell at a time, the Fraction Chart still opens one number at a time, a
+centred brochure heading still looks centred after editing, and the Corporate Governance paragraph still re-flows.
+
+**Known limits:** a column needs three rows sharing a left edge, so a two-row column is still judged against the
+page; a page mixing many short columns (a price grid) may yield coarse columns — tables are covered by Task 70's
+rules instead; "justified" is recognised, but editing still produces a ragged right edge, because alignment has no
+justified option.
+
+**Land:** branch `text-columns` from `paragraph-reflow`. Commit: `Judge text by its column, not the page (Task 73)`,
+then merge **both** Task 72 and Task 73 to `main` in one go, only after the numbers above and the user's check have
+passed.
+
+**Review of Task 73 (2026-09-25):** accepted, with Revision 1 below; nothing committed yet, so both land in one
+commit on `text-columns`.
+
+Built as specified, and tidier than asked: the baseline row merging was **extracted** into `mergeRunsIntoRows` and
+shared by `detectTextColumns` and `mergeRunsIntoLines` instead of being duplicated. `columns` is optional on
+`TextGroupingOptions`, so `documentText.ts`, `dateDetect.ts` and `locationDetect.ts` — which pass no options — keep
+byte-identical output, as the guardrail demanded, and `TextEditOverlay.tsx` needed no change. Step 4 reads exactly as
+written: a wide gap splits only when the two sides sit in different columns, or when no column contains the row.
+
+Verified:
+- Full suite **1,239 passed / 15 skipped (1,254)** in 158 files; typecheck, lint, build clean.
+- `TASK73_REAL=1`: Bhutan page 6's stretched line is **one** line inside a single 4-line block; page 8's crane
+  paragraph is `justified`, `align left`, **340.1 pt**, with no alignment column; a centred heading, a right-aligned
+  Ziro date and the crane paragraph each survive two export round trips with their first-line x reproduced; Sri
+  Lanka's four accommodation cells stay four; the Fraction Chart stays **218** boxes.
+- `TASK70_TABLES=1`: **45 files, 26 changed — 13 (a) stretched merges, 58 (b) alignment changes, 0 (c)
+  unexplained**, and the five table fixtures' box lists are asserted identical to Task 72's. Of the 58 (b) entries,
+  **49 only narrow the region** (46 left→left, 3 centre→centre) and **9 flip**: 4 left→centre, 2 left→right,
+  2 centre→left, 1 right→left (the intended Ziro fix, `Overnight Journey in Tempo Traveller`).
+- `TASK66_SWEEP=1`: **121 / 121** round trips, **0 untouched lines changed**, 807 removed, 0 skipped, 0 image
+  failures — unchanged. `TASK72_REAL=1` unchanged (seed 576 chars, box 447.6 pt, 0 edits, 25 text items).
+- Cost: `detectTextColumns` measured at **0.5–2.3 ms** per page (218-run Fraction Chart page: 2.3 ms).
+
+Three findings, all carried into Revision 1 or recorded here:
+1. **Defect — a line that exactly fills its column loses it.** `columnFor` tests containment with a strict `<=`, and
+   a column's `right` is the 90th percentile of those same lines' right edges, so the line lands a hundredth of a
+   point outside. Bhutan: **14 lines, 9 of them non-left**; page 6's `x 441.09 w 340.13` against a column of
+   `441.09..781.21` falls back to the page and takes `alignWidthPt` **743.6**; page 8 takes **736.9** — the exact
+   number this task was written to remove. Step 3 never fires on them; they only look right because Step 2 flattens
+   ≥ 3-line justified paragraphs to left. Revision 1, Step 1.
+2. **The spec's Bhutan page 6 acceptance was wrong, the code is right.** `Phuntsholing` sits on its **own baseline**
+   (y 698.40 against y 717.90), so `After breakfast, we leave` as one line is correct and the four fragments did
+   merge. The spec asked for a first line reading `After breakfast, we leave Phuntsholing…`, which the document does
+   not contain. Codex's test encodes the document; the spec's wording was the error.
+3. **A page-centred title above narrower body columns can flip to left.** Ziro page 4: `THE` / `DAY BY DAY` sit at
+   386.3..423.7 inside a column of 240.0..606.4 — gaps 146.3 against 182.8, too unbalanced for `center`, so they are
+   now `left`. Same page, `ZIRO → GUWAHATI` (gaps 116.7 / 115.7) and `TEMPLE, LAKE VISIT…` (18.5 / 17.6) correctly
+   became `center`. Recorded as a known limit; a reworded title grows rightwards instead of staying centred.
+
+Also noted, not a defect: the sweep labels **every** block-text change on a page `(a)` when any stretched merge
+explains anything on that page, so a genuine `(c)` could hide on a mixed page — tightened in Revision 1, Step 4. And
+`documentText.ts` still splits a stretched line into fragments for Ask, search and voice, because the guardrail
+forbids passing columns there; a later task can pass them and re-baseline.
+
+#### Task 73 — Revision 1  ⛔ DROPPED with Task 73 (2026-09-25) — built and verified, never committed. Its neighbour-limited edit box and the move handle moved inside that box **were kept** and carry into Task 74; the column tolerance went with the columns   *(Medium · 1 day)*
+
+**Three faults left after Task 73.** One is Task 73's own defect; two are older, and Task 72's re-flow is what makes
+the second one dangerous.
+
+| # | What the user sees | Measured |
+|---|---|---|
+| 1 | A right-column line still opens with a page-wide box | Bhutan page 6: line `x 441.09 w 340.13`, column `441.09..781.21`, right edge **781.22** — a hundredth of a point outside, so no column, so `alignWidthPt` **743.6** instead of 340.1. **14 lines on that file, 9 non-left** |
+| 2 | Clicking right-aligned text opens a box across the row, covering its neighbour | The user's `Rahul_Resume.pdf.pdf` page 1: the email block is `234.7..532.2`, the phone `9555737955` is `77.3..137.0` on the same row, and the box opens at **68.2..535.9**, over the phone. Across 45 files, **450** non-left blocks open with a box more than 1.5 × their own width **even with Task 73's columns**; **258** of them have a neighbour on their row |
+| 3 | A multi-line right-aligned block collapses into one line when edited | `tmp/compress-tests/rishi-ilovepdf.pdf` page 1: a 3-line right-aligned contact block, own width **169 pt**, box **506 pt** (381 after fault 2 is fixed) — Task 72 seeds it as one line and re-wraps it at the box width. **6** such blocks across 45 files |
+
+**What the user gets:** a line that fills its column is judged inside it; clicking right-aligned or centred text
+opens a box that stops where its neighbour ends instead of lying across the row; and text that is centred or
+right-aligned keeps the line breaks the PDF gives it, so editing one word can never re-shape the block. Where
+committed text lands does **not** change.
+
+Steps 1 → 4 in order.
+
+**Step 1 — A column accepts a line that exactly fills it.**
+In `columnFor` (`src/lib/pdf/textColumns.ts`), test containment with a small tolerance instead of exact `<=`:
+`rect.x >= column.left − t` and `rect.x + rect.w <= column.right + t`, with `t = 0.5` pt. The narrowest-column rule
+is unchanged, and a rect genuinely outside a column — the existing `x 10 w 20` case — must still return `undefined`.
+Nothing else in Task 73 changes.
+
+**Step 2 — The edit box stops at the nearest block on its row, and only the box.**
+For a block whose `align` is not `left`, the editor may open a box narrower than the alignment region:
+1. find the blocks on the same page whose vertical span overlaps this block's by more than half the shorter height;
+2. `boxLeft` = the largest right edge among those that end at or before this block's left edge, else the region's
+   left; `boxRight` = the smallest left edge among those that start at or after this block's right edge, else the
+   region's right;
+3. never narrower than the block itself: clamp `boxLeft ≤ block.rect.x` and `boxRight ≥ block.rect.x + block.rect.w`.
+This affects **only** the box's on-screen width and the width the text wraps at. `align`, `alignLeftPt` and
+`alignWidthPt` are passed through untouched, so committed text lands exactly where it does today and no table or
+sweep baseline may move. Put the geometry in a pure exported helper — `neighbourBoxWidth(block, blocks)` beside the
+other edit helpers — so it is unit-testable, and let `OverlayLayer.tsx` hand the page's blocks to the overlay.
+Bullet mode keeps its own width path.
+
+**Step 3 — Re-flow only left-aligned and justified text.**
+`TextEditOverlay.tsx` seeds a first-time edit with `paragraphSeedText(block)`. Use it only when the block's `align`
+is `left` (which now includes every justified paragraph, by Task 73 Step 2). For `center` and `right`, seed with the
+block's display lines — today's `block.text` — so the line breaks the PDF gives are preserved and editing a word
+cannot re-wrap the block. `paragraphSeedText` itself does not change; this is the call site only.
+
+**Step 4 — Tests, and account for every box again.**
+- *Columns* (`textColumns.test.ts`): a rect whose right edge exceeds a column's by 0.4 pt is inside it; by 2 pt is
+  not; the narrowest-containing and wrong-page cases still hold.
+- *Neighbour box* (new unit test): a right-aligned block at `234.7..532.2` with a neighbour ending at `137.0` on its
+  row and a region of `68.2..535.9` opens at **137.0..535.9**; with no neighbour it keeps `68.2..535.9`; a neighbour
+  that would cut into the block itself is clamped to the block's own edges; a left-aligned block is untouched.
+- *Seeding* (`TextEditOverlay` test with the Revision 1 measurer seam): a 3-line `right` block seeds with **two**
+  newlines and opens at its own width; the same block as `left` seeds with **none**; a justified block still
+  re-flows, because Task 73 marks it `left`.
+- *The user's files*, local, extending `TASK73_REAL=1`:
+  - Bhutan page 6 and page 8 — no line falls back to the page: for every line whose span is inside a column within
+    0.5 pt, `alignWidthPt` equals that column's width. The count of such lines on this file is **14 before, 0
+    after**.
+  - `tmp/bullets/Rahul_Resume.pdf.pdf` page 1 — the email block's box opens at **137.0 ± 1** on the left, not 68.2,
+    while its committed `align`, `alignLeftPt` and `alignWidthPt` are byte-identical to Task 73's.
+  - `tmp/compress-tests/rishi-ilovepdf.pdf` page 1 — the 3-line right-aligned contact block seeds with its **three**
+    lines intact, and an unchanged **Done** still writes 0 edits.
+- *Account for every change*: re-run `TASK70_TABLES=1`. Step 1 will move some `(b)` entries — print and classify them
+  as before — and **no `(a)` may appear that was not there in Task 73's run**, because Steps 2 and 3 touch no
+  grouping. Tighten the classifier first: match each changed block text to the merge that explains it rather than
+  labelling a whole page `(a)` when any merge on it explains anything, so a mixed page cannot hide a `(c)`. **Any
+  `(c)` fails the revision.**
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0 untouched lines changed**, 0
+  skipped; `TASK72_REAL=1` unchanged; typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textColumns.ts` + test | Step 1's tolerance, nothing else. |
+| `src/components/TextEditOverlay.tsx` + test | Steps 2 and 3 — the neighbour-limited box width and the seed choice. |
+| `src/lib/edit/paragraphSeed.ts` or a sibling + test | Step 2's pure `neighbourBoxWidth` helper. |
+| `src/components/OverlayLayer.tsx` | Pass the page's blocks to the overlay so Step 2 can see the neighbours. |
+| `src/lib/pdf/tableCells.local.test.ts` | Step 4's tighter per-change classification. |
+| `src/lib/edit/paragraphReflow.local.test.ts` | Step 4's real-file checks. |
+
+**Files that must not change:** `textContent.ts` — no grouping, alignment or justified rule moves in this revision;
+`paragraphSeedText`'s own output; `calculateInitialEditorWidth`'s formula; `buildTextEdits.ts` and everything that
+decides where committed text is drawn; `documentText.ts`, `dateDetect.ts`, `locationDetect.ts`; the export; tables;
+bullets; pictures; saved projects; voice and chat.
+
+**Guardrails:** no committed `align`, `alignLeftPt` or `alignWidthPt` may change anywhere in the corpus — this
+revision moves boxes, not text; a box must never be narrower than its own block; a left-aligned paragraph must still
+re-flow exactly as Task 72 makes it; no table cell may merge or split.
+
+**Verify (user):** open `Rahul_Resume.pdf.pdf` → click the email line: the box starts just right of the phone number
+instead of covering it → **Done** without typing: nothing changes. Then open `rishi-ilovepdf.pdf` page 1 → click the
+right-aligned contact block: it still shows three lines, and editing one of them leaves the others where they are.
+Then re-check Bhutan pages 6 and 8, a centred brochure heading, the Sri Lanka table and the Corporate Governance
+paragraph.
+
+**Known limits:** a centred or right-aligned block whose row holds nothing else — or only a neighbour too close to
+make a difference — still opens a column-wide box: **192** of the 450 across 45 files are not narrowed by more than
+a tenth. Harmless, because such a block is a single line and it lands back where it was.
+Centred and right-aligned text no longer re-flows when edited, which is deliberate. Shrinking the committed
+alignment region itself — so centred text centres in the gap rather than the column — is **not** done here, because
+it would move text on export and invalidate the Task 70 baseline.
+
+**Land:** same branch `text-columns`. Task 73 and this revision are committed together as
+`Judge text by its column, not the page (Task 73, Rev 1)`, then Task 72 and Task 73 merge to `main` in one go, only
+after the numbers above and the user's check have passed.
+
+**Revision 1 implementation notes (2026-09-25):**
+
+- `columnFor` now allows **0.5 pt** at either edge. The narrowest containing column and page isolation remain.
+- New pure `neighbourBoxWidth` limits a first-time non-left edit box to same-row neighbours, clamps it to the
+  block's own bounds, and leaves left-aligned blocks alone. `OverlayLayer` supplies the page's blocks.
+- The visible box, drag origin, snapping and floating toolbar use the narrowed position. Both sides of the
+  unchanged-edit comparison and the committed edit retain the original alignment metadata instead of copying
+  the visible width into `alignWidthPt`.
+- First-time centred/right-aligned multiline edits seed from `block.text` and open at the block's own width,
+  as required by the seeding acceptance test. Left/justified paragraphs still use `paragraphSeedText`.
+  Bullets retain their width path. Reopened saved edits retain their saved text and alignment geometry; the
+  source block's neighbours must not pull an already moved edit back to its old position.
+- The corpus classifier follows actual shared text runs through changed blocks, including continuations moved
+  by stretched-line merges. A synthetic mixed-page regression proves that a merge cannot explain an unrelated
+  regrouping elsewhere on the page. Every page is also compared directly with Task 73's strict-containment
+  version, reconstructed from the same extracted runs.
+
+**Necessary exception to the planned file guardrail:** applying 0.5 pt to all `columnFor` calls changed gap
+splitting in `tmp/compress-tests/healing.pdf` page 2, detaching `she` from its paragraph. Therefore the three
+gap-decision calls in `textContent.ts` explicitly use **0 pt**; the alignment lookup uses the new **0.5 pt**
+default. No gap/grouping rule, justified rule or export geometry was changed. Unit coverage checks both a
+row extending 0.4 pt beyond a column and a run nearly inside a narrower nested column. This small call-site
+exception is required to satisfy the revision's stronger no-new-grouping-changes guardrail.
+
+Revision 1 verification:
+- `TASK73_REAL=1`: Bhutan **14 recovered / 0 missed** boundary lines; Rahul email box **137.0..535.9 pt** with
+  committed alignment metadata unchanged; Rishi contact **3 lines**, own width **168.9 pt**, unchanged Done
+  **0 edits**. Original Bhutan, centred-heading/date two-round-trip, Sri Lanka and Fraction Chart checks pass.
+- `TASK72_REAL=1`: **576 characters**, **447.6 pt**, **0 edits**, **25 identical text items**, unchanged.
+- `TASK70_TABLES=1`: **45 files / 26 changed** versus the original baseline; all five table fixtures retain their
+  Task 72 box lists. Compared directly with Task 73 before this revision: **0 (a), 145 (b), 0 (c)**, so no new
+  stretched merges or other grouping changes. Full printed accounting is **330 (a), 2,338 (b), 0 (c)** versus
+  grouping without columns; here (a) counts each old/new affected block and (b) includes region-only metadata
+  changes. These are raw per-block counts, not the 13/58 summary quoted in the earlier review.
+- Full suite rerun: **1,250 passed / 16 skipped (1,266)**. The first run had one 5-second timeout in the unrelated
+  GOA image test during concurrent PDF sweeps; it passed on rerun without changing that test. After the final
+  saved-edit geometry guard, all **107** focused editor, neighbour, column and text-grouping tests pass.
+- `TASK66_SWEEP=1`: **121 / 121** round trips across 47 available files / 242 pages, **0 untouched lines changed**,
+  **807** removed text items, **0** skipped edits and **0** image-removal failures, matching the required baseline.
+- Final typecheck, lint and production build pass. Vite retains its existing large-chunk advisory.
+
+Manual acceptance above remains pending. Keep Task 72 and Task 73 together on the feature branch until that
+check and review pass; no commit or merge has been made during this revision.
+
+### Task 74 — Click what you see: the text editor stops guessing the page, and an edit stops painting over it  🟡 STEP 0 MEASURED (2026-09-26), awaiting the user's tradeoff decision before production work → branch `text-first` (from `paragraph-reflow`, which carries Task 72; Task 73 is dropped)   *(Large · 4–5 days)*
+
+**Why this exists.** The editor decides what a clickable "thing" is by running **fifteen judgement calls** over the
+whole page before the user touches anything: five about what belongs side by side (a gap over `max(18, 1.75 × size)`;
+two table numbers; a drawn vertical rule; two detected columns; no column found) and eight about which lines stack
+into one paragraph (numbers never join; gap ≤ 1.85 × size; a drawn horizontal rule; sizes within 22 %; same family
+and weight; "long enough" at 24 characters or 3 runs; left edges within `max(9, size)` or 70 % overlap; spacing
+within 35 % of the block's median), plus two that judge centre/right against the page or a detected column. Then,
+on **Done**, the export paints a sampled rectangle over the old words *and* deletes them from the file.
+
+Each call is a guess about meaning, and a guess has no floor: there is always a PDF it reads wrongly, and the damage
+lands on the user's document. The painted rectangle is the second half of the same problem — it is left over from
+before Task 67 could delete words for real, and it is what wipes out table borders, two-colour backgrounds and the
+edge of a neighbouring photo.
+
+| What the user hit | Measured |
+|---|---|
+| A résumé's email and city open as **one** box | `RAHUL_RAJPUT_RESUME.pdf` page 1: `rahulrajput82143@gmail.com` ends at **377.2**, `Gurgaon` starts at **472.0** — a **94.8 pt** gap, **9.4 ×** the 10.1 pt letter size, and the row's **only** gap. Task 73 refuses to split it because both sides share one detected column |
+| A stretched line used to break into four boxes | `Bhutan December'26.pdf` page 6: three gaps of **36.4 pt** at a 19.1 pt size — **1.9 ×**, and all three identical. Task 73 fixed this with columns |
+| Editing a table cell wipes the cell | every text edit emits a cover with `sampleBackground: true` (`buildTextEdits.ts:48, 207, 342`) and `drawCover` fills that rectangle unconditionally (`handlers/cover.ts`) |
+
+**The corpus says one number separates the two cases.** Over the 45 baseline files there are **294** wide gaps that
+sit inside a single column: **25** under 2 × the letter size (stretched justification), **225** at 3 × or more (two
+separate items — a résumé's email from its city, a CV's course from its school). Stretched text never opens a space
+much past twice the letter size; separate items start around three.
+
+**And one table rule out of three is worth keeping.** `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 yields **31** pieces
+with Task 70's rules and **31** without them — plain gaps already split a travel table. `Fraction Chart.pdf` yields
+**218** with them and **66** without, and the 152 lost pieces are dense numeric rows that would then be redrawn as
+one line of single-spaced text, collapsing the grid. So the two-numbers rule stays; the two drawn-line rules go.
+
+**What the user gets:** clicking text opens exactly what is there — a heading alone, a line alone, a paragraph as a
+paragraph, a bullet list as one list, a table cell as a cell — decided only from a line and its immediate
+neighbours, never from the page. And an edit no longer paints anything: the old words are deleted from the file, so
+table borders, coloured backgrounds and photos behind the text survive untouched.
+
+Steps 0 → 5 in order. **Step 0 produces a list the user reads before any production file is touched.**
+
+**Step 0 — Measure first; change nothing.**
+New local test `src/lib/pdf/textUnits.local.test.ts` behind `TASK74_UNITS=1`, in two parts. It asserts nothing, and
+no production file changes in this step. **The user reads both reports and confirms the trade before Step 1 lands.**
+
+*Part A — what every click would become.* Group every file in `tmp/tables/baseline.json` twice — today's rules, and
+the Step 1 rules from the new module — and print per file: the piece count each way, and every piece that differs,
+as `OLD …` / `NEW …`. End with a total: files, pieces today, pieces after, pieces changed.
+
+*Part B — the font count, so the "will my font survive?" question has a number.* For every text piece in those same
+files, ask the question the export asks: would an edit be drawn in **the document's own font**, or substituted with
+Helvetica or Times? The decision already exists — `resolvePageFontResource` (`src/lib/export/embeddedFont.ts:100`)
+returns a page font only when the run carries a `fontRef`, PDF.js reports the font file present
+(`missingFile !== true`), and the page's font dictionary has `WinAnsiEncoding`; everything else falls to
+`standardFontFor` (`englishFont.ts:12`) with the "widths/kerning may differ" warning. Print per file: pieces that
+keep their own font, pieces substituted, and the substituted font names with a count each — then the corpus total
+as a percentage. This changes nothing in Task 74; it tells the user whether fonts are the next task or a footnote.
+
+*Part C — is redrawing a page after every edit affordable?* The editor shows the **original** page and layers edits
+on top, so on screen an old word must still be covered even after Step 3 stops covering it in the file. The
+intended cure is to redraw the edited page from the edited bytes. This part only measures whether that is viable —
+nothing is built. Using the existing `exportPdf` (`src/lib/export/exportPdf.ts`) and `renderPage`
+(`src/lib/pdf/renderPage.ts`), take three real pages — a plain text page (`Corporate-Governance-edited (25).pdf`
+page 3), a brochure page carrying photos (`Bhutan December'26.pdf` page 6), and a dense table page
+(`Fraction Chart.pdf` page 1) — apply one text edit to each, and time:
+1. exporting the **whole document** with that edit applied;
+2. exporting a **single-page document** built from that page alone with the same edit — the page-scoped path we do
+   not have yet, to see what it would be worth;
+3. re-opening the resulting bytes and rendering that page at zoom 1, through `@napi-rs/canvas`.
+Report min / median / max in milliseconds for each, beside the file's page count and byte size, so it is clear how
+(1) scales with document size — a 60 MB brochure is the case that decides this. Node's canvas is only a proxy for
+the browser's, and the report must say so; the two export timings are directly comparable. The outcome we are
+looking for: redraw after every edit, redraw on a short delay after typing stops, or build a page-scoped export
+first.
+
+**Step 0 report (2026-09-26; no production grouping or export code changed):** the full `OLD` / `NEW` listing and
+per-file font counts are in `tmp/task74-step0-timing.log`, produced by `textUnits.local.test.ts` with
+`TASK74_UNITS=1`.
+
+- Click units across the 45 baseline files: **3,783 today → 4,511 proposed** (**+728 / +19.2%**). **30 / 45**
+  files change; the report prints **1,286 OLD and 1,748 NEW** entries (**3,034** changed-side entries). The biggest
+  source is the 84-page Corporate Governance corpus copy: **1,376 → 1,640**. The proposed rule leaves the Fraction
+  Chart exactly **218 → 218**, but Sri Lanka changes **163 → 177** and the Rahul résumé **23 → 36** as long
+  paragraphs split into more local pieces.
+- Font survival on the proposed 4,511 pieces: **741 own-font / 3,770 substituted = 16.4% own-font**. The original
+  Rahul résumé and Fraction Chart keep their own fonts for every piece; the brochure and Corporate Governance
+  families in this corpus mostly fall back to Helvetica or Times. This makes font fidelity a substantial follow-up,
+  rather than a footnote.
+- Export/redraw times below are **min / median / max ms over three runs**. Node `@napi-rs/canvas` is only a proxy
+  for browser rendering; the two export columns are directly comparable.
+
+| Real page | Document | Whole export | Single-page export | Reopen + render at zoom 1 |
+|---|---:|---:|---:|---:|
+| Corporate Governance p3 | 84 pages, 2.9 MB | 129 / **282** / 1,481 | 80 / **81** / 90 | 51 / **54** / 100 |
+| Bhutan p6 | 21 pages, 61.2 MB | 1,338 / **2,308** / 2,442 | 687 / **926** / 975 | 453 / **539** / 560 |
+| Fraction Chart p1 | 1 page, <0.1 MB | 144 / **170** / 193 | 48 / **60** / 66 | 35 / **38** / 41 |
+
+The measurement supports building a page-scoped export before any automatic redraw: the 61.2 MB brochure takes a
+median **2.85 s** for whole export plus redraw versus **1.47 s** after starting from a single-page document. Even
+the page-scoped proxy is too slow for every keystroke; a redraw would belong after Done or behind a quiet delay.
+Task 74 itself can still keep the stated limitation that the live preview uses a temporary patch while the exported
+file omits a satisfied patch.
+
+**Step 1 — One new module owns what a clickable piece is.**
+New `src/lib/pdf/textUnits.ts`, pure functions, no PDF.js, unit-tested with fixed numbers.
+
+*`splitRowIntoPieces(row)` — side by side:*
+1. split where the gap is wider than `max(18, 1.75 × size)` — today's rule, unchanged;
+2. split where both sides are table numbers and the gap is wider than `max(3, 0.4 × size)` — Task 70's number rule,
+   unchanged, and the only one of its three that survives;
+3. **do not** split when the row has **two or more** over-threshold gaps that are all within **20 %** of the largest
+   and none exceeds **3 × size** — that is stretched justification, not two items. Bhutan's three 36.4 pt gaps at
+   1.9 × stay one line; a résumé's single 94.8 pt gap at 9.4 × splits.
+
+*`canJoinParagraph(lines, line)` — stacked:*
+1. same page; same family, weight and slant; sizes within `max(1.5, 22 %)` — unchanged;
+2. vertical gap over 0.5 and at most `1.85 × size`, and within 35 % of the block's median gap — unchanged;
+3. left edges within `max(9, size)`, or 70 % horizontal overlap — unchanged;
+4. **new, and the heart of this task:** the **upper** line must run to the right edge of the text it belongs to —
+   its right edge within `2 × size` of the widest right edge among the block's lines and the candidate. Wrapped
+   text ends within a word of the same place on every line but its last; a heading, a date, a field label or a
+   standalone item stops far short. This single local test replaces the 24-character rule, justified detection and
+   column-relative judgement;
+5. **deleted:** the 24-character / 3-run test, the drawn-horizontal-rule test, and everything column-shaped.
+
+*Alignment, without a page-wide frame:*
+- a block of **two or more** lines is judged from **its own lines**: left when their left edges agree within
+  `max(2, 0.15 × size)`, right when their right edges agree, centre when their centres agree, and left otherwise.
+  Bhutan page 8's paragraph therefore comes out **left at its own 340.1 pt** with no justified flag and no column;
+- a **single-line** block keeps today's rule against the page's text bounds, so Task 42's centred headings and
+  right-aligned dates behave exactly as they do now;
+- `neighbourBoxWidth` (Task 73 Revision 1) **stays**: it is local, it only narrows the on-screen box, and it is what
+  keeps a right-aligned box off its neighbour's words.
+
+**Step 2 — Delete the page-wide machinery.**
+- Delete `src/lib/pdf/textColumns.ts` and `src/lib/pdf/textColumns.test.ts`.
+- In `src/lib/pdf/textContent.ts`: delete the `columns` option, the `justified` flag, `verticalRuleSeparates`,
+  `horizontalRuleSeparates` and the character-count test; `mergeRunsIntoLines` and `groupRunsIntoBlocks` keep their
+  signatures and their reading behaviour, and call into `textUnits.ts` for the two decisions above.
+- In `src/components/OverlayLayer.tsx`: stop computing columns per page.
+- `src/lib/pdf/ruleLines.ts` itself is **kept** — Task 10M uses it to move and delete divider lines. Only its use as
+  a grouping signal goes.
+
+**Step 3 — An export stops painting over words it actually removed.**
+- `src/lib/export/coveredGlyphs.ts`: the plan already knows which replaced items it removed. Report it **per cover**
+  — a cover is *satisfied* when every entry in its `replaces` was removed, and, where it carries `replacesImages`,
+  every one of those too.
+- `src/lib/export/exportPdf.ts`: when the page's rewrite succeeded, **skip drawing** every satisfied cover. Draw
+  every unsatisfied one exactly as today.
+- When a page is refused — the fail-closed path from Tasks 67 and 68 — nothing changes: covers are drawn and the
+  existing warning is raised. Removal reliability is already measured: **121 / 121** round trips over 47 files,
+  **807** pieces of text removed, **0** refusals.
+- **On screen nothing changes.** The canvas still renders the original page, so the editor must still cover the old
+  words while you work. The exported file simply comes out cleaner than the preview.
+
+**Step 4 — Tests, and account for every piece that moves.**
+- *Units* (`textUnits.test.ts`): a single 9 × gap splits; three identical 1.9 × gaps do not; two numbers with a
+  small gap split; a short heading does not join the paragraph below it; a paragraph's full lines join and its short
+  last line joins; two stacked short fields stay apart; a block whose left edges agree is left, whose right edges
+  agree is right, whose centres agree is centre; a single-line block still uses the page bounds.
+- *The user's files*, local, `TASK74_REAL=1`:
+  - `RAHUL_RAJPUT_RESUME.pdf` page 1 — the contact row is **three** pieces: the phone, the email, the city;
+  - `Bhutan December'26.pdf` page 6 — the stretched line is **one** line inside one 4-line paragraph;
+  - page 8 — the crane paragraph is **one** block, `align left`, **340.1 pt ± 1**, opening at its own width;
+  - `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 — still **31** pieces, the four accommodation cells intact;
+  - `Fraction Chart.pdf` — still **218** pieces, every `%` its own box;
+  - `Corporate-Governance-edited (25).pdf` page 3 — unchanged from Task 72: one 6-line block, seeds with no
+    newline, an unchanged **Done** writes nothing.
+- *The patch is gone and nothing leaks*: export an edited cell of the Sri Lanka table and assert, by rendering the
+  page, that the cell's border pixels survive; assert the exported text no longer contains the replaced word
+  (the Ctrl+F guarantee); assert a refused page still paints its cover and still warns.
+- *Account for every change*: re-run Step 0's sweep as an assertion. Every differing piece must be explained as
+  **(a)** a stretched line now kept whole, **(b)** two items now correctly separated, **(c)** an alignment change
+  from a block judged by its own lines, or **(d)** unexplained. **Any (d) fails the task.**
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0** untouched lines changed and
+  **0** skipped; `TASK72_REAL=1` unchanged; typecheck, lint, build.
+
+**Step 5 — Land.** Branch `text-first`. One commit per step, then Task 72 and Task 74 merge to `main` together.
+Task 73 and its Revision 1 are **dropped**: `text-columns` is archived unmerged, or discarded, as the user decides.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/textUnits.ts` | Step 1 — the two local rules and the block-local alignment |
+| `src/lib/pdf/textUnits.test.ts` | Step 4's unit tests |
+| `src/lib/pdf/textUnits.local.test.ts` | Step 0's measurement, then Step 4's corpus accounting |
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + test | Step 2 — delete the column option, the justified flag, both rule-line tests and the character-count test; call `textUnits.ts`. Reading, styles, hidden-text handling and `block.text` are untouched |
+| `src/components/OverlayLayer.tsx` | Stop computing columns; everything else unchanged |
+| `src/lib/export/coveredGlyphs.ts` + test | Step 3 — report removal per cover |
+| `src/lib/export/exportPdf.ts` + test | Step 3 — skip satisfied covers; refused pages unchanged |
+| `src/lib/pdf/tableCells.local.test.ts` | Drop the two deleted rules' expectations; keep the number-rule cases |
+| `src/lib/edit/paragraphReflow.local.test.ts` | Task 73's column cases replaced by Step 4's cases; Task 72's own case unchanged |
+
+**Files deleted**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/textColumns.ts` + `textColumns.test.ts` | Column detection is the page-wide guess this task removes |
+
+**Files that must not change:** `bulletList.ts` and everything bullet-shaped — a list stays one editable thing;
+`images.ts`, `imageCrop.ts`, `coveredImages.ts` and every picture task (68, 69, 71); all tools (51–63);
+`TextEditOverlay.tsx` beyond what already exists — the box, its width handle, the move handle, wrapping and
+shrink-to-fit are untouched; `buildTextEdits.ts` geometry; `textLayout.ts`; `textEditSession.ts` and the
+unchanged-edit guard; `paragraphSeed.ts`; `neighbourBoxWidth.ts`; saved projects (Task 65) — the edit format does
+not change, so files saved today still open; `ruleLines.ts`; voice and chat.
+
+**Guardrails:** every decision in the click path must be answerable from a line and its immediate neighbours — if a
+rule needs to look at the whole page, it does not belong in this task; no table cell may merge with the cell beside
+it; a stretched line must never split; a bullet list stays one unit; an exported file must never contain a word the
+user removed, and a refused page must still paint its cover and still warn; the preview must still hide old text on
+screen.
+
+**Verify (user):** open `RAHUL_RAJPUT_RESUME.pdf` → the contact row gives three separate boxes; click the email and
+only the email opens. Open `Bhutan December'26.pdf` → page 6, the first line opens whole; page 8, the paragraph's
+box hugs the paragraph. Open the Sri Lanka quote → edit one cell, export, and the table's borders and fill are
+intact. Open `Fraction Chart.pdf` → one number at a time. Then export any edited file, open it in Chrome and
+Ctrl+F the word you removed — no match.
+
+**Known limits:** the on-screen preview still paints a patch while you edit, because the page underneath is the
+original — the exported file is cleaner than the preview; a dense grid of **words** (not numbers) packed closer than
+the gap threshold can still open as a whole row; bullet dots drawn as vector shapes still remain after an edit
+(open since Task 67 Revision 2a); a single-line centred heading is still judged against the page, because a lone
+line has no other frame; a justified paragraph still comes back with a ragged right edge, because alignment has no
+justified option.
