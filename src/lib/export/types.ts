@@ -69,6 +69,10 @@ export interface TextEdit extends BaseEdit {
   readonly boxSpans?: readonly TextSpan[];
   /** Manual editor-box height in PDF points; repeated on wrapped line edits for re-editing. */
   readonly boxHeight?: number;
+  /** Display-only left edge of the editor box; export continues to use `rect`. */
+  readonly boxLeftPt?: number;
+  /** Display-only width of the editor box; export continues to use `rect`. */
+  readonly boxWidthPt?: number;
   /** Horizontal alignment inherited from the source PDF text line. */
   readonly align?: TextAlignment;
   /** Left edge of the alignment column in PDF points. */

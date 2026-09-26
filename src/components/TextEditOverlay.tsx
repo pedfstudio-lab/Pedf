@@ -3,7 +3,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { TextEdit, TextStyle } from '@/lib/export/types';
+import type { PdfRect, TextEdit, TextStyle } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
@@ -30,6 +30,7 @@ import {
   paragraphSeedText,
   widestLineWidth,
 } from '@/lib/edit/paragraphSeed';
+import { neighbourBoxWidth } from '@/lib/edit/neighbourBoxWidth';
 import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
@@ -132,8 +133,50 @@ function measureWidestInitialLine(
   return widestLineWidth(text, (line) => context.measureText(line).width);
 }
 
+function savedTextBoxRect(texts: readonly TextEdit[]): PdfRect {
+  const first = texts[0];
+  if (!first) return { x: 0, y: 0, w: 0, h: 0 };
+  const left = Math.min(...texts.map((edit) => edit.rect.x));
+  const right = Math.max(...texts.map((edit) => edit.rect.x + edit.rect.w));
+  const top = Math.max(...texts.map((edit) => edit.rect.y + edit.rect.h));
+  const bottom = Math.min(...texts.map((edit) => edit.rect.y));
+  const height = first.boxHeight ?? top - bottom;
+  return {
+    x: first.boxLeftPt ?? left,
+    y: top - height,
+    w: first.boxWidthPt ?? right - left,
+    h: height,
+  };
+}
+
+function savedEditingRect(
+  texts: readonly TextEdit[],
+  block: TextBlock,
+  align: TextEdit['align'],
+  alignLeftPt: number,
+  alignWidthPt: number,
+): PdfRect {
+  const saved = savedTextBoxRect(texts);
+  if (align === 'left') return saved;
+  const storesOnlyAlignmentRegion = Math.abs(saved.x - alignLeftPt) <= 0.01
+    && Math.abs(saved.w - alignWidthPt) <= 0.01
+    && alignWidthPt >= block.rect.w - 0.01;
+  if (!storesOnlyAlignmentRegion) return saved;
+
+  // Existing aligned edits store the full alignment region in rect. Recover the
+  // visible text rectangle without changing that persisted/exported geometry.
+  const sourceAlignLeftPt = block.alignLeftPt ?? block.rect.x;
+  return {
+    x: block.rect.x + alignLeftPt - sourceAlignLeftPt,
+    y: saved.y,
+    w: block.rect.w,
+    h: saved.h,
+  };
+}
+
 interface TextEditOverlayProps {
   readonly block: TextBlock;
+  readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
   readonly screenRect: ScreenRect;
   /** Box-only source-ink adjustment; content cancels it to retain the PDF baseline. */
@@ -159,6 +202,7 @@ interface TextEditOverlayProps {
 
 export function TextEditOverlay({
   block,
+  blocks = [],
   existing,
   screenRect,
   topCorrectionPx = 0,
@@ -178,7 +222,7 @@ export function TextEditOverlay({
   const initialText = existing?.[0]?.boxText ??
     (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
-    paragraphSeedText(block);
+    ((block.align ?? 'left') === 'left' ? paragraphSeedText(block) : block.text);
   // Re-opening a bullet list must seed its font from a body line, not the "•" marker
   // (whose style deliberately drops fontRef); recover a lost fontRef from the block so a
   // list damaged by an earlier re-edit heals its embedded font on the next edit.
@@ -192,6 +236,27 @@ export function TextEditOverlay({
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
   const usesAlignmentColumn = initialAlign !== 'left';
+  const editingRect = existing?.length
+    ? savedEditingRect(existing, block, initialAlign, initialAlignLeftPt, initialAlignWidthPt)
+    : block.rect;
+  const alignmentBox = neighbourBoxWidth({
+    pageIndex: block.pageIndex,
+    rect: editingRect,
+    align: initialAlign,
+    alignLeftPt: initialAlignLeftPt,
+    alignWidthPt: initialAlignWidthPt,
+  }, blocks.filter((candidate) => candidate !== block));
+  const savedLineCount = existing?.length
+    ? Math.max(existing.length, initialText.split('\n').length)
+    : 0;
+  const preservesDisplayLines = usesAlignmentColumn && (
+    existing?.length ? savedLineCount > 1 : block.lines.length > 1
+  );
+  const boxLeftPt = preservesDisplayLines ? editingRect.x : alignmentBox.left;
+  const boxWidthPt = preservesDisplayLines ? editingRect.w : alignmentBox.width;
+  // screenRect starts at the committed alignment region. Move only the visible box.
+  const boxScreenLeft = screenRect.left + (usesAlignmentColumn
+    ? (boxLeftPt - initialAlignLeftPt) * zoom : 0);
   const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans, zoom));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
   const [selectionStyle, setSelectionStyle] = useState({
@@ -205,7 +270,7 @@ export function TextEditOverlay({
   const [initialWidth] = useState(() => bulletMode
     ? Math.max(naturalWidth, existing?.[0]?.rect.w ?? 0)
     : usesAlignmentColumn
-      ? Math.max(MIN_BOX_WIDTH, initialAlignWidthPt)
+      ? Math.max(MIN_BOX_WIDTH, boxWidthPt)
       : calculateInitialEditorWidth({
         blockWidthPt: naturalWidth,
         blockXPt: block.rect.x,
@@ -257,7 +322,7 @@ export function TextEditOverlay({
     event.currentTarget.setPointerCapture(event.pointerId);
     onMoveStateChange({
       crosshair: {
-        x: screenRect.left + startOffset.x,
+        x: boxScreenLeft + startOffset.x,
         y: screenRect.top + startOffset.y,
       },
     });
@@ -267,7 +332,7 @@ export function TextEditOverlay({
         x: startOffset.x + moveEvent.clientX - startX,
         y: startOffset.y + moveEvent.clientY - startY,
       };
-      const rawLeft = screenRect.left + rawOffset.x;
+      const rawLeft = boxScreenLeft + rawOffset.x;
       const rawTop = screenRect.top + rawOffset.y;
       const boxWidth = width * zoom;
       const boxHeight = height * zoom;
@@ -292,7 +357,7 @@ export function TextEditOverlay({
       setMoveOffset(snappedOffset);
       onMoveStateChange({
         crosshair: {
-          x: screenRect.left + snappedOffset.x,
+          x: boxScreenLeft + snappedOffset.x,
           y: screenRect.top + snappedOffset.y,
         },
         ...(xSnap ? { vertical: xSnap.guide } : {}),
@@ -327,10 +392,12 @@ export function TextEditOverlay({
       height,
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
+      boxLeftPt: boxLeftPt + moveOffset.x / zoom,
+      boxWidthPt: width,
       ...(usesAlignmentColumn ? {
         align: initialAlign,
         alignLeftPt: initialAlignLeftPt,
-        alignWidthPt: width,
+        alignWidthPt: initialAlignWidthPt,
       } : {}),
     };
     if (bulletOverflow) return;
@@ -346,7 +413,7 @@ export function TextEditOverlay({
         ...(usesAlignmentColumn ? {
           align: initialAlign,
           alignLeftPt: initialAlignLeftPt,
-          alignWidthPt: initialWidth,
+          alignWidthPt: initialAlignWidthPt,
         } : {}),
       },
       next,
@@ -355,7 +422,7 @@ export function TextEditOverlay({
     );
   };
   const editorFrame: ScreenRect = {
-    left: screenRect.left + moveOffset.x,
+    left: boxScreenLeft + moveOffset.x,
     top: screenRect.top + moveOffset.y,
     width: width * zoom,
     height: height * zoom,
@@ -366,6 +433,10 @@ export function TextEditOverlay({
     left: toolbarOffsetInFrame(editorFrame, errorSize, pageSizePx, 8).left,
     top: editorFrame.height + 8,
   };
+  // A right or centre box now starts where its neighbour ends, so a handle hanging
+  // outside that corner would sit back on the neighbour's words. Keep it inside, where
+  // such a box always has empty room before its own text.
+  const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -12, top: -12 };
   const lineHeight = textBlockLineHeight(block, style);
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
   const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
@@ -507,7 +578,7 @@ export function TextEditOverlay({
     <div
       className="absolute isolate z-50"
       style={{
-        left: screenRect.left + moveOffset.x,
+        left: boxScreenLeft + moveOffset.x,
         top: screenRect.top + moveOffset.y,
         width: width * zoom,
         height: height * zoom,
@@ -618,7 +689,8 @@ export function TextEditOverlay({
           event.preventDefault();
           setMoveOffset((value) => ({ x: value.x + delta.x, y: value.y + delta.y }));
         }}
-        className="absolute -left-3 -top-3 z-20 h-6 w-6 cursor-move rounded-full border-2 border-white bg-blue-600 text-xs font-bold leading-none text-white shadow hover:bg-blue-700"
+        style={moveHandleOffset}
+        className="absolute z-20 h-6 w-6 cursor-move rounded-full border-2 border-white bg-blue-600 text-xs font-bold leading-none text-white shadow hover:bg-blue-700"
       >
         ✥
       </button>

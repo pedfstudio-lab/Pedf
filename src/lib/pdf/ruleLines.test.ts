@@ -7,6 +7,25 @@ import {
 } from './ruleLines';
 
 describe('ruleLinesFromOperatorList', () => {
+  it('detects a 20 pt divider', () => {
+    const lines = ruleLinesFromOperatorList({
+      fnArray: [OPS.constructPath, OPS.stroke],
+      argsArray: [
+        [[OPS.moveTo, OPS.lineTo], [40, 60, 60, 60]],
+        null,
+      ],
+    }, 0, { x: 0, y: 0, width: 200, height: 120 });
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        orientation: 'horizontal',
+        x1: 40,
+        y1: 60,
+        x2: 60,
+      }),
+    ]);
+  });
+
   it('detects horizontal and vertical segments but rejects a stroked rectangle', () => {
     const lines = ruleLinesFromOperatorList({
       fnArray: [
@@ -82,6 +101,61 @@ describe('ruleLinesFromOperatorList', () => {
     ]);
   });
 
+  it('returns six candidates from one path containing six rectangles', () => {
+    const lines = ruleLinesFromOperatorList({
+      fnArray: [OPS.constructPath, OPS.fill],
+      argsArray: [
+        [
+          [
+            OPS.rectangle,
+            OPS.rectangle,
+            OPS.rectangle,
+            OPS.rectangle,
+            OPS.rectangle,
+            OPS.rectangle,
+          ],
+          [
+            20, 20, 20, 1,
+            20, 40, 20, 1,
+            20, 60, 20, 1,
+            20, 80, 20, 1,
+            20, 100, 20, 1,
+            20, 120, 20, 1,
+          ],
+        ],
+        null,
+      ],
+    }, 0, { x: 0, y: 0, width: 200, height: 160 });
+
+    expect(lines).toHaveLength(6);
+    expect(lines.every((line) => line.orientation === 'horizontal')).toBe(true);
+    expect(lines.map((line) => line.y1)).toEqual([20.5, 40.5, 60.5, 80.5, 100.5, 120.5]);
+  });
+
+  it('returns four candidates from a four-segment polyline', () => {
+    const lines = ruleLinesFromOperatorList({
+      fnArray: [OPS.constructPath, OPS.stroke],
+      argsArray: [
+        [[OPS.moveTo, OPS.lineTo, OPS.lineTo, OPS.lineTo, OPS.lineTo], [
+          20, 20,
+          40, 20,
+          40, 40,
+          60, 40,
+          60, 60,
+        ]],
+        null,
+      ],
+    }, 0, { x: 0, y: 0, width: 100, height: 100 });
+
+    expect(lines).toHaveLength(4);
+    expect(lines.map((line) => line.orientation)).toEqual([
+      'horizontal',
+      'vertical',
+      'horizontal',
+      'vertical',
+    ]);
+  });
+
   it('rejects an exact-width text underline and a page-frame edge', () => {
     const lines = ruleLinesFromOperatorList({
       fnArray: [
@@ -126,7 +200,7 @@ describe('detectRuleLines fixtures', () => {
     }
   });
 
-  it('does not mistake GOA timeline ticks or text underlines for divider rules', async () => {
+  it('exposes short GOA vertical marks without mistaking text underlines for rules', async () => {
     const bytes = await readFile('public/samples/GOA 2026.pdf');
     const document = await getDocument({ data: new Uint8Array(bytes), verbosity: 0 }).promise;
     try {
@@ -134,7 +208,14 @@ describe('detectRuleLines fixtures', () => {
         const page = await document.getPage(pageNumber);
         return detectRuleLines(page, pageNumber - 1);
       }));
-      expect(pages.flat()).toEqual([]);
+      expect(pages[0]).toHaveLength(4);
+      expect(pages[0]?.every((line) => (
+        line.orientation === 'vertical'
+        && line.y2 - line.y1 > 64
+        && line.y2 - line.y1 < 65
+      ))).toBe(true);
+      expect(pages[1]).toEqual([]);
+      expect(pages[2]).toEqual([]);
     } finally {
       await document.destroy();
     }

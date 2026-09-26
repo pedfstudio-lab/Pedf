@@ -6,6 +6,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { exportPdf } from '@/lib/export/exportPdf';
 import type { Edit } from '@/lib/export/types';
 import type { PageGeometry } from '@/lib/pdf/types';
+import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import {
   editorWidthMeasurementText,
@@ -23,6 +24,20 @@ const enabled = process.env.TASK72_REAL === '1' && existsSync(fixture);
 if (!enabled) {
   process.stdout.write(
     'Task 72 real paragraph check skipped: set TASK72_REAL=1 with the Corporate Governance fixture present.\n',
+  );
+}
+
+const task74Fixtures = {
+  rishi: 'tmp/compress-tests/rishi-ilovepdf.pdf',
+  sriLanka: 'tmp/tables/Firgun_QT-H4SNASRX_SriLanka.pdf',
+  fractions: 'tmp/tables/Fraction Chart.pdf',
+  bhutan: "tmp/paragraphs/Bhutan December'26.pdf",
+} as const;
+const task74Enabled = process.env.TASK74_REAL === '1'
+  && Object.values(task74Fixtures).every((path) => existsSync(path));
+if (!task74Enabled) {
+  process.stdout.write(
+    'Task 74 real border check skipped: set TASK74_REAL=1 with the four named fixtures present.\n',
   );
 }
 
@@ -62,6 +77,21 @@ async function printableTextItems(document: PDFDocumentProxy, pageNumber: number
       hasEOL: item.hasEOL,
     }];
   });
+}
+
+async function editorPage(file: string, pageNumber: number) {
+  const document = await open(new Uint8Array(await readFile(file)));
+  const page = await document.getPage(pageNumber);
+  const pageIndex = pageNumber - 1;
+  const [runs, ruleLines] = await Promise.all([
+    extractTextRuns(page, pageIndex),
+    detectRuleLines(page, pageIndex),
+  ]);
+  return {
+    runs,
+    ruleLines,
+    blocks: groupRunsIntoBlocks(runs, { ruleLines }),
+  };
 }
 
 afterEach(async () => {
@@ -146,5 +176,56 @@ describe.skipIf(!enabled)('Task 72 real paragraph reflow', () => {
       + ` | width ${initialWidth.toFixed(1)} pt | edits ${edits.length}`
       + ` | text items ${before.length}\n`,
     );
+  }, 60_000);
+});
+
+describe.skipIf(!task74Enabled)('Task 74 Step 1 Revision 1 real borders', () => {
+  it('opens the Rishi education and certificate tables one row at a time', async () => {
+    const [page1, page2] = await Promise.all([
+      editorPage(task74Fixtures.rishi, 1),
+      editorPage(task74Fixtures.rishi, 2),
+    ]);
+    const educationRows = page1.blocks.map((block) => block.text).filter((text) => (
+      text === 'JECRC University, Jaipur. Rajasthan'
+      || text === 'Chinar Public School, Alwar, Rajasthan'
+    ));
+    expect(educationRows).toEqual([
+      'JECRC University, Jaipur. Rajasthan',
+      'Chinar Public School, Alwar, Rajasthan',
+      'Chinar Public School, Alwar, Rajasthan',
+    ]);
+    expect(page2.blocks.map((block) => block.text)).toEqual(expect.arrayContaining([
+      'Strategy Consulting Job Simulation by ACCENTURE',
+      'Strategy Consulting Job Simulation by BCG',
+      'Human Resource foundation course',
+      'IAYP(International Award for Young People) at Bronze Level',
+    ]));
+  }, 60_000);
+
+  it('keeps the Sri Lanka and Fraction Chart cell boundaries unchanged', async () => {
+    const [sriLankaPage1, sriLankaPage2, fractions] = await Promise.all([
+      editorPage(task74Fixtures.sriLanka, 1),
+      editorPage(task74Fixtures.sriLanka, 2),
+      editorPage(task74Fixtures.fractions, 1),
+    ]);
+    expect(sriLankaPage1.blocks).toHaveLength(31);
+    expect(sriLankaPage2.blocks.map((block) => block.text)).toEqual(expect.arrayContaining([
+      'Nuwara Eliya – Ella',
+      expect.stringMatching(/^After breakfast, proceed to Ambewela Railway Station/),
+    ]));
+    expect(fractions.blocks).toHaveLength(218);
+    expect(fractions.blocks.every((block) => (block.text.match(/%/g)?.length ?? 0) <= 1)).toBe(true);
+  }, 60_000);
+
+  it('does not introduce a border-driven Bhutan regression', async () => {
+    const [page6, page8] = await Promise.all([
+      editorPage(task74Fixtures.bhutan, 6),
+      editorPage(task74Fixtures.bhutan, 8),
+    ]);
+    expect(page6.ruleLines).toEqual([]);
+    expect(page6.blocks).toEqual(groupRunsIntoBlocks(page6.runs, { ruleLines: [] }));
+    const craneBlocks = page8.blocks.filter((block) => /Black-Necked\s*\n?Crane Centre/.test(block.text));
+    expect(craneBlocks).toHaveLength(1);
+    expect(craneBlocks[0]?.lines).toHaveLength(4);
   }, 60_000);
 });

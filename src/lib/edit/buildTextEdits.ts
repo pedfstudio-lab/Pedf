@@ -37,6 +37,8 @@ export interface NextTextEdit {
   readonly align?: TextAlignment;
   readonly alignLeftPt?: number;
   readonly alignWidthPt?: number;
+  readonly boxLeftPt?: number;
+  readonly boxWidthPt?: number;
 }
 
 export function buildTextEdits(
@@ -252,6 +254,8 @@ export function buildTextBlockEdits(
       boxText: next.text,
       ...(next.spans ? { boxSpans: next.spans } : {}),
       boxHeight: next.height,
+      ...(next.boxLeftPt !== undefined ? { boxLeftPt: next.boxLeftPt } : {}),
+      ...(next.boxWidthPt !== undefined ? { boxWidthPt: next.boxWidthPt } : {}),
       ...(usesAlignmentColumn ? {
         align,
         alignLeftPt: textLeft,

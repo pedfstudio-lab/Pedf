@@ -2,7 +2,7 @@ import { OPS } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { Rgb } from '@/lib/export/types';
 
-export const MIN_RULE_LENGTH_PT = 72;
+export const MIN_RULE_LENGTH_PT = 8;
 export const MAX_RULE_THICKNESS_PT = 3;
 const AXIS_TOLERANCE_PT = 1.5;
 const MERGE_TOLERANCE_PT = 2;
@@ -115,48 +115,62 @@ function cmykColor(value: unknown): Rgb | undefined {
   };
 }
 
-function parsePath(raw: unknown, ctm: Matrix): ParsedPath | undefined {
-  if (!Array.isArray(raw)) return undefined;
+function parsePath(raw: unknown, ctm: Matrix): ParsedPath[] {
+  if (!Array.isArray(raw)) return [];
   const operations = numericValues(raw[0]);
   const coordinates = numericValues(raw[1]);
-  if (!operations || !coordinates) return undefined;
+  if (!operations || !coordinates) return [];
 
-  if (operations.length === 1 && operations[0] === OPS.rectangle && coordinates.length >= 4) {
-    const [x = 0, y = 0, width = 0, height = 0] = coordinates;
-    return {
-      kind: 'rectangle',
-      points: [
-        transformPoint(ctm, x, y),
-        transformPoint(ctm, x + width, y),
-        transformPoint(ctm, x + width, y + height),
-        transformPoint(ctm, x, y + height),
-      ],
-    };
-  }
+  const paths: ParsedPath[] = [];
+  let cursor = 0;
+  let current: { readonly x: number; readonly y: number } | undefined;
 
-  if (
-    operations.every((operation) => operation === OPS.moveTo || operation === OPS.lineTo) &&
-    operations.filter((operation) => operation === OPS.lineTo).length === 1
-  ) {
-    let cursor = 0;
-    let current: { readonly x: number; readonly y: number } | undefined;
-    let segment: readonly [
-      { readonly x: number; readonly y: number },
-      { readonly x: number; readonly y: number },
-    ] | undefined;
-    for (const operation of operations) {
-      const x = coordinates[cursor];
-      const y = coordinates[cursor + 1];
-      cursor += 2;
-      if (x === undefined || y === undefined) return undefined;
+  const takeCoordinates = (count: number): number[] | undefined => {
+    const values = coordinates.slice(cursor, cursor + count);
+    cursor += count;
+    return values.length === count ? values : undefined;
+  };
+
+  for (const operation of operations) {
+    if (operation === OPS.rectangle) {
+      const values = takeCoordinates(4);
+      if (!values) return paths;
+      const [x = 0, y = 0, width = 0, height = 0] = values;
+      paths.push({
+        kind: 'rectangle',
+        points: [
+          transformPoint(ctm, x, y),
+          transformPoint(ctm, x + width, y),
+          transformPoint(ctm, x + width, y + height),
+          transformPoint(ctm, x, y + height),
+        ],
+      });
+      current = undefined;
+    } else if (operation === OPS.moveTo || operation === OPS.lineTo) {
+      const values = takeCoordinates(2);
+      if (!values) return paths;
+      const [x = 0, y = 0] = values;
       const next = transformPoint(ctm, x, y);
-      if (operation === OPS.moveTo) current = next;
-      else if (current) segment = [current, next];
+      if (operation === OPS.moveTo) {
+        current = next;
+      } else {
+        if (current) paths.push({ kind: 'segment', points: [current, next] });
+        current = next;
+      }
+    } else if (operation === OPS.curveTo) {
+      if (!takeCoordinates(6)) return paths;
+      current = undefined;
+    } else if (operation === OPS.curveTo2 || operation === OPS.curveTo3) {
+      if (!takeCoordinates(4)) return paths;
+      current = undefined;
+    } else if (operation === OPS.closePath) {
+      current = undefined;
+    } else {
+      return paths;
     }
-    if (segment) return { kind: 'segment', points: segment };
   }
 
-  return undefined;
+  return paths;
 }
 
 function isPageFrame(line: RuleLine, page: RulePageBox): boolean {
@@ -340,12 +354,17 @@ export function ruleLinesFromOperatorList(
   };
   const stack: GraphicsState[] = [];
   const candidates: RuleLine[] = [];
-  let path: ParsedPath | undefined;
+  let paths: ParsedPath[] = [];
 
-  const paint = (mode: 'fill' | 'stroke') => {
-    const line = classifyPath(path, mode, state, pageIndex, page);
-    if (line) candidates.push(line);
-    path = undefined;
+  const paint = (mode: 'fill' | 'stroke' | 'fillStroke') => {
+    for (const path of paths) {
+      const pathMode = mode === 'fillStroke'
+        ? path.kind === 'rectangle' ? 'fill' : 'stroke'
+        : mode;
+      const line = classifyPath(path, pathMode, state, pageIndex, page);
+      if (line) candidates.push(line);
+    }
+    paths = [];
   };
 
   for (let index = 0; index < operatorList.fnArray.length; index += 1) {
@@ -380,7 +399,7 @@ export function ruleLinesFromOperatorList(
     } else if (operation === OPS.setFillCMYKColor) {
       state = { ...state, fill: cmykColor(args) ?? state.fill };
     } else if (operation === OPS.constructPath) {
-      path = parsePath(args, state.ctm);
+      paths = parsePath(args, state.ctm);
     } else if (operation === OPS.stroke || operation === OPS.closeStroke) {
       paint('stroke');
     } else if (operation === OPS.fill || operation === OPS.eoFill) {
@@ -391,9 +410,9 @@ export function ruleLinesFromOperatorList(
       operation === OPS.closeFillStroke ||
       operation === OPS.closeEOFillStroke
     ) {
-      paint(path?.kind === 'rectangle' ? 'fill' : 'stroke');
+      paint('fillStroke');
     } else if (operation === OPS.endPath) {
-      path = undefined;
+      paths = [];
     }
   }
 

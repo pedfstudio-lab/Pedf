@@ -11679,230 +11679,541 @@ Revision 1 verification:
 Manual acceptance above remains pending. Keep Task 72 and Task 73 together on the feature branch until that
 check and review pass; no commit or merge has been made during this revision.
 
-### Task 74 — Click what you see: the text editor stops guessing the page, and an edit stops painting over it  🟡 STEP 0 MEASURED (2026-09-26), awaiting the user's tradeoff decision before production work → branch `text-first` (from `paragraph-reflow`, which carries Task 72; Task 73 is dropped)   *(Large · 4–5 days)*
+### Task 74 — See the whole page before judging it: read every border, stop painting over the page, and redraw what you changed  🔲 TODO → branch `text-first` (from `paragraph-reflow`, which carries Task 72; Task 73 is dropped)   *(Large · 5–6 days)*
 
-**Why this exists.** The editor decides what a clickable "thing" is by running **fifteen judgement calls** over the
-whole page before the user touches anything: five about what belongs side by side (a gap over `max(18, 1.75 × size)`;
-two table numbers; a drawn vertical rule; two detected columns; no column found) and eight about which lines stack
-into one paragraph (numbers never join; gap ≤ 1.85 × size; a drawn horizontal rule; sizes within 22 %; same family
-and weight; "long enough" at 24 characters or 3 runs; left edges within `max(9, size)` or 70 % overlap; spacing
-within 35 % of the block's median), plus two that judge centre/right against the page or a detected column. Then,
-on **Done**, the export paints a sampled rectangle over the old words *and* deletes them from the file.
-
-Each call is a guess about meaning, and a guess has no floor: there is always a PDF it reads wrongly, and the damage
-lands on the user's document. The painted rectangle is the second half of the same problem — it is left over from
-before Task 67 could delete words for real, and it is what wipes out table borders, two-colour backgrounds and the
-edge of a neighbouring photo.
+**Rewritten 2026-09-26 after Step 0 measured the corpus.** The first version of this task assumed the editor's
+problem was that it guessed too much, and proposed deleting rules. Step 0 proved something different and more
+useful: **the rules are mostly right and we are feeding them a fraction of the evidence.** A table's cell borders
+are in the file, in front of us, and we throw three quarters of them away before any rule sees them. Everything the
+user has hit on tables this week traces back to that, plus the painted patch.
 
 | What the user hit | Measured |
 |---|---|
-| A résumé's email and city open as **one** box | `RAHUL_RAJPUT_RESUME.pdf` page 1: `rahulrajput82143@gmail.com` ends at **377.2**, `Gurgaon` starts at **472.0** — a **94.8 pt** gap, **9.4 ×** the 10.1 pt letter size, and the row's **only** gap. Task 73 refuses to split it because both sides share one detected column |
-| A stretched line used to break into four boxes | `Bhutan December'26.pdf` page 6: three gaps of **36.4 pt** at a 19.1 pt size — **1.9 ×**, and all three identical. Task 73 fixed this with columns |
-| Editing a table cell wipes the cell | every text edit emits a cover with `sampleBackground: true` (`buildTextEdits.ts:48, 207, 342`) and `drawCover` fills that rectangle unconditionally (`handlers/cover.ts`) |
+| Three rows of a résumé's education table open as **one** box, and Done leaves a white rectangle across two rows | `rishi-ilovepdf.pdf`: **15** borders detected, **55** missed. Seeing the missed ones would split **11** wrongly merged rows on that file alone |
+| A price table's header — `50 to 149 pcs` / `150 to 299 pcs` / `300 to 599 pc` — opens as one box and its two dividers are painted out | the dividers are short vertical borders; the cell texts are phrases, so the numbers rule cannot separate them, and the gaps are small. The border is the only evidence, and it is discarded |
+| A travel quote's route cell glues itself to the day's description | `Firgun_QT-H4SNASRX_SriLanka.pdf` page 2: the gap between those cells is **15.8 pt**, below the `max(18, 1.75 × size)` split threshold. Only the drawn border separates them |
+| Editing a table cell wipes the cell | every text edit emits a cover with `sampleBackground: true` (`buildTextEdits.ts:48, 207, 342`) and `drawCover` fills it unconditionally (`handlers/cover.ts`) |
+| The patch is still there on screen after Done | the canvas renders the **original** page (`PageCanvas.tsx:114`); edits are a layer on top, so the old words must be covered on screen even once they are gone from the file |
 
-**The corpus says one number separates the two cases.** Over the 45 baseline files there are **294** wide gaps that
-sit inside a single column: **25** under 2 × the letter size (stretched justification), **225** at 3 × or more (two
-separate items — a résumé's email from its city, a CV's course from its school). Stretched text never opens a space
-much past twice the letter size; separate items start around three.
+**Why the borders vanish.** `ruleLines.ts` requires `MIN_RULE_LENGTH_PT = 72` — a border must be a full inch long
+to count. A divider between two header cells is about 20 pt tall. And `parsePath` (`ruleLines.ts:118`) accepts only
+a path that is **exactly one** `rectangle`, or a `moveTo`/`lineTo` pair with **exactly one** `lineTo`; a table grid
+drawn as one path of many rectangles or many segments is discarded whole.
 
-**And one table rule out of three is worth keeping.** `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 yields **31** pieces
-with Task 70's rules and **31** without them — plain gaps already split a travel table. `Fraction Chart.pdf` yields
-**218** with them and **66** without, and the 152 lost pieces are dense numeric rows that would then be redrawn as
-one line of single-spaced text, collapsing the grid. So the two-numbers rule stays; the two drawn-line rules go.
+**Measured over the 45 baseline files:** **257** borders detected, **724** missed, of which **365** are shorter
+than the 72 pt minimum. Reading the missed ones would split **13** wrongly merged cells and **33** wrongly merged
+rows. Per file: `rishi-ilovepdf.pdf` 11 rows, `Ziro Festival …` 4 cells, `Fraction Chart.pdf` **0 missed** (its
+borders are long), `Firgun_QT-H4SNASRX_SriLanka.pdf` 108 missed but **0** wrong merges — its cells are already
+separated by gaps.
 
-**What the user gets:** clicking text opens exactly what is there — a heading alone, a line alone, a paragraph as a
-paragraph, a bullet list as one list, a table cell as a cell — decided only from a line and its immediate
-neighbours, never from the page. And an edit no longer paints anything: the old words are deleted from the file, so
-table borders, coloured backgrounds and photos behind the text survive untouched.
+**What the user gets:** a table behaves like a table. Click one cell and only that cell opens; edit it and the
+borders, the fill and every other cell stay exactly as they were, on screen as well as in the saved file.
 
-Steps 0 → 5 in order. **Step 0 produces a list the user reads before any production file is touched.**
+Steps 1 → 7 in order. **Step 1 is the one that fixes the user's résumé, and it is the smallest.**
 
-**Step 0 — Measure first; change nothing.**
-New local test `src/lib/pdf/textUnits.local.test.ts` behind `TASK74_UNITS=1`, in two parts. It asserts nothing, and
-no production file changes in this step. **The user reads both reports and confirms the trade before Step 1 lands.**
+**Step 1 — See every border.**
+In `src/lib/pdf/ruleLines.ts`:
+1. Lower `MIN_RULE_LENGTH_PT` from 72 to **8**, and keep every other filter as it is — the thickness cap
+   (`MAX_RULE_THICKNESS_PT = 3`), the axis tolerance, the page-frame rejection and, above all, `isTextUnderline`,
+   which is what stops an underline being read as a row border.
+2. Teach `parsePath` to return **every** rectangle and **every** straight segment in a path instead of only a
+   lone one: a path of many `rectangle` ops yields one candidate per rectangle; a `moveTo`/`lineTo` polyline
+   yields one candidate per segment. Curves end the current run, as today.
+3. `mergeLines` already joins collinear neighbours; it now has more to join, which is the point — four short
+   dividers down one column merge into the column rule they really are.
+4. Nothing else in the file changes: colour, thickness and the `RuleLine` shape stay as they are, so Task 10M's
+   move-and-delete of divider lines keeps working unchanged.
+**Before:** 257 borders seen, 724 thrown away. **After:** the short ones are seen, and the 46 wrong merges above
+stop happening. **Check while building:** the underline guard must still reject every text underline — re-measure
+the 33 horizontal splits with the guard on and account for any that turn out to be leunderlines rather than borders.
 
-*Part A — what every click would become.* Group every file in `tmp/tables/baseline.json` twice — today's rules, and
-the Step 1 rules from the new module — and print per file: the piece count each way, and every piece that differs,
-as `OLD …` / `NEW …`. End with a total: files, pieces today, pieces after, pieces changed.
+**Step 2 — The click unit, decided from a line and its neighbours.**
+New `src/lib/pdf/textUnits.ts`, pure functions, no PDF.js. It owns both decisions, with Step 1's borders as its
+strongest evidence.
 
-*Part B — the font count, so the "will my font survive?" question has a number.* For every text piece in those same
-files, ask the question the export asks: would an edit be drawn in **the document's own font**, or substituted with
-Helvetica or Times? The decision already exists — `resolvePageFontResource` (`src/lib/export/embeddedFont.ts:100`)
-returns a page font only when the run carries a `fontRef`, PDF.js reports the font file present
-(`missingFile !== true`), and the page's font dictionary has `WinAnsiEncoding`; everything else falls to
-`standardFontFor` (`englishFont.ts:12`) with the "widths/kerning may differ" warning. Print per file: pieces that
-keep their own font, pieces substituted, and the substituted font names with a count each — then the corpus total
-as a percentage. This changes nothing in Task 74; it tells the user whether fonts are the next task or a footnote.
+*Side by side — when two pieces are one line:*
+1. a drawn **vertical border** between them splits, whatever the gap — Task 70's rule, now with the evidence it
+   was always meant to have;
+2. both sides are table numbers and the gap is over `max(3, 0.4 × size)` splits — Task 70's rule, unchanged;
+3. a gap wider than `max(18, 1.75 × size)` splits;
+4. **except** when the row has two or more such gaps, all within 20 % of the largest and none over `3 × size` —
+   that is stretched justification. Measured: Bhutan page 6's three gaps are **36.4 pt** at a 19.1 pt size
+   (**1.9 ×**) and identical; a résumé's email-to-city gap is **94.8 pt** at 10.1 pt (**9.4 ×**) and alone on its
+   row. Over the corpus, 294 wide gaps sit inside one column: **25** under 2 ×, **225** at 3 × or more.
 
-*Part C — is redrawing a page after every edit affordable?* The editor shows the **original** page and layers edits
-on top, so on screen an old word must still be covered even after Step 3 stops covering it in the file. The
-intended cure is to redraw the edited page from the edited bytes. This part only measures whether that is viable —
-nothing is built. Using the existing `exportPdf` (`src/lib/export/exportPdf.ts`) and `renderPage`
-(`src/lib/pdf/renderPage.ts`), take three real pages — a plain text page (`Corporate-Governance-edited (25).pdf`
-page 3), a brochure page carrying photos (`Bhutan December'26.pdf` page 6), and a dense table page
-(`Fraction Chart.pdf` page 1) — apply one text edit to each, and time:
-1. exporting the **whole document** with that edit applied;
-2. exporting a **single-page document** built from that page alone with the same edit — the page-scoped path we do
-   not have yet, to see what it would be worth;
-3. re-opening the resulting bytes and rendering that page at zoom 1, through `@napi-rs/canvas`.
-Report min / median / max in milliseconds for each, beside the file's page count and byte size, so it is clear how
-(1) scales with document size — a 60 MB brochure is the case that decides this. Node's canvas is only a proxy for
-the browser's, and the report must say so; the two export timings are directly comparable. The outcome we are
-looking for: redraw after every edit, redraw on a short delay after typing stops, or build a page-scoped export
-first.
+*Stacked — when two lines are one paragraph:*
+1. a drawn **horizontal border** between them never joins — Task 70's rule, now with Step 1's evidence;
+2. same page, family, weight and slant, sizes within `max(1.5, 22 %)`, vertical gap over 0.5 and at most
+   `1.85 × size` and within 35 % of the block's median, left edges within `max(9, size)` or 70 % overlap — all
+   unchanged from today;
+3. the **upper** line must run to the right edge of the text it belongs to — within `2 × size` of the widest right
+   edge among the block's lines and the candidate. Wrapped text ends in the same place on every line but its last;
+4. **and** the lower line must not start a new item: a line beginning with a bullet marker, or following a line
+   that ends a sentence, never joins upward. Measured need: `• Breakfast` and `• Dinner` sit at the same left edge,
+   9.8 pt apart, with **identical** right edges, so rule 3 alone would glue them;
+5. **deleted:** the 24-character / 3-run test.
 
-**Step 0 report (2026-09-26; no production grouping or export code changed):** the full `OLD` / `NEW` listing and
-per-file font counts are in `tmp/task74-step0-timing.log`, produced by `textUnits.local.test.ts` with
-`TASK74_UNITS=1`.
+*Alignment, without a page-wide frame:* a block of two or more lines is judged from **its own lines** — left when
+their left edges agree within `max(2, 0.15 × size)`, right when their right edges agree, centre when their centres
+agree, left otherwise. Bhutan page 8's paragraph comes out **left at its own 340.1 pt** with no justified flag and
+no column. A **single-line** block keeps today's page-bounds rule, so Task 42's centred headings and right-aligned
+dates behave exactly as they do now. `neighbourBoxWidth` (kept from Task 73 Revision 1) still narrows the on-screen
+box so it never lies across a neighbour.
 
-- Click units across the 45 baseline files: **3,783 today → 4,511 proposed** (**+728 / +19.2%**). **30 / 45**
-  files change; the report prints **1,286 OLD and 1,748 NEW** entries (**3,034** changed-side entries). The biggest
-  source is the 84-page Corporate Governance corpus copy: **1,376 → 1,640**. The proposed rule leaves the Fraction
-  Chart exactly **218 → 218**, but Sri Lanka changes **163 → 177** and the Rahul résumé **23 → 36** as long
-  paragraphs split into more local pieces.
-- Font survival on the proposed 4,511 pieces: **741 own-font / 3,770 substituted = 16.4% own-font**. The original
-  Rahul résumé and Fraction Chart keep their own fonts for every piece; the brochure and Corporate Governance
-  families in this corpus mostly fall back to Helvetica or Times. This makes font fidelity a substantial follow-up,
-  rather than a footnote.
-- Export/redraw times below are **min / median / max ms over three runs**. Node `@napi-rs/canvas` is only a proxy
-  for browser rendering; the two export columns are directly comparable.
+*A line you did not change does not move.* This is the insurance that makes a wrong grouping harmless, and it
+needs no judgement about the page — only a comparison of the text before and after. Today a commit re-lays out
+**every** line in the box, so a box that wrongly holds two table cells collapses both into one run and the row is
+destroyed. Instead, on commit:
+1. match the previous lines to the new wrapped lines by **exact text**, taking the longest common prefix and the
+   longest common suffix;
+2. every matched line keeps the baseline and left edge it already had — it is not redrawn;
+3. only the unmatched middle is laid out, starting under the prefix;
+4. if preserving those positions would make two lines overlap, fall back to today's full re-layout, so the
+   behaviour is never worse than it is now.
+A genuine paragraph is unaffected: delete a word from its first line and every following line's text changes, so
+there is no matched suffix and the whole block re-flows exactly as Task 72 makes it. A wrongly merged pair of
+cells is saved: the cell you did not touch matches, so it is left exactly where it was. This is the property the
+user observed in PDFfiller — a box holding three rows kept them as three lines while one was edited — and it
+applies to every document, because it is a property of the edit, not of the layout.
+*Checks:* editing one line of a three-line block leaves the other two baselines **byte-identical**; deleting a word
+from the first line of `Corporate-Governance-edited (25).pdf` page 3 still re-flows the whole paragraph, so
+`TASK72_REAL=1` is unchanged; a block where only the last line changes leaves every earlier line untouched; an
+overlap forces the documented fallback.
 
-| Real page | Document | Whole export | Single-page export | Reopen + render at zoom 1 |
-|---|---:|---:|---:|---:|
-| Corporate Governance p3 | 84 pages, 2.9 MB | 129 / **282** / 1,481 | 80 / **81** / 90 | 51 / **54** / 100 |
-| Bhutan p6 | 21 pages, 61.2 MB | 1,338 / **2,308** / 2,442 | 687 / **926** / 975 | 453 / **539** / 560 |
-| Fraction Chart p1 | 1 page, <0.1 MB | 144 / **170** / 193 | 48 / **60** / 66 | 35 / **38** / 41 |
+**Step 3 — Delete the page-wide machinery.**
+Delete `src/lib/pdf/textColumns.ts` and its test. In `textContent.ts` delete the `columns` option, the `justified`
+flag and the character-count test; `mergeRunsIntoLines` and `groupRunsIntoBlocks` keep their signatures and their
+reading behaviour and call into `textUnits.ts`. In `OverlayLayer.tsx` stop computing columns. `ruleLines.ts` stays —
+it is now the backbone, not a hint.
 
-The measurement supports building a page-scoped export before any automatic redraw: the 61.2 MB brochure takes a
-median **2.85 s** for whole export plus redraw versus **1.47 s** after starting from a single-page document. Even
-the page-scoped proxy is too slow for every keystroke; a redraw would belong after Done or behind a quiet delay.
-Task 74 itself can still keep the stated limitation that the live preview uses a temporary patch while the exported
-file omits a satisfied patch.
+**Step 4 — An export stops painting over words it removed.**
+`coveredGlyphs.ts` reports, per cover, whether every entry in its `replaces` — and every `replacesImages` entry
+where present — was removed. `exportPdf.ts` skips drawing every satisfied cover when the page's rewrite succeeded,
+and draws every unsatisfied one exactly as today. A refused page is unchanged: covers drawn, warning raised.
+Verified already: editing a table cell and exporting leaves the original words gone from the file with **0**
+warnings, and the plain render of that page is crisp.
 
-**Step 1 — One new module owns what a clickable piece is.**
-New `src/lib/pdf/textUnits.ts`, pure functions, no PDF.js, unit-tested with fixed numbers.
+**Step 5 — Redraw the page you edited, so the screen matches the file.**
+This is what makes Step 4 visible, and without it a table still *looks* wiped in the app. After an edit commits,
+re-export that page and redraw its canvas from the result, then draw the remaining edit layer on top of a page that
+no longer contains the old words — so no cover is painted on screen either.
+Measured in Step 0 (Node canvas, a browser proxy): exporting the **whole** document takes 180 ms on an 84-page
+2.9 MB file and **1,866 ms** on the 21-page 61 MB brochure; exporting **that page alone** takes 74 ms and 537 ms;
+re-opening and redrawing takes 53 ms and 299 ms.
+So: build a **page-scoped export** (one page plus its edits, which does not exist yet), run it on a short idle
+delay after the user stops typing rather than on every keystroke, and keep the current overlay as the immediate
+feedback until the redraw lands. If the redraw fails for any reason, fall back to today's behaviour — cover and
+overlay — so a slow or broken redraw can never lose an edit.
 
-*`splitRowIntoPieces(row)` — side by side:*
-1. split where the gap is wider than `max(18, 1.75 × size)` — today's rule, unchanged;
-2. split where both sides are table numbers and the gap is wider than `max(3, 0.4 × size)` — Task 70's number rule,
-   unchanged, and the only one of its three that survives;
-3. **do not** split when the row has **two or more** over-threshold gaps that are all within **20 %** of the largest
-   and none exceeds **3 × size** — that is stretched justification, not two items. Bhutan's three 36.4 pt gaps at
-   1.9 × stay one line; a résumé's single 94.8 pt gap at 9.4 × splits.
-
-*`canJoinParagraph(lines, line)` — stacked:*
-1. same page; same family, weight and slant; sizes within `max(1.5, 22 %)` — unchanged;
-2. vertical gap over 0.5 and at most `1.85 × size`, and within 35 % of the block's median gap — unchanged;
-3. left edges within `max(9, size)`, or 70 % horizontal overlap — unchanged;
-4. **new, and the heart of this task:** the **upper** line must run to the right edge of the text it belongs to —
-   its right edge within `2 × size` of the widest right edge among the block's lines and the candidate. Wrapped
-   text ends within a word of the same place on every line but its last; a heading, a date, a field label or a
-   standalone item stops far short. This single local test replaces the 24-character rule, justified detection and
-   column-relative judgement;
-5. **deleted:** the 24-character / 3-run test, the drawn-horizontal-rule test, and everything column-shaped.
-
-*Alignment, without a page-wide frame:*
-- a block of **two or more** lines is judged from **its own lines**: left when their left edges agree within
-  `max(2, 0.15 × size)`, right when their right edges agree, centre when their centres agree, and left otherwise.
-  Bhutan page 8's paragraph therefore comes out **left at its own 340.1 pt** with no justified flag and no column;
-- a **single-line** block keeps today's rule against the page's text bounds, so Task 42's centred headings and
-  right-aligned dates behave exactly as they do now;
-- `neighbourBoxWidth` (Task 73 Revision 1) **stays**: it is local, it only narrows the on-screen box, and it is what
-  keeps a right-aligned box off its neighbour's words.
-
-**Step 2 — Delete the page-wide machinery.**
-- Delete `src/lib/pdf/textColumns.ts` and `src/lib/pdf/textColumns.test.ts`.
-- In `src/lib/pdf/textContent.ts`: delete the `columns` option, the `justified` flag, `verticalRuleSeparates`,
-  `horizontalRuleSeparates` and the character-count test; `mergeRunsIntoLines` and `groupRunsIntoBlocks` keep their
-  signatures and their reading behaviour, and call into `textUnits.ts` for the two decisions above.
-- In `src/components/OverlayLayer.tsx`: stop computing columns per page.
-- `src/lib/pdf/ruleLines.ts` itself is **kept** — Task 10M uses it to move and delete divider lines. Only its use as
-  a grouping signal goes.
-
-**Step 3 — An export stops painting over words it actually removed.**
-- `src/lib/export/coveredGlyphs.ts`: the plan already knows which replaced items it removed. Report it **per cover**
-  — a cover is *satisfied* when every entry in its `replaces` was removed, and, where it carries `replacesImages`,
-  every one of those too.
-- `src/lib/export/exportPdf.ts`: when the page's rewrite succeeded, **skip drawing** every satisfied cover. Draw
-  every unsatisfied one exactly as today.
-- When a page is refused — the fail-closed path from Tasks 67 and 68 — nothing changes: covers are drawn and the
-  existing warning is raised. Removal reliability is already measured: **121 / 121** round trips over 47 files,
-  **807** pieces of text removed, **0** refusals.
-- **On screen nothing changes.** The canvas still renders the original page, so the editor must still cover the old
-  words while you work. The exported file simply comes out cleaner than the preview.
-
-**Step 4 — Tests, and account for every piece that moves.**
-- *Units* (`textUnits.test.ts`): a single 9 × gap splits; three identical 1.9 × gaps do not; two numbers with a
-  small gap split; a short heading does not join the paragraph below it; a paragraph's full lines join and its short
-  last line joins; two stacked short fields stay apart; a block whose left edges agree is left, whose right edges
-  agree is right, whose centres agree is centre; a single-line block still uses the page bounds.
+**Step 6 — Tests, and account for every piece that moves.**
+- *Borders* (`ruleLines.test.ts`): a 20 pt divider is a border; a path of six rectangles yields six candidates; a
+  polyline of four segments yields four; a text underline is still rejected; a page frame is still rejected.
+- *Units* (`textUnits.test.ts`): a vertical border splits two cells 15.8 pt apart; a single 9 × gap splits; three
+  identical 1.9 × gaps do not; a horizontal border blocks a join; `• Breakfast` / `• Dinner` stay apart; a short
+  heading does not join the paragraph below it; a paragraph's full lines join and its short last line joins; the
+  three alignment cases; a single-line block still uses the page bounds.
 - *The user's files*, local, `TASK74_REAL=1`:
-  - `RAHUL_RAJPUT_RESUME.pdf` page 1 — the contact row is **three** pieces: the phone, the email, the city;
-  - `Bhutan December'26.pdf` page 6 — the stretched line is **one** line inside one 4-line paragraph;
-  - page 8 — the crane paragraph is **one** block, `align left`, **340.1 pt ± 1**, opening at its own width;
-  - `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 — still **31** pieces, the four accommodation cells intact;
+  - `rishi-ilovepdf.pdf` — the education table is **three** separate rows, not one block; editing one row leaves
+    the other two untouched;
+  - `RAHUL_RAJPUT_RESUME.pdf` page 1 — the contact row is **three** pieces: phone, email, city;
+  - `Bhutan December'26.pdf` page 6 — the stretched line is **one** line inside one 4-line paragraph; page 8 — the
+    crane paragraph is one block, `align left`, **340.1 pt ± 1**;
+  - `Firgun_QT-H4SNASRX_SriLanka.pdf` — page 1 still **31** pieces with its four accommodation cells; page 2's
+    route cell is **separate** from its description;
   - `Fraction Chart.pdf` — still **218** pieces, every `%` its own box;
-  - `Corporate-Governance-edited (25).pdf` page 3 — unchanged from Task 72: one 6-line block, seeds with no
-    newline, an unchanged **Done** writes nothing.
-- *The patch is gone and nothing leaks*: export an edited cell of the Sri Lanka table and assert, by rendering the
-  page, that the cell's border pixels survive; assert the exported text no longer contains the replaced word
-  (the Ctrl+F guarantee); assert a refused page still paints its cover and still warns.
-- *Account for every change*: re-run Step 0's sweep as an assertion. Every differing piece must be explained as
-  **(a)** a stretched line now kept whole, **(b)** two items now correctly separated, **(c)** an alignment change
-  from a block judged by its own lines, or **(d)** unexplained. **Any (d) fails the task.**
+  - `Corporate-Governance-edited (25).pdf` page 3 — unchanged from Task 72.
+- *The patch is gone and the table survives*: export an edited Sri Lanka cell and assert, by rendering the page,
+  that the cell's border pixels are unchanged; assert the exported text no longer contains the replaced word; assert
+  a refused page still paints its cover and still warns.
+- *The redraw*: after a commit, the page's rendered pixels match the exported file's, and no cover is drawn on
+  screen; a forced redraw failure falls back to cover + overlay with the edit intact.
+- *Account for every change*: re-run Step 0's sweep as an assertion, **comparing piece boundaries by their runs,
+  not by their text** — Step 0's first run compared text and buried two real faults inside 3,034 cosmetic
+  differences. Every differing piece must be explained as **(a)** a border now seen, **(b)** a stretched line kept
+  whole, **(c)** two items correctly separated, **(d)** an alignment change from a block judged by its own lines,
+  or **(e)** unexplained. **Any (e) fails the task.**
 - *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0** untouched lines changed and
-  **0** skipped; `TASK72_REAL=1` unchanged; typecheck, lint, build.
+  **0** skipped; `TASK70_TABLES=1` re-baselined with every change classified; `TASK72_REAL=1` unchanged; typecheck,
+  lint, build.
 
-**Step 5 — Land.** Branch `text-first`. One commit per step, then Task 72 and Task 74 merge to `main` together.
-Task 73 and its Revision 1 are **dropped**: `text-columns` is archived unmerged, or discarded, as the user decides.
+**Step 7 — Land.** Branch `text-first`, one commit per step. **Step 1 may be committed and merged on its own** —
+it is small, it is the one that fixes the user's résumé, and it needs none of the others. Then Task 72 and the rest
+of Task 74 merge to `main` together. Task 73 stays dropped.
 
 **New files**
 
 | File | Why |
 |---|---|
-| `src/lib/pdf/textUnits.ts` | Step 1 — the two local rules and the block-local alignment |
-| `src/lib/pdf/textUnits.test.ts` | Step 4's unit tests |
-| `src/lib/pdf/textUnits.local.test.ts` | Step 0's measurement, then Step 4's corpus accounting |
+| `src/lib/pdf/textUnits.ts` + test | Step 2 — the local rules and the block-local alignment |
+| `src/lib/pdf/textUnits.local.test.ts` | Step 0's measurement, now Step 6's corpus accounting (exists; its comparison must move from text to run boundaries) |
+| a page-scoped export entry point beside `exportPdf.ts` + test | Step 5 — one page and its edits, for the redraw |
 
 **Existing files that change — and how to handle each**
 
 | File | Change |
 |---|---|
-| `src/lib/pdf/textContent.ts` + test | Step 2 — delete the column option, the justified flag, both rule-line tests and the character-count test; call `textUnits.ts`. Reading, styles, hidden-text handling and `block.text` are untouched |
-| `src/components/OverlayLayer.tsx` | Stop computing columns; everything else unchanged |
-| `src/lib/export/coveredGlyphs.ts` + test | Step 3 — report removal per cover |
-| `src/lib/export/exportPdf.ts` + test | Step 3 — skip satisfied covers; refused pages unchanged |
-| `src/lib/pdf/tableCells.local.test.ts` | Drop the two deleted rules' expectations; keep the number-rule cases |
-| `src/lib/edit/paragraphReflow.local.test.ts` | Task 73's column cases replaced by Step 4's cases; Task 72's own case unchanged |
+| `src/lib/pdf/ruleLines.ts` + test | **Step 1** — the length minimum and the multi-part path parser. Keep the underline guard, the thickness cap and the page-frame rejection |
+| `src/lib/pdf/textContent.ts` + test | Step 3 — delete the column option, the justified flag and the character-count test; call `textUnits.ts` |
+| `src/components/OverlayLayer.tsx` | Step 3 — stop computing columns; Step 5 — redraw the page after a commit and stop drawing covers once it has |
+| `src/components/PageCanvas.tsx` | Step 5 — render from the edited page bytes when they exist |
+| `src/lib/export/coveredGlyphs.ts` + test | Step 4 — report removal per cover |
+| `src/lib/export/exportPdf.ts` + test | Step 4 — skip satisfied covers; Step 5 — the page-scoped path |
+| `src/lib/pdf/tableCells.local.test.ts` | Re-baseline with Step 1's borders; keep the number-rule cases |
+| `src/lib/edit/paragraphReflow.local.test.ts` | Task 73's column cases replaced by Step 6's cases |
 
-**Files deleted**
-
-| File | Why |
-|---|---|
-| `src/lib/pdf/textColumns.ts` + `textColumns.test.ts` | Column detection is the page-wide guess this task removes |
+**Files deleted:** `src/lib/pdf/textColumns.ts` + `textColumns.test.ts`.
 
 **Files that must not change:** `bulletList.ts` and everything bullet-shaped — a list stays one editable thing;
 `images.ts`, `imageCrop.ts`, `coveredImages.ts` and every picture task (68, 69, 71); all tools (51–63);
 `TextEditOverlay.tsx` beyond what already exists — the box, its width handle, the move handle, wrapping and
-shrink-to-fit are untouched; `buildTextEdits.ts` geometry; `textLayout.ts`; `textEditSession.ts` and the
-unchanged-edit guard; `paragraphSeed.ts`; `neighbourBoxWidth.ts`; saved projects (Task 65) — the edit format does
-not change, so files saved today still open; `ruleLines.ts`; voice and chat.
+shrink-to-fit; `buildTextEdits.ts` geometry; `textLayout.ts`; `textEditSession.ts` and the unchanged-edit guard;
+`paragraphSeed.ts`; `neighbourBoxWidth.ts`; saved projects (Task 65); voice and chat.
 
-**Guardrails:** every decision in the click path must be answerable from a line and its immediate neighbours — if a
-rule needs to look at the whole page, it does not belong in this task; no table cell may merge with the cell beside
-it; a stretched line must never split; a bullet list stays one unit; an exported file must never contain a word the
-user removed, and a refused page must still paint its cover and still warn; the preview must still hide old text on
-screen.
+**Guardrails:** every decision in the click path must be answerable from a line, its immediate neighbours, and any
+border drawn between them — no rule may look at the whole page; a text underline must never be read as a row
+border; no table cell may merge with the cell beside it; a stretched line must never split; a bullet list stays one
+unit; an exported file must never contain a word the user removed, and a refused page must still paint its cover
+and still warn; a failed redraw must never lose an edit.
 
-**Verify (user):** open `RAHUL_RAJPUT_RESUME.pdf` → the contact row gives three separate boxes; click the email and
-only the email opens. Open `Bhutan December'26.pdf` → page 6, the first line opens whole; page 8, the paragraph's
-box hugs the paragraph. Open the Sri Lanka quote → edit one cell, export, and the table's borders and fill are
-intact. Open `Fraction Chart.pdf` → one number at a time. Then export any edited file, open it in Chrome and
-Ctrl+F the word you removed — no match.
+**Verify (user):** open `rishi-ilovepdf.pdf` → the education table gives three separate rows; edit one and the
+other two do not move, and the borders stay. Open the price table → `50 to 149 pcs`, `150 to 299 pcs` and
+`300 to 599 pc` are three boxes and the dividers survive an edit. Open `RAHUL_RAJPUT_RESUME.pdf` → the contact row
+is three boxes. Open `Bhutan December'26.pdf` → page 6 opens the first line whole, page 8 hugs the paragraph. Open
+`Fraction Chart.pdf` → one number at a time. Then export any of them, open it in Chrome, Ctrl+F a word you
+removed — no match.
 
-**Known limits:** the on-screen preview still paints a patch while you edit, because the page underneath is the
-original — the exported file is cleaner than the preview; a dense grid of **words** (not numbers) packed closer than
-the gap threshold can still open as a whole row; bullet dots drawn as vector shapes still remain after an edit
-(open since Task 67 Revision 2a); a single-line centred heading is still judged against the page, because a lone
-line has no other frame; a justified paragraph still comes back with a ragged right edge, because alignment has no
-justified option.
+**Known limits:** a table with **no borders at all** whose word cells are packed closer than the gap threshold can
+still open as one row — Step 6 counts how often that happens across the corpus so the size of the gap is known; a
+dense grid of words behaves the same; bullet dots drawn as vector shapes still remain after an edit (open since
+Task 67 Revision 2a); a single-line centred heading is still judged against the page, because a lone line has no
+other frame; a justified paragraph still comes back with a ragged right edge; **fonts are not addressed here** —
+Step 0 measured that only **741** of **4,511** pieces (**16.4 %**) keep the document's own font, and
+`rishi-ilovepdf.pdf` keeps **0 of 41**, so an edit on that file is redrawn in Helvetica. That is the next task
+after this one and it is bigger than this one.
+
+**Step 0 — what was measured (2026-09-26, `TASK74_UNITS=1`, committed in `0f71c62`).**
+- *Click units:* 45 files, 3,783 pieces today → 4,511 under the first draft of the rules. The report compared piece
+  **text**, so 3,034 "changes" were mostly spacing differences; two real faults were found by hand inside them and
+  are fixed in Step 2 above. Step 6 re-runs this comparing boundaries.
+- *Fonts:* **741** pieces keep the document's own font, **3,770** are substituted — **16.4 %**. Worst case
+  `rishi-ilovepdf.pdf` at 0 of 41; best `cv-signed-compressed.pdf` at 46 of 46.
+- *Redraw cost:* whole-document / single-page / re-open-and-render, median ms —
+  `Corporate-Governance-edited (25).pdf` (84 pages, 2.9 MB) **180 / 74 / 53**;
+  `Bhutan December'26.pdf` (21 pages, 61.2 MB) **1,866 / 537 / 299**;
+  `Fraction Chart.pdf` (1 page) **134 / 40 / 19**.
+- *Borders (measured separately, 2026-09-26):* 257 detected, 724 missed, 365 of the missed shorter than 72 pt;
+  reading them would split 13 merged cells and 33 merged rows.
+
+#### Task 74 — Step 1, Revision 1  🟡 BUILT by Codex on `text-first` (2026-09-26), confirmed by the user — the résumé's education rows now separate; full review pending — a border found is a border used: judge it against the baselines, not the padded text box   *(Easy–Medium · half a day)*
+
+**What Step 1 achieved, and where it stops.** Step 1 works: on `tmp/compress-tests/rishi-ilovepdf.pdf` page 1 the
+detected dividers went from **7 to 12**, and all four row borders of the education table are now among them —
+`y 544.7`, `530.7`, `517.0`, `503.0`, each spanning `x 36.4 .. 559.1`, the full table width. Before Step 1 they
+were discarded for being shorter than an inch.
+
+**But the grouping did not move: 24 pieces before, 24 after**, and the two education rows are still one box
+(`"JECRC University, Jaipur. Rajasthan / Chinar Public School, Alwar, Rajasthan"`). The reason is a tolerance, not
+a rule:
+
+```
+row 1 text box   y 534.1 .. 545.3
+row 2 text box   y 520.1 .. 531.3
+the row border   y 530.7          → 0.6 pt inside row 2's box
+```
+
+`horizontalRuleSeparates` (`src/lib/pdf/textContent.ts:283`) requires the rule to sit **between the two text
+boxes** — `y > lower.rect.y + lower.rect.h - 0.5` and `y < upper.rect.y + 0.5`. A text box includes the ascender
+space above the letters, and that space reaches over the border, so the border misses the test by **0.1 pt** and is
+ignored. `verticalRuleSeparates` (`:129`) has the same defect from the other direction: it demands the rule span
+from below both runs' boxes to above them (`bottom <= lowerBottom + 0.5 && top >= higherTop - 0.5`), so a cell
+divider that ends exactly at the row border — as it must — fails whenever a letter's ascender pokes above that
+border.
+
+**What the user gets:** the education table in the résumé opens as three separate rows, and a price table's header
+cells open one at a time, because the borders that are already being found are finally allowed to do their job.
+
+**Change 1 — Judge a horizontal border against the baselines.**
+In `horizontalRuleSeparates`, replace the box-edge band with the two lines' **baselines**: the rule separates when
+`lower.baselineY < y < upper.baselineY`. A baseline is an exact number with no ascender or descender padding, so
+the 0.1 pt miss cannot happen. Keep the horizontal span test exactly as it is — the rule must still cover the two
+lines' overlap — and keep the page and orientation checks.
+
+**Change 2 — Give the vertical test the same freedom.**
+In `verticalRuleSeparates`, keep the geometry but replace the flat `0.5` slack on the two spanning tests with
+`Math.max(0.5, size * 0.3)`, where `size` is the larger of the two runs' `fontSizePt`. A divider that spans its
+row still separates the cells beside it even though the text's ascenders rise above the row border. The horizontal
+placement tests (`x > leftEdge - 0.5`, `x < rightEdge + 0.5`) do **not** change: a divider must still fall in the
+gap between the two runs.
+
+**Checks — tests, and account for every piece that moves.**
+- *Units* (`textContent.test.ts`): two lines with a rule between their baselines do not join, even when the rule
+  sits inside the lower line's bounding box; two lines with a rule below both baselines still join; a run pair with
+  a divider spanning only the row still splits when an ascender rises above it; a divider that stops short of the
+  text does not split.
+- *Underlines still rejected*: the existing underline cases must still pass — print, in the corpus run, how many
+  horizontal candidates the underline guard rejects, so it is visible that the guard is doing work rather than
+  being bypassed.
+- *The user's files*, local, `TASK74_REAL=1`:
+  - `rishi-ilovepdf.pdf` page 1 — the education column is **three** pieces, one per row, `JECRC …`,
+    `Chinar … Alwar` and `Chinar … Alwar`, each its own box;
+  - same file page 2 — the certificates table's rows are separate pieces, not one block;
+  - `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 — still **31** pieces with the four accommodation cells intact;
+    page 2 — the route cell is separate from its description;
+  - `Fraction Chart.pdf` — still **218** pieces, every `%` its own box;
+  - `Bhutan December'26.pdf` — page 6's stretched line is still one line; page 8's paragraph is still one block.
+- *Account for every change*: re-run `TASK70_TABLES=1`. The count **will** move — the permissive survey predicted
+  **13** wrongly merged cells and **33** wrongly merged rows would separate across the 45 files. Print every
+  changed box per file and classify each as **(a)** a cell separated by a vertical border, **(b)** a row separated
+  by a horizontal border, or **(c)** unexplained. **Any (c) fails the revision.** Report the final totals against
+  that 13 / 33 prediction and explain any shortfall.
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with **0** untouched lines changed and
+  **0** skipped; `TASK72_REAL=1` unchanged; typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + test | Both separator tests — baselines for horizontal, size-proportional slack for vertical. Nothing else in the file changes |
+| `src/lib/pdf/tableCells.local.test.ts` | The classification above; re-baseline once the changes are all explained |
+| `src/lib/edit/paragraphReflow.local.test.ts` | The résumé cases above |
+
+**Files that must not change:** `ruleLines.ts` — Step 1 is done and its thresholds stay as they are; the underline
+guard; the click-unit rules, which are Step 2 of Task 74 and are not started; the edit box; bullets; pictures;
+tools; the export.
+
+**Guardrails:** a text underline must never separate two lines; a divider must still lie in the gap between the two
+runs it separates, not merely somewhere on the row; a stretched line must never split; the Fraction Chart's 218
+boxes and the Sri Lanka quote's 31 must not change.
+
+**Verify (user):** open `rishi-ilovepdf.pdf` → the education table gives **three** boxes, one per row; click the
+middle one and only that row opens. Then the certificates table on page 2, one row at a time. Then check the
+Fraction Chart still opens one number at a time and the Sri Lanka quote still opens one cell at a time.
+
+**Land:** same branch, committed with Step 1 as one change — `See every border, and let it separate (Task 74,
+Step 1)`.
+
+#### Task 74 — Step 1, Revision 2  🟡 BUILT by Codex on `text-first` (2026-09-26), confirmed by the user — re-edit boxes no longer span the row; full review pending → same branch `text-first` — re-editing must not re-open a box across the row   *(Easy · 2 hours)*
+
+**What the user hit.** After Revision 1 the résumé's education rows separate correctly. Editing a date cell the
+**first** time opens a box around that cell. Editing the **same cell again** opens a box spanning the whole table
+width, and because the box is opaque it hides `Class XII`, `Chinar Public School` and `88.4%` while it is open.
+
+**Measured** on `tmp/compress-tests/rishi-ilovepdf.pdf` page 1 (595.4 pt wide):
+
+| | `2022-2025` |
+|---|---|
+| the text itself | `506.1 .. 554.2` |
+| its alignment region | `36.0 .. 560.0` — the page's text width, because a right-aligned cell has no column to anchor to |
+| first edit opens at | `463.5 .. 560.0` — `neighbourBoxWidth` stops it at the `8.80 CGPA` cell |
+| **re-edit opens at** | **`36.0 .. 560.0`** — the whole row |
+
+**Why.** `TextEditOverlay.tsx` narrows the box only when there is no saved edit:
+`existing?.length ? { left: initialAlignLeftPt, width: initialAlignWidthPt } : neighbourBoxWidth(...)`. That branch
+came from the Task 73 Revision 1 note "saved edits already carry their own geometry", which is right about
+**position** — a moved edit must stay where the user put it — and wrong about **width**.
+
+**What the user gets:** a second, third and tenth edit of the same cell opens the same box as the first one.
+
+**Change 1 — Narrow a saved edit's box the same way, from where it now sits.**
+Apply the neighbour limit on the re-edit path too, measured from the **saved edit's own rectangle** rather than the
+original block's, so a moved edit keeps its position and only its width is limited:
+1. take the saved edit's rect (`textBoxRect(existing)` as the overlay already computes) and its stored `align`,
+   `alignLeftPt` and `alignWidthPt`;
+2. run the same neighbour search over the page's blocks — the nearest block that ends at or before the saved rect's
+   left edge sets the box's left, the nearest that starts at or after its right edge sets the box's right;
+3. clamp so the box always contains the saved text: never narrower than the saved rect, never moved past it.
+Let `neighbourBoxWidth` take a rect plus the three alignment values instead of a whole `TextBlock`, so both paths
+call one function. A left-aligned edit is untouched, as today.
+
+**Change 2 — A saved multi-line centre/right edit keeps its own width.**
+`preservesDisplayLines` currently applies only to a first edit. Apply the same on re-edit: a saved edit with two or
+more lines whose `align` is not `left` opens at its own width, not at its alignment region.
+
+**Checks — and nothing may move in the file.**
+- *Overlay tests* (`TextEditOverlay.test.tsx`): re-opening the `2022-2025` case — a saved right-aligned edit at
+  `506.1 .. 554.2` with a stored region of `36.0 .. 560.0` and a neighbour ending at `463.5` — opens at
+  **`463.5 .. 560.0`**, the same as the first edit; a saved edit that was **moved** keeps its moved position and is
+  still narrowed only on the side where a neighbour exists; a saved edit with no neighbour on its row still opens
+  at its region; a saved left-aligned edit is unchanged.
+- *Nothing moves in the file*: for each of those, the committed `align`, `alignLeftPt` and `alignWidthPt` are
+  **byte-identical** to what the previous edit stored, and an unchanged **Done** still cancels and writes nothing.
+- *The user's file*, local, `TASK74_REAL=1`: on `rishi-ilovepdf.pdf` page 1, the box for `2022-2025` is
+  `463.5 .. 560.0 ± 1` on both the first edit and a re-edit built from the first edit's output.
+- *Reach*: print how many of the corpus's non-left pieces the neighbour limit narrows — the survey measured **258
+  of 450** oversized boxes — and confirm the count is identical for first edits and re-edits.
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121**; `TASK72_REAL=1` unchanged; typecheck,
+  lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/components/TextEditOverlay.tsx` + test | Both changes — the re-edit box width and the saved multi-line case |
+| `src/lib/edit/neighbourBoxWidth.ts` + test | Take a rect plus alignment values instead of a `TextBlock`, so both paths share one function |
+
+**Files that must not change:** `textContent.ts` and both separator tests — Step 1 and Revision 1 are done;
+`ruleLines.ts`; `buildTextEdits.ts` and everything that decides where committed text is drawn; the unchanged-edit
+guard; bullets; pictures; tools; the export.
+
+**Guardrails:** no committed `align`, `alignLeftPt` or `alignWidthPt` may change anywhere — this revision moves a
+box on screen, not text in the file; a moved edit must keep its position; a box must never be narrower than the
+text it holds; a left-aligned edit must behave exactly as it does today.
+
+**Verify (user):** open `rishi-ilovepdf.pdf` → click a date cell, type something, **Done** → click the same cell
+again: the box opens around that cell, not across the row, and `Class XII`, the school name and the percentage stay
+visible. Then the same on a centred heading and on a left-aligned paragraph, which must behave as before.
+
+**Known limit:** a centre or right-aligned piece with **nothing** beside it on its row — 192 of the 450 in the
+survey — still opens a wide box, and that box is still opaque, so it still covers what is under it. Narrowing
+cannot fix that case; **Step 5 of Task 74 does**, by redrawing the page from the edited file so the box never needs
+to hide anything.
+
+**Land:** same branch, one commit with Revision 1 — `See every border, and let it separate (Task 74, Step 1)`.
+
+#### Task 74 — Step 1, Revision 3  🟡 BUILT by Codex on `text-first` (2026-09-26), reviewed — targets now match the box; one defect found, see Revision 4 → same branch `text-first` — an edited piece must be clickable where you see it, and a big target must never swallow a small one   *(Easy · 2–3 hours)*
+
+**What the user hit.** After editing the `2022-2025` cell of the résumé's education table, clicking the school name
+`JECRC University, Jaipur. Rajasthan` in the same row re-opens the **year** cell. Nothing else in that row can be
+clicked any more.
+
+**Measured** on `tmp/compress-tests/rishi-ilovepdf.pdf` page 1:
+
+| | |
+|---|---|
+| the year's text | `506.1 .. 554.2` — 48 pt wide |
+| the box Revision 2 opens | `463.5 .. 560.0` — 96 pt |
+| **the committed edit's rect** | **`36.0 .. 560.0` — 524 pt, the whole row** |
+| the school name's own target | `172.5 .. 342.6` — entirely inside it |
+
+**Why.** For right-aligned text, `buildTextBlockEdits` stores `rect.w = alignWidthPt` (`buildTextEdits.ts:233`)
+because that region is what places the text on export — correct, and Revision 2 deliberately left it alone. But
+`OverlayLayer.tsx:1044` builds the "edited text" click target straight from those rects with `textBoxRect`, so the
+target inherits the whole region. It is rendered at **z-25**, above the plain text targets at **z-20**, so it wins
+every click in the row.
+
+This predates Revisions 1 and 2; re-editing simply made it reachable.
+
+**What the user gets:** an edited cell is clickable exactly where it is drawn, and every other cell in its row
+stays clickable.
+
+**Change 1 — remember the box, and use it for the target.**
+When an edit commits, record the on-screen box Revision 2 computed on the resulting `TextEdit`s as display-only
+fields — `boxLeftPt` and `boxWidthPt` beside the existing `boxText` and `boxHeight`. The export ignores them, as it
+ignores `boxText` today, so nothing about where text lands can change. `textBoxRect` prefers them when present and
+falls back to the union of `rect`s when absent, so edits saved before this revision keep working (Task 65 files
+must still open).
+
+**Change 2 — the smallest target wins.**
+Overlapping click targets are currently ordered by kind: dividers at z-29, edited text at z-25, plain text at z-20.
+Order them by **area** instead within the editing layer, so a smaller target always sits above a larger one that
+covers it. A wide box then cannot swallow a small neighbour even where Change 1 leaves it wide — for example the
+192 pieces in the corpus survey that have no neighbour on their row. Keep the divider targets' existing behaviour
+for equal areas.
+
+**Checks**
+- *Overlay tests* (`TextEditOverlay.test.tsx` / a new `OverlayLayer` test): a committed right-aligned edit whose
+  region is `36.0 .. 560.0` but whose box was `463.5 .. 560.0` exposes a target of **`463.5 .. 560.0`**; a plain
+  text target inside a larger edited-text target is reachable — a click at the school name's centre opens the
+  school name, not the year; a left-aligned edit's target is unchanged; an edit saved without the new fields still
+  produces today's target.
+- *Centred text has the same fault and the same fix.* A centred edit stores `rect.w = alignWidthPt` exactly as a
+  right-aligned one does, so its target is its whole region too. Measured on
+  `tmp/image-removal/Ziro Festival Firgun-edited-edited (1).pdf` page 4: `ZIRO → GUWAHATI` is **356.7 .. 490.7**
+  (134 pt of text) inside a region of **240.0 .. 606.4** (366 pt), so a committed edit there leaves a target 2.7 ×
+  the text, over its neighbours. Assert that a committed centred edit exposes the narrowed box, and that a
+  neighbouring piece under its old region stays clickable.
+- *Left-aligned is not immune, only luckier.* A left-aligned edit stores `rect.w = next.width`, the box width,
+  which tracks the text — but a user who drags the width handle wider gets a wider target with it. Change 2 must
+  keep such a target from swallowing a smaller neighbour; assert that with a deliberately widened left-aligned
+  edit over a small neighbouring piece.
+- *Nothing moves in the file*: for each case the committed `rect`, `align`, `alignLeftPt` and `alignWidthPt` are
+  **byte-identical** to what is stored today, and an unchanged **Done** still cancels.
+- *The user's file*, local, `TASK74_REAL=1`: on `rishi-ilovepdf.pdf` page 1, after committing an edit to
+  `2022-2025`, the click targets for `JECRC University, Jaipur. Rajasthan`, `8.80 CGPA` and `BBA - General` are all
+  still reachable, and the year's own target is `463.5 .. 560.0 ± 1`.
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121**; `TASK72_REAL=1` unchanged; saved
+  projects from before this revision still open and re-edit; typecheck, lint, build.
+
+**Existing files that change — and how to handle each**
+
+| File | Change |
+|---|---|
+| `src/lib/export/types.ts` | Two optional display-only fields on `TextEdit` |
+| `src/lib/edit/buildTextEdits.ts` + test | Record the box on commit; `rect`, `align` and the alignment values are untouched |
+| `src/components/TextEditOverlay.tsx` | Pass the box it computed into the commit |
+| `src/components/OverlayLayer.tsx` + test | `textBoxRect` prefers the recorded box; targets ordered by area |
+
+**Files that must not change:** `textContent.ts`; `ruleLines.ts`; the export handlers and anything that decides
+where committed text is drawn; the unchanged-edit guard; bullets; pictures; tools.
+
+**Guardrails:** no committed geometry may change — this revision changes what is clickable, not what is drawn; an
+edit saved before this revision must still open; a left-aligned edit must behave exactly as today; the divider
+targets must stay reachable.
+
+**Verify (user):** open `rishi-ilovepdf.pdf` → edit the `2022-2025` cell, press **Done** → click the school name in
+the same row: the school name opens, not the year. Then click `8.80 CGPA` and `BBA - General` in that row — each
+opens itself. Then re-click the year: it opens as its own cell.
+
+**Land:** same branch, one commit with Revisions 1 and 2.
+
+#### Task 74 — Step 1, Revision 4  🔲 TODO → same branch `text-first` — a click target must never sit on top of the open edit box   *(Easy · 1 hour)*
+
+**What the user hit.** With an edit box open on a table cell, clicking inside the box to place the cursor opens the
+text-actions popover instead. The box, its text and its toolbar are all correct; one invisible layer is in front of
+them.
+
+**Measured in the running app** on `tmp/compress-tests/rishi-ilovepdf.pdf` page 1, with the box for the `75%` cell
+open:
+
+| element | z-index |
+|---|---|
+| the open edit box (`TextEditOverlay.tsx:579`, `absolute isolate z-50`) | **50** |
+| the `Text actions: 75%` click target, covering the box's centre | **88** |
+
+**Why.** Revision 3's "smallest target wins" ranks every click target by area and maps rank to
+`20 + rank × 2` (`OverlayLayer.tsx`, `clickTargetZIndex`), with no upper bound. Page 1 of that résumé has enough
+distinct target areas to reach 88, and a dense page reaches several hundred. Anything past 50 paints and receives
+clicks above the editor. Small pieces are worst affected — a small area means a high rank means a high z — which is
+exactly the table cells Revisions 1 to 3 just made clickable. The ordering itself is right; the range is not.
+The specification for Revision 3 said "order them by area" and never said where the band must stop; that is the
+defect.
+
+**What the user gets:** clicking inside an open edit box puts the cursor where you clicked.
+
+**Change 1 — bound the band below the editor.**
+In `clickTargetZIndex`, clamp the rank so the result can never reach the editor's layer: `20 + min(rank, 25)`, with
+the divider tie-break still applied inside that range, giving a maximum of **46** against the editor's 50. Targets
+beyond the 26th distinct area share the top of the band; ordering still holds for every case that matters, because
+only targets that overlap each other compete, and a page does not stack 26 different sizes over one point.
+
+**Change 2 — do not render click targets while an edit session is open.**
+When `activeBlock`, `activeBulletList`, `activeRuleLine` or a free-text session is set, skip rendering the target
+buttons entirely. They cannot be used while a box is open, and not drawing them also stops their hover tint
+appearing under the box. Change 1 alone closes the defect; this makes it structural rather than arithmetic.
+
+**Checks**
+- *Overlay test* (`OverlayLayer.test.tsx`): with 40 distinct target areas on a page, **no** click target has a
+  z-index of 50 or more; the ordering among overlapping targets is unchanged — a small target still sits above a
+  larger one covering it; a divider still wins an equal-area tie.
+- *The reported case*: with an edit session open, no click target is rendered; closing it renders them again.
+- *Unchanged*: Revision 3's target rectangles — the year cell's target is still the box, not the row; the school
+  name in an edited row is still reachable; the full suite; `TASK74_REAL=1`; `TASK66_SWEEP=1` at **121 / 121**;
+  `TASK70_TABLES=1` unchanged at 45 files / 18 changed / 0 unexplained; typecheck, lint, build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/components/OverlayLayer.tsx` + test | Both changes; nothing else moves |
+
+**Files that must not change:** `TextEditOverlay.tsx`; `textContent.ts`; `ruleLines.ts`; `buildTextEdits.ts`; the
+export; bullets; pictures; tools.
+
+**Guardrails:** no click target may reach the editor's layer; the relative order of overlapping targets must not
+change; committed geometry is untouched — this revision changes only what is painted on top of what.
+
+**Verify (user):** open `rishi-ilovepdf.pdf` → click a table cell, then click **inside** the open box: the cursor
+lands where you clicked and no popover appears. Press Done, then click a different cell in the same row: that cell
+opens.
+
+**Land:** same branch, with Revisions 1 to 3.

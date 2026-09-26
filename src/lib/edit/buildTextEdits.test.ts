@@ -209,6 +209,8 @@ describe('buildTextEdits', () => {
         align: 'center',
         alignLeftPt: 40,
         alignWidthPt: 240,
+        boxLeftPt: 115,
+        boxWidthPt: 90,
       },
       ['New title'],
       30,
@@ -221,6 +223,8 @@ describe('buildTextEdits', () => {
       align: 'center',
       alignLeftPt: 45,
       alignWidthPt: 240,
+      boxLeftPt: 115,
+      boxWidthPt: 90,
     });
   });
 

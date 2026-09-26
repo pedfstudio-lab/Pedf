@@ -135,6 +135,8 @@ function verticalRuleSeparates(
   const rightEdge = right.rect.x;
   const lowerBottom = Math.min(left.rect.y, right.rect.y);
   const higherTop = Math.max(left.rect.y + left.rect.h, right.rect.y + right.rect.h);
+  const size = Math.max(left.style.fontSizePt, right.style.fontSizePt);
+  const spanSlack = Math.max(0.5, size * 0.3);
   return ruleLines.some((rule) => {
     if (rule.pageIndex !== left.pageIndex || rule.orientation !== 'vertical') return false;
     const x = (rule.x1 + rule.x2) / 2;
@@ -142,8 +144,8 @@ function verticalRuleSeparates(
     const top = Math.max(rule.y1, rule.y2);
     return x > leftEdge - 0.5
       && x < rightEdge + 0.5
-      && bottom <= lowerBottom + 0.5
-      && top >= higherTop - 0.5;
+      && bottom <= lowerBottom + spanSlack
+      && top >= higherTop - spanSlack;
   });
 }
 
@@ -294,16 +296,13 @@ function horizontalRuleSeparates(
   const narrower = upper.rect.w <= lower.rect.w ? upper.rect : lower.rect;
   const targetLeft = overlapRight > overlapLeft ? overlapLeft : narrower.x;
   const targetRight = overlapRight > overlapLeft ? overlapRight : narrower.x + narrower.w;
-  const lowerTop = lower.rect.y + lower.rect.h;
-  const upperBottom = upper.rect.y;
-
   return ruleLines.some((rule) => {
     if (rule.pageIndex !== upper.pageIndex || rule.orientation !== 'horizontal') return false;
     const y = (rule.y1 + rule.y2) / 2;
     const left = Math.min(rule.x1, rule.x2);
     const right = Math.max(rule.x1, rule.x2);
-    return y > lowerTop - 0.5
-      && y < upperBottom + 0.5
+    return y > lower.baselineY
+      && y < upper.baselineY
       && left <= targetLeft + 1
       && right >= targetRight - 1;
   });

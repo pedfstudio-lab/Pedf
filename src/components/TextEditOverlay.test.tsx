@@ -2,10 +2,23 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type { TextEdit } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
+import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { widestLineWidth } from '@/lib/edit/paragraphSeed';
+import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import { TextEditOverlay } from './TextEditOverlay';
+
+const task74Fixture = 'tmp/compress-tests/rishi-ilovepdf.pdf';
+const task74RealEnabled = process.env.TASK74_REAL === '1' && existsSync(task74Fixture);
+if (!task74RealEnabled) {
+  process.stdout.write(
+    'Task 74 real re-edit box check skipped: set TASK74_REAL=1 with rishi-ilovepdf.pdf present.\n',
+  );
+}
 
 const style = {
   fontName: 'Helvetica',
@@ -43,6 +56,7 @@ function paragraph(...texts: string[]): TextBlock {
 }
 
 interface RenderEditorOptions {
+  readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
   readonly bulletMode?: { readonly items: readonly string[]; readonly maxHeightPt: number };
   readonly onDone?: ReturnType<typeof vi.fn>;
@@ -59,8 +73,9 @@ function renderEditor(
   return render(
     <TextEditOverlay
       block={value}
+      blocks={options.blocks}
       existing={options.existing}
-      screenRect={{ left: 40, top: 100, width: 240, height: value.rect.h }}
+      screenRect={{ left: (options.existing?.[0]?.alignLeftPt ?? value.alignLeftPt ?? value.rect.x) * zoom, top: 100, width: 240, height: value.rect.h }}
       topCorrectionPx={topCorrectionPx}
       zoom={zoom}
       pageWidthPt={600}
@@ -116,6 +131,45 @@ describe('TextEditOverlay first-line placement', () => {
 });
 
 describe('TextEditOverlay paragraph seed', () => {
+  it.each(['right', 'center'] as const)('keeps three %s display lines at their own width', (align) => {
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    renderEditor({ ...paragraph('First', 'Second', 'Third'), align, alignLeftPt: 10, alignWidthPt: 500 }, 1, 0, {
+      onDone, onCancel, measureTextWidth: (line) => line.length * 6,
+    });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    expect(editor.innerHTML).toBe('First<br>Second<br>Third');
+    expect(editor.parentElement?.style.width).toBe('240px');
+    expect(editor.parentElement?.style.left).toBe('40px');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+    editor.innerHTML = 'First!<br>Second<br>Third';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      text: 'First!\nSecond\nThird', width: 240, align, alignLeftPt: 10, alignWidthPt: 500,
+    });
+  });
+
+  it('keeps the move handle inside a right or centre box and outside a left one', () => {
+    const right = renderEditor({ ...block('Email', 24), align: 'right', alignLeftPt: 68.2, alignWidthPt: 467.7 });
+    const insideHandle = screen.getByRole('button', { name: 'Drag to move' });
+    expect(insideHandle.style.left).toBe('0px');
+    expect(insideHandle.style.top).toBe('0px');
+    right.unmount();
+
+    renderEditor(block('Heading', 24));
+    const outsideHandle = screen.getByRole('button', { name: 'Drag to move' });
+    expect(outsideHandle.style.left).toBe('-12px');
+    expect(outsideHandle.style.top).toBe('-12px');
+  });
+
+  it('still reflows a left-aligned paragraph', () => {
+    renderEditor({ ...paragraph('First', 'Second', 'Third'), align: 'left' });
+    expect(screen.getByRole('textbox', { name: 'Editable text' }).textContent).toBe('First Second Third');
+  });
+
   it('opens a multi-line source paragraph as flowing text without newlines', () => {
     renderEditor(paragraph('A number of Postgraduate', 'Departments serve students', 'across the region'));
 
@@ -190,10 +244,10 @@ describe('TextEditOverlay width measurement', () => {
 
   it('does not use line measurement for alignment columns or bullets', () => {
     const measureTextWidth = vi.fn((line: string) => line.length * 6);
-    const aligned = { ...paragraph('Centred', 'paragraph'), align: 'center' as const, alignWidthPt: 210 };
+    const aligned = { ...block('Centred', 24), align: 'center' as const, alignWidthPt: 300 };
     const alignedRender = renderEditor(aligned, 1, 0, { measureTextWidth });
     expect(screen.getByRole('textbox', { name: 'Editable text' }).parentElement?.style.width)
-      .toBe('210px');
+      .toBe('300px');
     alignedRender.unmount();
 
     renderEditor(paragraph('First item', 'Second item'), 1, 0, {
@@ -243,6 +297,224 @@ describe('TextEditOverlay width measurement', () => {
 });
 
 describe('TextEditOverlay unchanged guard', () => {
+  it('re-opens a saved right-aligned table cell at the same neighbour-limited width', () => {
+    const value = {
+      ...block('2022-2025', 24),
+      rect: { x: 506.1, y: 650, w: 48.1, h: 20 },
+      align: 'right' as const,
+      alignLeftPt: 36,
+      alignWidthPt: 524,
+    };
+    const neighbour = {
+      ...block('8.80 CGPA', 24),
+      rect: { x: 400, y: 650, w: 63.5, h: 20 },
+    };
+    const firstOnDone = vi.fn();
+    const first = renderEditor(value, 1, 0, { blocks: [neighbour, value], onDone: firstOnDone });
+    const firstEditor = screen.getByRole('textbox', { name: 'Editable text' });
+    const firstFrame = firstEditor.parentElement;
+    expect(firstFrame?.style.left).toBe('463.5px');
+    expect(firstFrame?.style.width).toBe('96.5px');
+    firstEditor.textContent = '2022-2026';
+    fireEvent.input(firstEditor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    const firstOutput = firstOnDone.mock.calls[0]?.[0];
+    expect(firstOutput).toBeDefined();
+    expect(firstOutput).toMatchObject({ boxLeftPt: 463.5, boxWidthPt: 96.5 });
+    const existing = buildTextBlockEdits(
+      value,
+      firstOutput!,
+      ['2022-2026'],
+      1,
+      { x: value.rect.x, topBaselineY: value.rect.y },
+    ).texts;
+    expect(existing[0]?.rect).toEqual({ x: 36, y: 650, w: 524, h: 20 });
+    expect(existing[0]).toMatchObject({ boxLeftPt: 463.5, boxWidthPt: 96.5 });
+    first.unmount();
+
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    renderEditor(value, 1, 0, {
+      existing, blocks: [neighbour, value], onDone, onCancel,
+    });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    expect(editor.parentElement?.style.left).toBe('463.5px');
+    expect(editor.parentElement?.style.width).toBe('96.5px');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    editor.textContent = '2022-2027';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      align: existing[0]?.align,
+      alignLeftPt: existing[0]?.alignLeftPt,
+      alignWidthPt: existing[0]?.alignWidthPt,
+      boxLeftPt: 463.5,
+      boxWidthPt: 96.5,
+    });
+  });
+
+  it('limits a moved saved edit from its moved geometry and preserves its alignment metadata', () => {
+    const value = {
+      ...block('Original', 24),
+      align: 'right' as const,
+      alignLeftPt: 10,
+      alignWidthPt: 500,
+    };
+    const existing = buildTextBlockEdits(value, {
+      text: 'Moved', style, width: 240, height: 20, dx: 290, dy: 0,
+      align: 'right', alignLeftPt: 10, alignWidthPt: 500,
+    }, ['Moved'], 1, { x: value.rect.x, topBaselineY: value.rect.y }).texts;
+    expect(existing[0]?.rect).toEqual({ x: 300, y: 650, w: 500, h: 20 });
+    const right = { ...block('Right neighbour', 24), rect: { x: 650, y: 650, w: 90, h: 20 } };
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    renderEditor(value, 1, 0, { existing, blocks: [value, right], onDone, onCancel });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    expect(editor.parentElement?.style.left).toBe('300px');
+    expect(editor.parentElement?.style.width).toBe('350px');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    editor.textContent = 'Moved!';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      align: existing[0]?.align,
+      alignLeftPt: existing[0]?.alignLeftPt,
+      alignWidthPt: existing[0]?.alignWidthPt,
+    });
+  });
+
+  it('keeps a saved alignment region when there is no neighbour on its row', () => {
+    const value = {
+      ...block('2022-2025', 24),
+      rect: { x: 506.1, y: 650, w: 48.1, h: 20 },
+      align: 'right' as const,
+      alignLeftPt: 36,
+      alignWidthPt: 524,
+    };
+    const existing: TextEdit = {
+      id: 'saved-date', kind: 'text', pageIndex: 0, z: 2,
+      rect: value.rect, text: value.text, boxText: value.text, boxHeight: 20, style,
+      align: 'right', alignLeftPt: 36, alignWidthPt: 524,
+    };
+    renderEditor(value, 1, 0, { existing: [existing], blocks: [value] });
+    const frame = screen.getByRole('textbox', { name: 'Editable text' }).parentElement;
+    expect(frame?.style.left).toBe('36px');
+    expect(frame?.style.width).toBe('524px');
+  });
+
+  it('leaves a saved left-aligned edit at its own rectangle', () => {
+    const value = block('Original', 24);
+    const existing: TextEdit = {
+      id: 'saved-left', kind: 'text', pageIndex: 0, z: 2,
+      rect: value.rect, text: 'Saved left', boxText: 'Saved left', boxHeight: 20, style,
+      align: 'left',
+    };
+    const neighbour = { ...block('Neighbour', 24), rect: { x: 300, y: 650, w: 80, h: 20 } };
+    renderEditor(value, 1, 0, { existing: [existing], blocks: [value, neighbour] });
+    const frame = screen.getByRole('textbox', { name: 'Editable text' }).parentElement;
+    expect(frame?.style.left).toBe('40px');
+    expect(frame?.style.width).toBe('240px');
+  });
+
+  it.each(['right', 'center'] as const)(
+    're-opens a saved multi-line %s edit at its own width',
+    (align) => {
+      const value = {
+        ...paragraph('Source first', 'Source second'),
+        align,
+        alignLeftPt: 10,
+        alignWidthPt: 500,
+      };
+      const existing: TextEdit[] = [
+        {
+          id: 'saved-1', kind: 'text', pageIndex: 0, z: 2,
+          rect: { x: 100, y: 680, w: 200, h: 20 }, text: 'Saved first',
+          boxText: 'Saved first\nSaved second', boxHeight: 48, style,
+          align, alignLeftPt: 10, alignWidthPt: 500,
+        },
+        {
+          id: 'saved-2', kind: 'text', pageIndex: 0, z: 3,
+          rect: { x: 120, y: 656, w: 180, h: 20 }, text: 'Saved second',
+          boxText: 'Saved first\nSaved second', boxHeight: 48, style,
+          align, alignLeftPt: 10, alignWidthPt: 500,
+        },
+      ];
+      renderEditor(value, 1, 0, { existing, blocks: [value] });
+      const frame = screen.getByRole('textbox', { name: 'Editable text' }).parentElement;
+      expect(frame?.style.left).toBe('100px');
+      expect(frame?.style.width).toBe('200px');
+    },
+  );
+
+  it('keeps a moved saved alignment region instead of clamping it to the original source block', () => {
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    const existing: TextEdit = {
+      id: 'moved-right', kind: 'text', pageIndex: 0, z: 2,
+      rect: { x: 300, y: 500, w: 200, h: 20 }, text: 'Moved', boxText: 'Moved', boxHeight: 24, style,
+      align: 'right', alignLeftPt: 300, alignWidthPt: 200,
+    };
+    renderEditor({ ...block('Original', 24), align: 'right', alignLeftPt: 10, alignWidthPt: 500 }, 1, 0, {
+      existing: [existing], blocks: [block('Old neighbour', 24)], onDone, onCancel,
+    });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    expect(editor.parentElement?.style.left).toBe('300px');
+    expect(editor.parentElement?.style.width).toBe('200px');
+    expect(editor.textContent).toBe('Moved');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('narrows the email box at zoom without changing committed alignment or treating it as a move', () => {
+    const value = { ...block('Email', 24), align: 'right' as const,
+      rect: { x: 234.7, y: 650, w: 297.5, h: 20 }, alignLeftPt: 68.2, alignWidthPt: 467.7 };
+    const phone = { ...block('Phone', 24), rect: { x: 77.3, y: 650, w: 59.7, h: 20 } };
+    const onDone = vi.fn();
+    const onCancel = vi.fn();
+    renderEditor(value, 2, 0, { blocks: [phone, value], onDone, onCancel });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    expect(Number.parseFloat(editor.parentElement!.style.left)).toBeCloseTo(274);
+    expect(Number.parseFloat(editor.parentElement!.style.width)).toBeCloseTo(797.8);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+    editor.textContent = 'Email!';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      text: 'Email!', dx: 0, dy: -0, align: 'right', alignLeftPt: 68.2, alignWidthPt: 467.7,
+      boxLeftPt: 137,
+      boxWidthPt: 398.9,
+    });
+  });
+
+  it('records a left-aligned box without changing its geometry', () => {
+    const value = block('Heading', 24);
+    const onDone = vi.fn();
+    renderEditor(value, 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    editor.textContent = 'Heading!';
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      text: 'Heading!',
+      width: 240,
+      dx: 0,
+      boxLeftPt: 40,
+      boxWidthPt: 240,
+    });
+  });
+
   it('closes without committing when Done is pressed without a change', () => {
     const onDone = vi.fn();
     const onCancel = vi.fn();
@@ -302,4 +574,53 @@ describe('TextEditOverlay unchanged guard', () => {
     expect(onCancel).toHaveBeenCalledOnce();
     expect(existing).toMatchObject({ id: 'keep-this-id', z: 7 });
   });
+});
+
+describe.skipIf(!task74RealEnabled)('TextEditOverlay Task 74 real re-edit box', () => {
+  it('opens the Rishi 2022-2025 cell at the same narrow width on first edit and re-edit', async () => {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const document = await getDocument({
+      data: new Uint8Array(await readFile(task74Fixture)),
+      verbosity: 0,
+    }).promise;
+    try {
+      const page = await document.getPage(1);
+      const [runs, ruleLines] = await Promise.all([
+        extractTextRuns(page, 0),
+        detectRuleLines(page, 0),
+      ]);
+      const blocks = groupRunsIntoBlocks(runs, { ruleLines });
+      const value = blocks.find((candidate) => candidate.text === '2022-2025');
+      expect(value, 'Rishi date cell').toBeDefined();
+      if (!value) return;
+
+      const firstOnDone = vi.fn();
+      const first = renderEditor(value, 1, 0, { blocks, onDone: firstOnDone });
+      const firstEditor = screen.getByRole('textbox', { name: 'Editable text' });
+      const firstLeft = Number.parseFloat(firstEditor.parentElement!.style.left);
+      const firstWidth = Number.parseFloat(firstEditor.parentElement!.style.width);
+      expect(firstLeft).toBeCloseTo(463.5, 0);
+      expect(firstLeft + firstWidth).toBeCloseTo(560, 0);
+      firstEditor.textContent = '2022-2026';
+      fireEvent.input(firstEditor);
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      const firstOutput = firstOnDone.mock.calls[0]?.[0];
+      expect(firstOutput).toBeDefined();
+      const existing = buildTextBlockEdits(value, firstOutput!, ['2022-2026'], 1).texts;
+      first.unmount();
+
+      renderEditor(value, 1, 0, { blocks, existing });
+      const reEditFrame = screen.getByRole('textbox', { name: 'Editable text' }).parentElement!;
+      const reEditLeft = Number.parseFloat(reEditFrame.style.left);
+      const reEditWidth = Number.parseFloat(reEditFrame.style.width);
+      expect(reEditLeft).toBeCloseTo(firstLeft, 5);
+      expect(reEditWidth).toBeCloseTo(firstWidth, 5);
+      process.stdout.write(
+        `TASK74 REAL Rishi 2022-2025 box first/re-edit ${firstLeft.toFixed(1)}..`
+        + `${(firstLeft + firstWidth).toFixed(1)} pt\n`,
+      );
+    } finally {
+      await document.destroy();
+    }
+  }, 60_000);
 });

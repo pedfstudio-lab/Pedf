@@ -185,9 +185,29 @@ function unionRects(rects: readonly PdfRect[]): PdfRect {
 
 function textBoxRect(texts: readonly TextEdit[]): PdfRect {
   const union = unionRects(texts.map((edit) => edit.rect));
-  const height = texts[0]?.boxHeight ?? union.h;
+  const first = texts[0];
+  const height = first?.boxHeight ?? union.h;
   const top = Math.max(...texts.map((edit) => edit.rect.y + edit.rect.h));
-  return { x: union.x, y: top - height, w: union.w, h: height };
+  return {
+    x: first?.boxLeftPt ?? union.x,
+    y: top - height,
+    w: first?.boxWidthPt ?? union.w,
+    h: height,
+  };
+}
+
+function clickTargetArea(rect: ScreenRect, minimumWidth = 0, minimumHeight = 8): number {
+  return Math.max(minimumWidth, rect.width) * Math.max(minimumHeight, rect.height);
+}
+
+function clickTargetZIndex(
+  area: number,
+  areaRanks: ReadonlyMap<number, number>,
+  preferDivider = false,
+): number {
+  // Keep every click target below the editor's z-50 layer. A divider still wins
+  // an equal-area tie, while dense pages share the top of the bounded band.
+  return 20 + Math.min(areaRanks.get(area) ?? 0, 25) + (preferDivider ? 1 : 0);
 }
 
 function alignmentEditorRect(
@@ -789,6 +809,48 @@ export function OverlayLayer({
 
   if (peek) return null;
 
+  const clickTargetAreas = [
+    ...editableRuleLines.map((editable) => clickTargetArea(
+      pdfRectToScreenRect(ruleLineRect(editable.current), viewport, dpr),
+      12,
+      12,
+    )),
+    ...blocks.flatMap((block) => {
+      const list = bulletLists.find((entry) => entry.sourceBlock === block);
+      const target = list ? bulletListHeadingBlock(list) : block;
+      return target
+        ? [clickTargetArea(pdfRectToScreenRect(target.rect, viewport, dpr))]
+        : [];
+    }),
+    ...bulletLists.map((list) => {
+      const existing = findExistingBulletList(list);
+      const target = existing && existing.texts.length > 0
+        ? textBoxRect(existing.texts)
+        : list.coverRect;
+      return clickTargetArea(pdfRectToScreenRect(target, viewport, dpr));
+    }),
+    ...freeTextGroups.map(({ texts }) => clickTargetArea(
+      pdfRectToScreenRect(freeTextBoxRect(texts), viewport, dpr),
+    )),
+    ...blocks.flatMap((block) => {
+      const list = bulletLists.find((entry) => entry.sourceBlock === block);
+      const target = list ? bulletListHeadingBlock(list) : block;
+      if (!target) return [];
+      const existing = findExisting(target);
+      return existing && existing.texts.length > 0
+        ? [clickTargetArea(pdfRectToScreenRect(textBoxRect(existing.texts), viewport, dpr))]
+        : [];
+    }),
+  ];
+  const clickTargetAreaRanks = new Map(
+    [...new Set(clickTargetAreas)]
+      .sort((left, right) => right - left)
+      .map((area, index) => [area, index]),
+  );
+  const showClickTargets = editMode && !(
+    activeBlock || activeBulletList || activeRuleLine || freeTextSession
+  );
+
   return (
     <div
       ref={overlayRef}
@@ -919,10 +981,11 @@ export function OverlayLayer({
         </div>
       )}
 
-      {editMode && editableRuleLines.map((editable, index) => {
+      {showClickTargets && editableRuleLines.map((editable, index) => {
         const rect = pdfRectToScreenRect(ruleLineRect(editable.current), viewport, dpr);
         const hitWidth = Math.max(12, rect.width);
         const hitHeight = Math.max(12, rect.height);
+        const area = hitWidth * hitHeight;
         return (
           <button
             key={`rule-${editable.source.pageIndex}-${index}-${editable.source.x1}-${editable.source.y1}`}
@@ -936,18 +999,19 @@ export function OverlayLayer({
               setFreeTextSession(null);
               setActiveRuleLine(editable);
             }}
-            className="absolute z-[29] cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none"
+            className="absolute cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none"
             style={{
               left: rect.left - (hitWidth - rect.width) / 2,
               top: rect.top - (hitHeight - rect.height) / 2,
               width: hitWidth,
               height: hitHeight,
+              zIndex: clickTargetZIndex(area, clickTargetAreaRanks, true),
             }}
           />
         );
       })}
 
-      {editMode && blocks.map((block, index) => {
+      {showClickTargets && blocks.map((block, index) => {
         const list = bulletLists.find((entry) => entry.sourceBlock === block);
         const target = list ? bulletListHeadingBlock(list) : block;
         if (!target) return null;
@@ -957,6 +1021,7 @@ export function OverlayLayer({
         const actionText = existing && existing.texts.length > 0
           ? sourceText(existing.texts)
           : target.text;
+        const area = clickTargetArea(rect);
         return (
           <button
             key={`${block.pageIndex}-${index}-${block.rect.x}-${block.rect.y}`}
@@ -969,13 +1034,19 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: actionText, screenRect: rect });
             }}
-            className="absolute z-20 cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
-            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: Math.max(8, rect.height),
+              zIndex: clickTargetZIndex(area, clickTargetAreaRanks),
+            }}
           />
         );
       })}
 
-      {editMode && bulletLists.map((list, index) => {
+      {showClickTargets && bulletLists.map((list, index) => {
         const existing = findExistingBulletList(list);
         const actionText = existing
           ? sourceText(existing.texts)
@@ -986,6 +1057,7 @@ export function OverlayLayer({
           dpr,
         );
         const label = actionText.replace(/\s+/g, ' ').trim() || 'empty bullet list';
+        const area = clickTargetArea(rect);
         return (
           <button
             key={`bullet-list-${list.block.pageIndex}-${index}-${list.coverRect.y}`}
@@ -1003,15 +1075,22 @@ export function OverlayLayer({
                 screenRect: rect,
               });
             }}
-            className="absolute z-[26] cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none"
-            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: Math.max(8, rect.height),
+              zIndex: clickTargetZIndex(area, clickTargetAreaRanks),
+            }}
           />
         );
       })}
 
-      {editMode && freeTextGroups.map(({ boxId, texts }) => {
+      {showClickTargets && freeTextGroups.map(({ boxId, texts }) => {
         const rect = pdfRectToScreenRect(freeTextBoxRect(texts), viewport, dpr);
         const label = sourceText(texts).replace(/\s+/g, ' ').trim();
+        const area = clickTargetArea(rect);
         return (
           <button
             key={`free-text-${boxId}`}
@@ -1029,13 +1108,19 @@ export function OverlayLayer({
                 boxId,
               });
             }}
-            className="absolute z-[28] cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none"
-            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: Math.max(8, rect.height),
+              zIndex: clickTargetZIndex(area, clickTargetAreaRanks),
+            }}
           />
         );
       })}
 
-      {editMode && blocks.map((block, index) => {
+      {showClickTargets && blocks.map((block, index) => {
         const list = bulletLists.find((entry) => entry.sourceBlock === block);
         const target = list ? bulletListHeadingBlock(list) : block;
         if (!target) return null;
@@ -1046,6 +1131,7 @@ export function OverlayLayer({
           viewport,
           dpr,
         );
+        const area = clickTargetArea(rect);
         return (
           <button
             key={`re-edit-${block.pageIndex}-${index}`}
@@ -1057,8 +1143,14 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
             }}
-            className="absolute z-[25] cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
-            style={{ left: rect.left, top: rect.top, width: rect.width, height: Math.max(8, rect.height) }}
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: Math.max(8, rect.height),
+              zIndex: clickTargetZIndex(area, clickTargetAreaRanks),
+            }}
           />
         );
       })}
@@ -1167,6 +1259,7 @@ export function OverlayLayer({
             <TextEditOverlay
               key={`${activeBlock.pageIndex}:${activeBlock.rect.x}:${activeBlock.rect.y}:${activeBlock.text}`}
               block={activeBlock}
+              blocks={blocks}
               existing={existing?.texts}
               screenRect={screenRect}
               topCorrectionPx={topCorrectionPx}

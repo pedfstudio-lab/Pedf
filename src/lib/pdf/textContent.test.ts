@@ -564,6 +564,22 @@ describe('editor table cell grouping', () => {
     }).map((line) => line.text)).toEqual(['Name City']);
   });
 
+  it('splits at a vertical divider that spans the row despite ascender padding', () => {
+    const cells = [run('Name', 10, 500, 30), run('City', 48.8, 500, 25)];
+
+    expect(mergeRunsIntoLines(cells, {
+      ruleLines: [rule('vertical', 44.4, 499, 44.4, 509)],
+    }).map((line) => line.text)).toEqual(['Name', 'City']);
+  });
+
+  it('does not split at a vertical divider that stops short of the text row', () => {
+    const cells = [run('Name', 10, 500, 30), run('City', 48.8, 500, 25)];
+
+    expect(mergeRunsIntoLines(cells, {
+      ruleLines: [rule('vertical', 44.4, 499, 44.4, 507)],
+    }).map((line) => line.text)).toEqual(['Name City']);
+  });
+
   it.each([
     '50.00%',
     '100.00%',
@@ -641,6 +657,35 @@ describe('editor table cell grouping', () => {
     expect(groupRunsIntoBlocks(paragraph, { ruleLines: [spanning] }).map((block) => block.text)).toEqual([
       'This paragraph-length line belongs above',
       'This paragraph-length line belongs below',
+    ]);
+  });
+
+  it('uses a rule between baselines even when it sits inside the lower text box', () => {
+    const paragraph = [
+      run('This paragraph-length line belongs above', 20, 500, 210),
+      run('This paragraph-length line belongs below', 20, 482, 200),
+    ];
+    const insideLowerBox = rule('horizontal', 20, 490, 220, 490);
+
+    expect(groupRunsIntoBlocks(paragraph, {
+      ruleLines: [insideLowerBox],
+    }).map((block) => block.text)).toEqual([
+      'This paragraph-length line belongs above',
+      'This paragraph-length line belongs below',
+    ]);
+  });
+
+  it('does not split at a horizontal rule below both baselines', () => {
+    const paragraph = [
+      run('This paragraph-length line belongs above', 20, 500, 210),
+      run('This paragraph-length line belongs below', 20, 482, 200),
+    ];
+    const belowBoth = rule('horizontal', 20, 480, 220, 480);
+
+    expect(groupRunsIntoBlocks(paragraph, {
+      ruleLines: [belowBoth],
+    }).map((block) => block.text)).toEqual([
+      'This paragraph-length line belongs above\nThis paragraph-length line belongs below',
     ]);
   });
 });
