@@ -12347,3 +12347,47 @@ block and each marker line still starts an item, but Enter copies the marker of 
 item takes that item's marker rather than the list's dominant one.
 
 **Land:** same branch, committed on top of Step 2.
+
+#### Task 74 — Step 2, Revision 2  ✅ DONE by Claude (2026-09-27, user: "fix it yourself"), committed and pushed — a full stop is not the end of a paragraph   *(Easy · 1 hour)*
+
+**What the user hit.** On a question paper and on a university prospectus, clicking a paragraph selected only part
+of it. "From the Director's Desk" broke immediately after `…'EDUCATION FOR ALL' is our motto.`; a maths question
+broke after `…followers increased by 50%.` — in both cases at a full stop in the middle of the paragraph.
+
+**Why.** Step 2 added a guard to `canJoinTextBlock`: a line whose predecessor ends a sentence never joins it. The
+intent was to keep two unrelated stacked items apart. Prose does not work that way — a paragraph is a run of
+sentences, and every one of them ends with a full stop. Measured over the 45 baseline files: **5,240** adjacent
+same-column line pairs, **630** blocked by the guard, and **320** of those had an upper line that still ran to the
+text's right edge — unmistakably mid-paragraph.
+
+**Why the guard was unnecessary as well as wrong.** A paragraph ends on a **short** line, and the right-edge test
+introduced in the same step already refuses to join after one. The sentence guard only ever added the cases where
+the line was full — exactly the 320 that should have joined. The two-stacked-items case it was written for is
+covered by the right-edge test, and two bullets are kept apart by the marker rule beside it.
+
+**Change.** Delete `SENTENCE_END` and drop it from the join condition, leaving
+`if (startsWithBulletMarker(line.text)) return false;`. Nothing else in `textUnits.ts` changes.
+
+**Checks**
+- *Units* (`textUnits.test.ts`): the test that asserted the old behaviour is replaced by two — a full stop on a line
+  that still reaches the right edge keeps the paragraph together; a full stop on a short line ends the block.
+- Full suite **1,286 passed / 28 skipped**; typecheck, lint clean.
+- `TASK72_REAL`: Corporate Governance page 3 unchanged — one 6-line block, 576-character seed, 447.6 pt.
+- `TASK74_REAL`: 10 passed — the résumé still has its 4 bullet lists with items [6, 5] and [4, 3]; Bhutan pages 6
+  and 8, Sri Lanka and the Fraction Chart all unchanged.
+- `TASK70_TABLES`: 45 files, 31 changed, **0 unexplained**. Border-driven row splits move **40 → 44**: with prose
+  joining across a mid-paragraph full stop, more blocks now reach a row border and are separated by it. Cell splits
+  stay at 14 and the underline guard still rejects the same 32 candidates.
+- `TASK66_SWEEP`: **121 / 121**, 0 untouched lines changed, 807 removed, 0 skipped.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textUnits.ts` | The guard removed |
+| `src/lib/pdf/textUnits.test.ts` | Its test replaced by the two correct cases |
+| `src/lib/pdf/tableCells.local.test.ts` | The row-split expectation, 40 → 44, with the reason recorded |
+
+**Known limit:** two stacked, unrelated, full-width lines of the same style and spacing — an address block, say —
+join into one piece. They did before Step 2 as well; the sentence guard was the only thing separating them, and it
+cost 320 real paragraphs to do it.

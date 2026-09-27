@@ -3,7 +3,6 @@ import type { RuleLine } from './ruleLines';
 import type { TextLine, TextRun } from './textContent';
 
 const TEXT_BULLET = /^\s*[\uF0B7\uF0A7\uF0A8\uF0D8\uF06C\uF075\uF0FC\uF0FD\u2022\u25CF\u25AA\u25E6\u2023\u2043\u00B7\u2219]/u;
-const SENTENCE_END = /[.!?]["')\]}]*\s*$/u;
 
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
@@ -216,10 +215,14 @@ export function canJoinTextBlock(
   const previousStartsItem = startsWithBulletMarker(previous.text)
     || lineHasDrawnMarker(previous, markers);
   if (!previousStartsItem) {
+    // A paragraph ends on a SHORT line, not merely on a full stop: prose is full of
+    // sentences that end mid-paragraph, and 320 line pairs across the 45 test files were
+    // being split at one. Ending a sentence only ends the block when the line also stops
+    // short of the text's right edge.
     const widestRight = Math.max(...[...lines, line].map((item) => item.rect.x + item.rect.w));
     if (widestRight - (previous.rect.x + previous.rect.w) > size * 2) return false;
   }
-  if (startsWithBulletMarker(line.text) || SENTENCE_END.test(previous.text)) return false;
+  if (startsWithBulletMarker(line.text)) return false;
   return true;
 }
 

@@ -354,7 +354,9 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
     const alignmentChangeTotal = comparisons.reduce((sum, result) => sum + result.alignmentChanges.length, 0);
     const unexplained = comparisons.flatMap((result) => result.unexplained);
     expect(cellSplitTotal).toBe(14);
-    expect(rowSplitTotal).toBe(40);
+    // 44, not 40, since the sentence guard was removed: prose paragraphs now join across
+    // a mid-paragraph full stop, so more blocks reach a row border and are split by it.
+    expect(rowSplitTotal).toBe(44);
     expect(unexplained).toEqual([]);
     expect(rejectedUnderlineCandidates).toBe(32);
 

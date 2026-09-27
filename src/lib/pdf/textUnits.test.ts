@@ -129,10 +129,21 @@ describe('stacked text units', () => {
     expect(canJoinTextBlock([first, second], last, [])).toBe(true);
   });
 
-  it('does not join a new item after a completed sentence', () => {
+  it('keeps a paragraph together when a sentence ends mid-line', () => {
+    // Prose is full of sentences that end in the middle of a paragraph. A full stop on a
+    // line that still runs to the text's right edge is not the end of the block.
     expect(canJoinTextBlock(
-      [line('First item.', 20, 500, 200)],
-      line('Second item', 20, 486, 195),
+      [line('A sentence ends here.', 20, 500, 200)],
+      line('and the paragraph carries on', 20, 486, 195),
+      [],
+    )).toBe(true);
+  });
+
+  it('ends the block when the sentence ends on a short line', () => {
+    // A paragraph's last line stops short; that, not the full stop, ends the block.
+    expect(canJoinTextBlock(
+      [line('The end.', 20, 500, 60)],
+      line('A new item starts here', 20, 486, 195),
       [],
     )).toBe(false);
   });
