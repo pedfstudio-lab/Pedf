@@ -5,6 +5,7 @@ import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
 import { dropCoveredTextRuns } from './hiddenText';
 import type { RuleLine } from './ruleLines';
+import type { DrawnMarker } from './textUnits';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
@@ -122,6 +123,12 @@ function isStandaloneNumber(text: string): boolean {
 
 export interface TextGroupingOptions {
   readonly ruleLines: readonly RuleLine[];
+  /**
+   * Dots drawn beside lines rather than typed into them. Without these a drawn-marker
+   * bullet list never groups, so `bulletList.ts` cannot recognise it and the list loses
+   * its bullet editing entirely.
+   */
+  readonly markers?: readonly DrawnMarker[];
 }
 
 /** Infer a line's alignment against the horizontal content bounds of its page. */
@@ -263,8 +270,8 @@ function canJoinBlock(
   options?: TextGroupingOptions,
 ): boolean {
   if (options) {
-    return canJoinTextBlock(lines, line, options.ruleLines)
-      || canJoinTextBulletList(lines, line, options.ruleLines);
+    return canJoinTextBlock(lines, line, options.ruleLines, options.markers ?? [])
+      || canJoinTextBulletList(lines, line, options.ruleLines, options.markers ?? []);
   }
   const previous = lines.at(-1);
   if (!previous || previous.pageIndex !== line.pageIndex) return false;

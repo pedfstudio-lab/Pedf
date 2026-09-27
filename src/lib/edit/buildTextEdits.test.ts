@@ -264,6 +264,79 @@ describe('buildTextEdits', () => {
     expect(result.texts.map((edit) => edit.rect.y)).toEqual([500, 484, 468, 452]);
   });
 
+  it('reflows one marker-list item while every other item keeps its source position', () => {
+    const block = sourceBlock([
+      { text: '• Item one', x: 40, y: 500, w: 90 },
+      { text: '• Item two', x: 42, y: 484, w: 88 },
+      { text: '• Item three used to', x: 40, y: 468, w: 150 },
+      { text: 'wrap onto this line', x: 54, y: 452, w: 120 },
+      { text: '• Item four', x: 41, y: 436, w: 92 },
+      { text: '• Item five', x: 43, y: 420, w: 86 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      {
+        text: '• Item one\n• Item two\n• Item three is shorter\n• Item four\n• Item five',
+        style: run.style,
+        width: 180,
+        height: 96,
+        dx: 0,
+        dy: 0,
+      },
+      ['• Item one', '• Item two', '• Item three is shorter', '• Item four', '• Item five'],
+      20,
+    );
+
+    expect(result.texts.map((edit) => edit.text)).toEqual([
+      '• Item one',
+      '• Item two',
+      '• Item three is shorter',
+      '• Item four',
+      '• Item five',
+    ]);
+    expect([0, 1, 3, 4].map((index) => ({
+      x: result.texts[index]?.rect.x,
+      y: result.texts[index]?.rect.y,
+    }))).toEqual([
+      { x: 40, y: 500 },
+      { x: 42, y: 484 },
+      { x: 41, y: 436 },
+      { x: 43, y: 420 },
+    ]);
+  });
+
+  it('pushes later marker-list items down when the edited item gains a line', () => {
+    const block = sourceBlock([
+      { text: '• Item one', x: 40, y: 500, w: 90 },
+      { text: '• Item two', x: 40, y: 484, w: 90 },
+      { text: '• Item three', x: 40, y: 468, w: 100 },
+      { text: '• Item four', x: 40, y: 452, w: 90 },
+      { text: '• Item five', x: 40, y: 436, w: 90 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      {
+        text: '• Item one\n• Item two\n• Item three is now long enough to wrap\n• Item four\n• Item five',
+        style: run.style,
+        width: 180,
+        height: 96,
+        dx: 0,
+        dy: 0,
+      },
+      [
+        '• Item one',
+        '• Item two',
+        '• Item three is now long',
+        'enough to wrap',
+        '• Item four',
+        '• Item five',
+      ],
+      20,
+    );
+
+    expect(result.texts.map((edit) => edit.rect.y)).toEqual([500, 484, 468, 452, 436, 420]);
+  });
+
   it('keeps the user-selected font size and box dimensions authoritative', () => {
     const block: TextBlock = {
       pageIndex: run.pageIndex,

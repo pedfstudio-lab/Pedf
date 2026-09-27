@@ -1,4 +1,4 @@
-import type { TextAlignment } from '@/lib/export/types';
+import type { PdfRect, TextAlignment } from '@/lib/export/types';
 import type { RuleLine } from './ruleLines';
 import type { TextLine, TextRun } from './textContent';
 
@@ -139,11 +139,50 @@ export function startsWithBulletMarker(text: string): boolean {
   return TEXT_BULLET.test(text);
 }
 
+/** A dot drawn beside a line rather than typed into it — an image or a vector shape. */
+export interface DrawnMarker {
+  readonly pageIndex: number;
+  readonly rect: PdfRect;
+}
+
+// Mirrors the geometry `bulletList.ts` uses to claim a marker for a line. Grouping only
+// needs to know a dot is there, so this stays deliberately simple; the list itself is
+// still detected by bulletList.ts afterwards with its stricter rule.
+const MIN_MARKER_SIZE_PT = 1;
+const MAX_MARKER_SIZE_PT = 7;
+const MIN_LEFT_GAP_PT = 0.5;
+const MAX_LEFT_GAP_PT = 16;
+
+/** Is there a small drawn dot immediately left of this line, on its own baseline? */
+export function lineHasDrawnMarker(
+  line: TextLine,
+  markers: readonly DrawnMarker[],
+): boolean {
+  return markers.some((marker) => {
+    if (marker.pageIndex !== line.pageIndex) return false;
+    const { rect } = marker;
+    const size = Math.max(rect.w, rect.h);
+    const aspectRatio = rect.w / Math.max(0.001, rect.h);
+    if (
+      size < MIN_MARKER_SIZE_PT
+      || size > Math.min(MAX_MARKER_SIZE_PT, line.style.fontSizePt * 0.85)
+      || aspectRatio < 0.65
+      || aspectRatio > 1.55
+    ) return false;
+    const leftGap = line.rect.x - (rect.x + rect.w);
+    if (leftGap < MIN_LEFT_GAP_PT || leftGap > MAX_LEFT_GAP_PT) return false;
+    const centerY = rect.y + rect.h / 2;
+    const expectedCenterY = line.baselineY + line.style.fontSizePt * 0.34;
+    return Math.abs(centerY - expectedCenterY) <= Math.max(1.5, line.style.fontSizePt * 0.34);
+  });
+}
+
 /** Decide whether the next line continues the local paragraph immediately above it. */
 export function canJoinTextBlock(
   lines: readonly TextLine[],
   line: TextLine,
   ruleLines: readonly RuleLine[],
+  markers: readonly DrawnMarker[] = [],
 ): boolean {
   const previous = lines.at(-1);
   if (!previous || previous.pageIndex !== line.pageIndex) return false;
@@ -172,21 +211,37 @@ export function canJoinTextBlock(
     if (Math.abs(verticalGap - expected) > Math.max(2, expected * 0.35)) return false;
   }
 
-  const widestRight = Math.max(...[...lines, line].map((item) => item.rect.x + item.rect.w));
-  if (widestRight - (previous.rect.x + previous.rect.w) > size * 2) return false;
+  // A list item's own first line need not reach the block's widest edge — items differ in
+  // length — so its wrapped continuation must not be judged by that test.
+  const previousStartsItem = startsWithBulletMarker(previous.text)
+    || lineHasDrawnMarker(previous, markers);
+  if (!previousStartsItem) {
+    const widestRight = Math.max(...[...lines, line].map((item) => item.rect.x + item.rect.w));
+    if (widestRight - (previous.rect.x + previous.rect.w) > size * 2) return false;
+  }
   if (startsWithBulletMarker(line.text) || SENTENCE_END.test(previous.text)) return false;
   return true;
 }
 
-/** Consecutive text-marker bullets remain one list block, not a prose paragraph. */
+/**
+ * Consecutive bullets remain one list block, not a prose paragraph — whether the marker
+ * is typed into the line or drawn beside it. A drawn-marker list depends on this: its
+ * items carry no dot in their text, so the paragraph rules above see only short lines
+ * ending in full stops and would leave every item in a block of its own, which is too
+ * few for `bulletList.ts` to recognise a list at all.
+ */
 export function canJoinTextBulletList(
   lines: readonly TextLine[],
   line: TextLine,
   ruleLines: readonly RuleLine[],
+  markers: readonly DrawnMarker[] = [],
 ): boolean {
   const previous = lines.at(-1);
-  const marker = lines.find((candidate) => startsWithBulletMarker(candidate.text));
-  if (!previous || !marker || !startsWithBulletMarker(line.text)) {
+  const marker = lines.find((candidate) => (
+    startsWithBulletMarker(candidate.text) || lineHasDrawnMarker(candidate, markers)
+  ));
+  const lineIsItem = startsWithBulletMarker(line.text) || lineHasDrawnMarker(line, markers);
+  if (!previous || !marker || !lineIsItem) {
     return false;
   }
   if (previous.pageIndex !== line.pageIndex || horizontalRuleSeparates(previous, line, ruleLines)) {

@@ -12229,11 +12229,12 @@ opens.
 
 **Land:** same branch, with Revisions 1 to 3.
 
-#### Task 74 — Step 2, Revision 1  🔲 TODO → same branch `text-first` — a list is not prose: never re-flow a block whose lines start with bullet markers   *(Easy · 2 hours)*
 
-**What the user hit.** On page 5 of `C:/Users/eddyu/Downloads/FIRGUN SRI 1.pdf`, clicking the "Vehicle Allocation"
-list opens all nine bullets as **one run-on paragraph** with the dots inline. Pressing **Done** would write that
-paragraph back, and the list would be gone from the document.
+#### Task 74 — Step 2, Revision 1  🔲 TODO → same branch `text-first` — a list edits as a list: each bullet is an item, and re-flow happens inside an item   *(Medium · 1 day)*
+
+**What the user hit.** On page 5 of `FIRGUN SRI 1.pdf`, clicking the "Vehicle Allocation" list opens all nine
+bullets as **one run-on paragraph** with the dots inline. Pressing **Done** would write that paragraph back and the
+list would be gone from the document.
 
 **Measured** on that page — the grouping is right and the seed is wrong:
 
@@ -12246,70 +12247,103 @@ RUN y 408.7  "• 5-6 pax -- SUV vehicle + Separate Luggage Van"
 BLOCK  lines 9  align left  own 231.8 pt
 ```
 
-Step 2 groups them correctly as one nine-line block — a list is one editable unit, as the user asked. The failure
-comes one step later: `TextEditOverlay.tsx` seeds a left-aligned multi-line block with `paragraphSeedText(block)`,
-which joins every display line with spaces so a paragraph can re-flow. For a list that turns nine items into one
-paragraph.
+Step 2 groups them correctly as one nine-line block — a list is one editable unit. The failure is one step later:
+`TextEditOverlay.tsx:225` seeds a left-aligned multi-line block with `paragraphSeedText(block)`, which joins every
+display line with spaces so a paragraph can re-flow. For a list that turns nine items into one paragraph.
 
-**Why the bullet feature did not catch it.** `bulletList.ts:193-195` requires the marker to be **its own run** —
-`TEXT_BULLET_CHARACTERS.has(markerText)` tests a whole run. In this file the dot is inside the text run
-(`"• A/C vehicle during…"` is one run), so no marker is found, no bullet mode, and the block falls through to the
-ordinary text path. Tasks 10H, 45, 64 and 67 Revision 2a are unaffected by this revision: lists whose dot is a
-separate run or a picture keep their existing bullet handling in full.
+**Why the bullet feature does not catch it.** `bulletList.ts:193-195` needs the marker to be **its own run** —
+`TEXT_BULLET_CHARACTERS.has(markerText)` tests a whole run. Here the dot is inside the text run
+(`"• A/C vehicle during…"` is one run), so no marker is found and the block falls to the ordinary text path.
 
-**How widespread — measured over the 45 baseline files plus the user's file:** **4,755** blocks, **2,069** with
-more than one line, **102** of those carrying bullet markers, and **48** of those containing an item that wraps
-onto a further line. The rule below touches those 102 and nothing else.
+**Why not simply stop re-flowing these.** That was this revision's first draft and the user rejected it, correctly:
+a four-line bullet item would then keep a hole wherever words were deleted, because nothing pulls the continuation
+up. The fix is to re-flow **inside each item** instead of across the block.
 
-**What the user gets:** clicking a bullet list opens it as a list — one item per line, exactly as the page shows —
-and editing one item leaves the others where they are.
+**How widespread — measured over the 45 baseline files plus the user's file:** **4,755** blocks, **2,069** with more
+than one line, **102** carrying bullet markers, **48** of those containing an item that wraps onto further lines.
 
-**Change — the seed keeps a list's lines.**
-In `src/lib/edit/paragraphSeed.ts`, `paragraphSeedText` returns `block.text` unchanged when **any** of the block's
-lines starts with a bullet marker, using `startsWithBulletMarker` from `src/lib/pdf/textUnits.ts` (written in Step 2)
-rather than a second copy of the character list. Everything else in the function is untouched: a single-line block
-still returns `block.text`, and a block with no markers still joins its lines and rejoins a hyphenated word.
+**What the user gets:** a bullet list opens one item per line, exactly as the page shows. Editing inside an item
+re-flows that item and nothing else. The other items do not move. Enter starts a new item.
 
-**Checks**
-- *Seed* (`paragraphSeed.test.ts`): a nine-line block whose lines all start with `•` seeds with **eight** newlines
-  and no joining; a block where only the first line starts with `•` — an item wrapping onto continuation lines —
-  also seeds unchanged; a block with no markers still seeds as one flowing line with no newline, and still rejoins
-  `Postgra-` + `duate`; a single-line block is unchanged.
-- *Overlay* (`TextEditOverlay.test.tsx`): a left-aligned three-line bullet block opens showing three lines; a
-  left-aligned three-line prose block still opens as one flowing line.
-- *The user's file*, local, `TASK74_REAL=1` — copy `FIRGUN SRI 1.pdf` into `tmp/paragraphs/` first: page 5's
-  vehicle-allocation block is **9 lines**, and the text handed to the editor contains **8** newlines, so the
-  bullets are not flattened. An unchanged **Done** still writes nothing.
-- *Everything else still re-flows*: `TASK72_REAL=1` unchanged — `Corporate-Governance-edited (25).pdf` page 3 still
-  seeds to 576 characters with no newline at 447.6 pt.
-- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with 0 untouched lines changed and 0
-  skipped; `TASK70_TABLES=1` unchanged at 45 files, 31 changed, **0 unexplained**; typecheck, lint, build.
+**Change 1 — the seed splits a block into items.**
+New exported helper beside `paragraphSeedText` in `src/lib/edit/paragraphSeed.ts` — `listSeedText(block)` — used
+when any of the block's lines starts with a bullet marker (`startsWithBulletMarker` from `textUnits.ts`; do not
+copy the character list):
+1. walk the block's display lines; a line that starts with a marker **begins an item**, and every following line
+   that does not belongs to that item;
+2. join each item's lines exactly as `paragraphSeedText` joins a paragraph — single spaces, runs of spaces
+   collapsed, a word split by a hyphen rejoined when the next line starts lowercase;
+3. return the items joined by `\n`, so the editor shows one item per line and a long item wraps visually.
+A block with no markers still goes to `paragraphSeedText` unchanged. A block whose first line has no marker cannot
+occur — Step 2's rule already keeps a marker line from joining a non-marker line above it — but if it does, treat
+the leading lines as one leading item rather than dropping them.
+
+**Change 2 — the commit wraps each item, not the block.**
+In `src/lib/edit/buildTextEdits.ts`, `buildTextBlockEdits` currently wraps the whole box text and lays the wrapped
+lines out one after another. For a marker list it must instead wrap **each item** at the box width and lay the
+resulting lines out in order, using the same line height as today. The existing preservation from Step 2 —
+matching previous lines to new ones by exact text and leaving matched lines where they were — applies to the
+resulting lines unchanged, which is what keeps the untouched items still. The overlap fallback is unchanged.
+**`buildBulletListEdits` in the same file is not touched**: it is the real bullet feature's layout and must keep
+producing exactly what it produces today.
+
+**Change 3 — Enter starts a new item.**
+In `TextEditOverlay.tsx`, when the block is a marker list and the caret is at the end of a line, pressing Enter
+inserts a newline followed by the same marker and spacing the previous item used — read from that item's own text,
+not a hard-coded `"• "`. Bullet mode's own Enter handling is untouched and still wins, because `bulletMode` is
+chosen before this path at `:222-225`.
+
+**Checks — and the existing bullet feature must be provably untouched.**
+- *A real bullet list is byte-identical.* For a list whose marker is its own run — the user's résumé — assert that
+  the edits, covers and exported bytes produced by an edit are **identical** before and after this revision. Not
+  "equivalent": identical. This is the guardrail that matters most, because `buildBulletListEdits` shares a file
+  with Change 2.
+- *Seed* (`paragraphSeed.test.ts`): a nine-line block of one-line items seeds to nine items with **eight**
+  newlines; an eight-line block of five items, three of them wrapped, seeds to **five** lines; a block with no
+  markers still seeds as one flowing line and still rejoins `Postgra-` + `duate`; a single-line block is unchanged.
+- *Commit* (`buildTextEdits.test.ts`): editing the words of item 3 of a five-item block re-wraps item 3 only —
+  items 1, 2, 4 and 5 keep **byte-identical** baselines and left edges; making item 3 longer by a line pushes the
+  items below down rather than overlapping them; a block with no markers lays out exactly as it does today.
+- *Overlay* (`TextEditOverlay.test.tsx`): Enter at the end of an item inserts the item's own marker and spacing;
+  Enter in a prose paragraph inserts a plain newline; a list handled by bullet mode still uses bullet mode.
+- *The user's files*, local, `TASK74_REAL=1` — copy `FIRGUN SRI 1.pdf` into `tmp/paragraphs/` first:
+  - Firgun page 5: the block is **9 lines**, the editor receives **9 items / 8 newlines**, and an unchanged **Done**
+    writes nothing;
+  - `rishi-ilovepdf.pdf` page 1: the 8-line, 5-item experience block seeds to **5** items; deleting a word from
+    item 3 pulls its continuation up, and items 1, 2, 4 and 5 keep their baselines;
+  - the résumé's real bullet list still enters **bullet mode**.
+- *Everything else still re-flows*: `TASK72_REAL=1` unchanged — Corporate Governance page 3 still seeds to 576
+  characters with no newline at 447.6 pt.
+- *Unchanged elsewhere*: the full suite; the existing `bulletList.test.ts` and `buildTextEdits.test.ts` cases
+  untouched and passing; `TASK66_SWEEP=1` at **121 / 121** with 0 untouched lines changed and 0 skipped — it covers
+  the bullet PDFs and Task 45's Word-symbol files; `TASK70_TABLES=1` unchanged at 45 files, 31 changed, **0
+  unexplained**; typecheck, lint, build.
 
 **Existing files that change**
 
 | File | Change |
 |---|---|
-| `src/lib/edit/paragraphSeed.ts` + test | The one condition, using `startsWithBulletMarker` |
-| `src/lib/edit/paragraphReflow.local.test.ts` | The Firgun page-5 case |
+| `src/lib/edit/paragraphSeed.ts` + test | Change 1 — `listSeedText` beside `paragraphSeedText` |
+| `src/lib/edit/buildTextEdits.ts` + test | Change 2 — per-item wrapping in `buildTextBlockEdits` only |
+| `src/components/TextEditOverlay.tsx` + test | Changes 1 and 3 — choose the seed, and Enter |
+| `src/lib/edit/paragraphReflow.local.test.ts` | The Firgun and rishi cases |
 
-**Files that must not change:** `bulletList.ts` and the bullet feature — lists whose marker is a separate run or a
-picture keep their existing handling; `textUnits.ts` and the Step 2 grouping rules; `textContent.ts`;
-`ruleLines.ts`; `buildTextEdits.ts` and the unchanged-line preservation; the export; pictures; tools.
+**Files that must not change:** `bulletList.ts` and `buildBulletListEdits` — the real bullet feature, Tasks 10H,
+45, 64 Revision 1 and 67 Revision 2a; `textUnits.ts` and the Step 2 grouping rules; `textContent.ts`;
+`ruleLines.ts`; the export handlers; pictures; tools; saved projects.
 
-**Guardrails:** a block with no bullet markers must still re-flow exactly as Task 72 makes it; the bullet feature's
-own lists must not change behaviour; no committed geometry changes — this revision only changes the text handed to
-the editor when a box opens.
+**Guardrails:** a block with no bullet markers must re-flow exactly as Task 72 makes it; a list the bullet feature
+recognises must keep bullet mode and produce identical output; no committed alignment value changes; the marker
+inserted by Enter is copied from the list's own text, never invented.
 
-**Verify (user):** open `FIRGUN SRI 1.pdf` → page 5 → click the vehicle-allocation list: it opens with one bullet
-per line, not as a paragraph. Edit one item and press **Done**: the other items stay where they are. Then open
-`Corporate-Governance-edited (25).pdf` page 3 and confirm an ordinary paragraph still re-flows when a word is
-deleted.
+**Verify (user):** open `FIRGUN SRI 1.pdf` → page 5 → click the vehicle list: one bullet per line. Delete a couple
+of words from a long item: the rest of *that item* pulls up and the other items do not move. Press Enter at the end
+of an item: a new bullet appears. **Done**, then reopen: the list is still a list. Then open
+`Corporate-Governance-edited (25).pdf` page 3 and confirm a plain paragraph still re-flows, and the résumé's own
+bullet list still behaves as it always has.
 
-**Known limit:** inside a bullet item that wraps onto a second line — **48** blocks in the corpus — deleting words
-no longer pulls the continuation up, so a short line is left behind until it is tidied by hand. That is the
-pre-Task-72 behaviour, and it is the price of not flattening the list. A later task could teach `bulletList.ts` to
-recognise a marker embedded at the start of a run, which would give these lists the full bullet treatment —
-redrawn dots, indent, and removal of the old dots on export — but that changes what the export writes and belongs
-on its own.
+**Known limit:** a list mixing markers of different shapes — `•` on some items, `-` or `◦` on others — is still one
+block and each marker line still starts an item, but Enter copies the marker of the item the caret is in, so a new
+item takes that item's marker rather than the list's dominant one.
 
-**Land:** same branch, committed with Step 2.
+**Land:** same branch, committed on top of Step 2.

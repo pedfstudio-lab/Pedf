@@ -9,6 +9,8 @@ const MIN_MARKER_SIZE_PT = 1;
 const MAX_MARKER_SIZE_PT = 7;
 const MAX_LEFT_GAP_PT = 16;
 const MIN_LEFT_GAP_PT = 0.5;
+/** A typed marker may touch its words; the character itself is the evidence. */
+const MIN_TEXT_LEFT_GAP_PT = -0.5;
 const MIN_LIST_ITEMS = 2;
 
 /** Text glyphs commonly used as list markers by Word and other PDF producers. */
@@ -208,8 +210,11 @@ function textBulletMatch(line: TextLine): TextBulletMatch | undefined {
     return undefined;
   }
 
+  // An author who typed "•Any" rather than "• Any" still wrote a bullet: the run is a
+  // recognised marker character on its own, which is evidence enough. Only the image
+  // detector needs a real gap, because there the shape itself is all it has to go on.
   const leftGap = bodyRun.rect.x - (markerRun.rect.x + markerRun.rect.w);
-  if (leftGap < MIN_LEFT_GAP_PT || leftGap > MAX_LEFT_GAP_PT) return undefined;
+  if (leftGap < MIN_TEXT_LEFT_GAP_PT || leftGap > MAX_LEFT_GAP_PT) return undefined;
 
   const baselineDistance = Math.abs(markerRun.rect.y - bodyRun.rect.y);
   if (baselineDistance > Math.max(1.5, line.style.fontSizePt * 0.25)) return undefined;

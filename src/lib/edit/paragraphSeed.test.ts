@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TextEdit } from '@/lib/export/types';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
-import { editorWidthMeasurementText, paragraphSeedText } from './paragraphSeed';
+import { editorWidthMeasurementText, listSeedText, paragraphSeedText } from './paragraphSeed';
 
 const style = {
   fontName: 'Helvetica',
@@ -59,6 +59,58 @@ describe('paragraphSeedText', () => {
   it('does not add a second space when a line already ends with one', () => {
     expect(paragraphSeedText(paragraph('First line ', 'second line')))
       .toBe('First line second line');
+  });
+});
+
+describe('listSeedText', () => {
+  it('seeds nine one-line items as nine editor lines', () => {
+    const seed = listSeedText(paragraph(
+      '• First item',
+      '• Second item',
+      '• Third item',
+      '• Fourth item',
+      '• Fifth item',
+      '• Sixth item',
+      '• Seventh item',
+      '• Eighth item',
+      '• Ninth item',
+    ));
+
+    expect(seed.split('\n')).toHaveLength(9);
+    expect(seed.match(/\n/g)).toHaveLength(8);
+  });
+
+  it('joins continuation lines only within their own list item', () => {
+    expect(listSeedText(paragraph(
+      '• First item wraps',
+      'onto another line',
+      '• Second item',
+      '• Third item also',
+      'wraps onto another line',
+      '• Fourth item',
+      '• Fifth item',
+      'and keeps flowing',
+    ))).toBe([
+      '• First item wraps onto another line',
+      '• Second item',
+      '• Third item also wraps onto another line',
+      '• Fourth item',
+      '• Fifth item and keeps flowing',
+    ].join('\n'));
+  });
+
+  it('keeps prose flowing and rejoins a split lowercase word', () => {
+    expect(listSeedText(paragraph('A Postgra-', 'duate programme')))
+      .toBe('A Postgraduate programme');
+  });
+
+  it('returns a single-line block unchanged', () => {
+    expect(listSeedText(paragraph('• Keep  these spaces'))).toBe('• Keep  these spaces');
+  });
+
+  it('keeps leading non-marker lines as a leading item', () => {
+    expect(listSeedText(paragraph('Leading line', 'still leading', '• Marked item')))
+      .toBe('Leading line still leading\n• Marked item');
   });
 });
 

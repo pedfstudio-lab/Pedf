@@ -384,7 +384,14 @@ export function OverlayLayer({
     ]).then(([nextRuns, nextGraphicRegions, nextRuleLines]) => {
       if (!cancelled) {
         setRuns(nextRuns);
-        setBlocks(groupRunsIntoBlocks(nextRuns, { ruleLines: nextRuleLines }));
+        // A drawn bullet dot is local evidence that two stacked lines are list items:
+        // without it their own text looks like short sentences and they never group,
+        // which leaves bulletList.ts with one item per block and no list to edit.
+        const markers = [
+          ...nextGraphicRegions.imageRegions,
+          ...nextGraphicRegions.shapeMarkerRegions,
+        ];
+        setBlocks(groupRunsIntoBlocks(nextRuns, { ruleLines: nextRuleLines, markers }));
         setImageRegions([...nextGraphicRegions.imageRegions]);
         setShapeMarkerRegions([...nextGraphicRegions.shapeMarkerRegions]);
         setRuleLines(nextRuleLines);

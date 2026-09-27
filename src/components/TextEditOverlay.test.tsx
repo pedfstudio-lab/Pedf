@@ -92,6 +92,15 @@ function renderEditor(
   );
 }
 
+function placeCaretAtTextEnd(node: Node): void {
+  const range = document.createRange();
+  range.setStart(node, node.textContent?.length ?? 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     font: '',
@@ -187,6 +196,59 @@ describe('TextEditOverlay paragraph seed', () => {
 
     expect(screen.getByRole('textbox', { name: 'Editable bullet list' }).innerHTML)
       .toBe('• First item<br>• Second item');
+  });
+
+  it('opens an inline-marker list as one editor line per item', () => {
+    renderEditor(paragraph(
+      '• First item wraps',
+      'onto its continuation',
+      '• Second item',
+      '• Third item wraps',
+      'onto another continuation',
+    ));
+
+    expect(screen.getByRole('textbox', { name: 'Editable text' }).innerHTML).toBe(
+      '• First item wraps onto its continuation<br>• Second item<br>• Third item wraps onto another continuation',
+    );
+  });
+
+  it('copies the current inline marker when Enter is pressed at an item end', () => {
+    const onDone = vi.fn();
+    renderEditor(paragraph('◦ First item', '◦ Second item'), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    const firstItem = editor.firstChild;
+    expect(firstItem).not.toBeNull();
+    placeCaretAtTextEnd(firstItem!);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0].text).toBe('◦ First item\n◦ \n◦ Second item');
+  });
+
+  it('inserts a plain newline for Enter in prose', () => {
+    renderEditor(paragraph('Plain paragraph'));
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    placeCaretAtTextEnd(editor.firstChild!);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(editor.textContent).toBe('Plain paragraph\n');
+  });
+
+  it('keeps bullet mode in charge of Enter', () => {
+    const onDone = vi.fn();
+    renderEditor(paragraph('First item', 'Second item'), 1, 0, {
+      bulletMode: { items: ['First item', 'Second item'], maxHeightPt: 200 },
+      onDone,
+    });
+    const editor = screen.getByRole('textbox', { name: 'Editable bullet list' });
+    placeCaretAtTextEnd(editor.firstChild!);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0].text).toBe('• First item\n• \n• Second item');
   });
 
   it('re-opens an edited block from boxText instead of reseeding the source paragraph', () => {

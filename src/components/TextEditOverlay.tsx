@@ -27,10 +27,12 @@ import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar
 import type { ElementSize } from '@/lib/edit/floatingToolbar';
 import {
   editorWidthMeasurementText,
+  listSeedText,
   paragraphSeedText,
   widestLineWidth,
 } from '@/lib/edit/paragraphSeed';
 import { neighbourBoxWidth } from '@/lib/edit/neighbourBoxWidth';
+import { startsWithBulletMarker } from '@/lib/pdf/textUnits';
 import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
@@ -78,6 +80,37 @@ function insertPlainText(root: HTMLElement, text: string): boolean {
   selection.removeAllRanges();
   selection.addRange(range);
   return true;
+}
+
+function markerPrefixAtLineEnd(
+  root: HTMLElement,
+  style: TextStyle,
+  zoom: number,
+): string | undefined {
+  const caret = selectionRangeInside(root);
+  if (!caret?.collapsed) return undefined;
+
+  const beforeCaret = window.document.createRange();
+  beforeCaret.selectNodeContents(root);
+  beforeCaret.setEnd(caret.startContainer, caret.startOffset);
+  const wrapper = window.document.createElement('div');
+  wrapper.append(beforeCaret.cloneContents());
+  const prefixText = serializeRichText(wrapper, style, zoom).text;
+  const fullText = serializeRichText(root, style, zoom).text;
+  const nextBreak = fullText.indexOf('\n', prefixText.length);
+  const lineEnd = nextBreak < 0 ? fullText.length : nextBreak;
+  if (prefixText.length !== lineEnd) return undefined;
+
+  const lineStart = prefixText.lastIndexOf('\n') + 1;
+  const line = prefixText.slice(lineStart);
+  if (!startsWithBulletMarker(line)) return undefined;
+  const leadingSpace = line.match(/^\s*/u)?.[0] ?? '';
+  const afterLeadingSpace = line.slice(leadingSpace.length);
+  const marker = Array.from(afterLeadingSpace)[0];
+  if (!marker) return undefined;
+  const afterMarker = afterLeadingSpace.slice(marker.length);
+  const markerSpace = afterMarker.match(/^\s*/u)?.[0] ?? '';
+  return `${leadingSpace}${marker}${markerSpace}`;
 }
 
 function elementAtRangeStart(range: Range, root: HTMLElement): HTMLElement {
@@ -219,10 +252,14 @@ export function TextEditOverlay({
   onDone,
   onCancel,
 }: TextEditOverlayProps) {
+  const markerList = !bulletMode
+    && block.lines.some((line) => startsWithBulletMarker(line.text));
   const initialText = existing?.[0]?.boxText ??
     (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
-    ((block.align ?? 'left') === 'left' ? paragraphSeedText(block) : block.text);
+    ((block.align ?? 'left') === 'left'
+      ? (markerList ? listSeedText(block) : paragraphSeedText(block))
+      : block.text);
   // Re-opening a bullet list must seed its font from a body line, not the "•" marker
   // (whose style deliberately drops fontRef); recover a lost fontRef from the block so a
   // list damaged by an earlier re-edit heals its embedded font on the next edit.
@@ -654,7 +691,12 @@ export function TextEditOverlay({
           } else if (event.key === 'Enter') {
             event.preventDefault();
             const editable = editableRef.current;
-            if (editable) insertPlainText(editable, bulletMode ? '\n• ' : '\n');
+            if (editable) {
+              const markerPrefix = markerList
+                ? markerPrefixAtLineEnd(editable, style, zoom)
+                : undefined;
+              insertPlainText(editable, bulletMode ? '\n• ' : `\n${markerPrefix ?? ''}`);
+            }
             resizeToContent();
           }
         }}

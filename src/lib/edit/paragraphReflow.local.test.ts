@@ -7,12 +7,16 @@ import { exportPdf } from '@/lib/export/exportPdf';
 import type { Edit } from '@/lib/export/types';
 import type { PageGeometry } from '@/lib/pdf/types';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
+import { detectBulletListFromRegions } from '@/lib/pdf/bulletList';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import {
   editorWidthMeasurementText,
+  listSeedText,
   paragraphSeedText,
   widestLineWidth,
 } from './paragraphSeed';
+import { startsWithBulletMarker } from '@/lib/pdf/textUnits';
 import {
   calculateInitialEditorWidth,
   finishTextEdit,
@@ -28,6 +32,7 @@ if (!enabled) {
 }
 
 const task74Fixtures = {
+  firgun: 'tmp/tables/Firgun_QT-H4SNASRX_SriLanka.pdf',
   rishi: 'tmp/compress-tests/rishi-ilovepdf.pdf',
   rahul: 'tmp/bullets/RAHUL_RAJPUT_RESUME.pdf',
   sriLanka: 'tmp/tables/Firgun_QT-H4SNASRX_SriLanka.pdf',
@@ -85,14 +90,27 @@ async function editorPage(file: string, pageNumber: number) {
   const document = await open(new Uint8Array(await readFile(file)));
   const page = await document.getPage(pageNumber);
   const pageIndex = pageNumber - 1;
-  const [runs, ruleLines] = await Promise.all([
+  // Group exactly as OverlayLayer does, drawn bullet markers included; without them a
+  // drawn-marker list does not group and bulletList.ts cannot see it.
+  const [runs, ruleLines, regions] = await Promise.all([
     extractTextRuns(page, pageIndex),
     detectRuleLines(page, pageIndex),
+    detectPageGraphicRegions(page, pageIndex),
   ]);
+  const markers = [...regions.imageRegions, ...regions.shapeMarkerRegions];
+  const blocks = groupRunsIntoBlocks(runs, { ruleLines, markers });
   return {
     runs,
     ruleLines,
-    blocks: groupRunsIntoBlocks(runs, { ruleLines }),
+    regions,
+    blocks,
+    bulletLists: blocks
+      .map((block) => detectBulletListFromRegions(
+        block,
+        [...regions.imageRegions],
+        [...regions.shapeMarkerRegions],
+      ))
+      .filter((list): list is NonNullable<typeof list> => list !== null),
   };
 }
 
@@ -233,6 +251,45 @@ describe.skipIf(!task74Enabled)('Task 74 Step 1 Revision 1 real borders', () => 
 });
 
 describe.skipIf(!task74Enabled)('Task 74 Step 2 real text units', () => {
+  it('opens the Firgun vehicle allocation list as nine items and unchanged Done writes nothing', async () => {
+    const page = await editorPage(task74Fixtures.firgun, 5);
+    const block = page.blocks.find((candidate) => (
+      candidate.text.includes('A/C vehicle during the tours and transfers')
+      && candidate.text.includes('1-4 pax')
+    ));
+    expect(block, 'Firgun page 5 Vehicle Allocation list').toBeDefined();
+    expect(block?.lines).toHaveLength(9);
+    const seed = listSeedText(block!);
+    expect(seed.split('\n')).toHaveLength(9);
+    expect(seed.match(/\n/g)).toHaveLength(8);
+
+    const opened: TextEditSessionValue = {
+      text: seed,
+      style: block!.style,
+      width: block!.rect.w,
+      height: block!.rect.h,
+      dx: 0,
+      dy: 0,
+      align: block!.align ?? 'left',
+      alignLeftPt: block!.alignLeftPt ?? block!.rect.x,
+      alignWidthPt: block!.alignWidthPt ?? block!.rect.w,
+    };
+    const onDone = () => {
+      throw new Error('unchanged list Done must not build or add edits');
+    };
+    expect(finishTextEdit(opened, { ...opened }, onDone, () => undefined)).toBe('cancelled');
+  }, 60_000);
+
+  it('seeds the wrapped Rishi experience list as five items', async () => {
+    const page = await editorPage(task74Fixtures.rishi, 1);
+    const block = page.blocks.find((candidate) => (
+      candidate.lines.length === 8
+      && candidate.lines.filter((line) => startsWithBulletMarker(line.text)).length === 5
+    ));
+    expect(block, 'Rishi page 1 five-item experience list').toBeDefined();
+    expect(listSeedText(block!).split('\n')).toHaveLength(5);
+  }, 60_000);
+
   it('keeps the Bhutan stretched line in its paragraph and gives the crane block local geometry', async () => {
     const [page6, page8] = await Promise.all([
       editorPage(task74Fixtures.bhutan, 6),
@@ -276,4 +333,28 @@ describe.skipIf(!task74Enabled)('Task 74 Step 2 real text units', () => {
     expect(block?.lines).toHaveLength(6);
     expect(paragraphSeedText(block!)).toHaveLength(576);
   }, 60_000);
+});
+
+describe.skipIf(!task74Enabled)('Task 74 drawn bullet markers', () => {
+  it('still finds the resume bullet lists that grouping must hold together', async () => {
+    // Step 2's sentence-end and right-edge guards broke these: every item ends with a
+    // full stop and an item's last line is short, so each item became its own block and
+    // bulletList.ts saw no list at all. main detects four; so must we.
+    const [page1, page2] = await Promise.all([
+      editorPage(task74Fixtures.rahul, 1),
+      editorPage(task74Fixtures.rahul, 2),
+    ]);
+    expect(page1.bulletLists.length + page2.bulletLists.length).toBe(4);
+    expect(page1.bulletLists.map((list) => list.items.length)).toEqual([6, 5]);
+    expect(page2.bulletLists.map((list) => list.items.length)).toEqual([4, 3]);
+
+    // A typed-marker list is unaffected either way.
+    const rishi = await editorPage(task74Fixtures.rishi, 1);
+    expect(rishi.bulletLists).toHaveLength(2);
+    process.stdout.write(
+      `TASK74 BULLETS rahul ${page1.bulletLists.length + page2.bulletLists.length} lists`
+      + ` | rishi ${rishi.bulletLists.length} lists
+`,
+    );
+  }, 120_000);
 });
