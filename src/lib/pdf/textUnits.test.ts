@@ -1,0 +1,161 @@
+import { describe, expect, it } from 'vitest';
+import type { RuleLine } from './ruleLines';
+import type { TextLine, TextRun } from './textContent';
+import {
+  canJoinTextBlock,
+  canJoinTextBulletList,
+  detectBlockAlignment,
+  splitTextRow,
+} from './textUnits';
+
+const style = {
+  fontName: 'Helvetica',
+  fontSizePt: 10,
+  bold: false,
+  italic: false,
+  color: { r: 0, g: 0, b: 0 },
+};
+
+function run(text: string, x: number, w: number, y = 500, size = 10): TextRun {
+  return {
+    pageIndex: 0,
+    text,
+    rect: { x, y, w, h: size },
+    style: { ...style, fontSizePt: size },
+  };
+}
+
+function line(text: string, x: number, y: number, w: number, size = 10): TextLine {
+  const source = run(text, x, w, y, size);
+  return {
+    pageIndex: 0,
+    text,
+    rect: source.rect,
+    baselineY: y,
+    style: source.style,
+    runs: [source],
+  };
+}
+
+function rule(
+  orientation: RuleLine['orientation'],
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): RuleLine {
+  return {
+    pageIndex: 0,
+    orientation,
+    x1,
+    y1,
+    x2,
+    y2,
+    thicknessPt: 1,
+    color: { r: 0, g: 0, b: 0 },
+  };
+}
+
+describe('text row click units', () => {
+  it('splits at a vertical border even when the gap is only 15.8 pt', () => {
+    const runs = [run('Left cell', 10, 20), run('Right cell', 45.8, 35)];
+    expect(splitTextRow(runs, [rule('vertical', 38, 498, 38, 511)]))
+      .toEqual([[runs[0]], [runs[1]]]);
+  });
+
+  it('splits one isolated nine-times-font-size gap', () => {
+    const runs = [run('email@example.com', 10, 80), run('City', 180, 25)];
+    expect(splitTextRow(runs, [])).toEqual([[runs[0]], [runs[1]]]);
+  });
+
+  it('keeps three identical 1.9-times-font-size stretched gaps in one line', () => {
+    const runs = [
+      run('After', 10, 42, 500, 20),
+      run('breakfast,', 90, 80, 500, 20),
+      run('we', 208, 22, 500, 20),
+      run('leave', 268, 45, 500, 20),
+    ];
+    expect(splitTextRow(runs, [])).toEqual([runs]);
+  });
+
+  it('allows half-point measurement noise at the three-times-size stretched limit', () => {
+    const runs = [
+      run('chortens', 10, 40),
+      run('surrounded', 80.25, 50),
+      run('by', 160.5, 12),
+    ];
+    expect(splitTextRow(runs, [])).toEqual([runs]);
+  });
+
+  it('keeps the compact table-number split', () => {
+    const runs = [run('50.00%', 10, 40), run('100.00%', 55, 45)];
+    expect(splitTextRow(runs, [])).toEqual([[runs[0]], [runs[1]]]);
+  });
+});
+
+describe('stacked text units', () => {
+  it('never joins across a spanning horizontal border', () => {
+    const upper = line('Upper paragraph line', 20, 500, 200);
+    const lower = line('Lower paragraph line', 20, 486, 195);
+    expect(canJoinTextBlock(
+      [upper],
+      lower,
+      [rule('horizontal', 20, 493, 220, 493)],
+    )).toBe(false);
+  });
+
+  it('keeps bullet items out of prose while retaining consecutive bullets as a list', () => {
+    const breakfast = line('• Breakfast', 20, 500, 100);
+    const continuation = line('with fresh fruit', 34, 486, 90);
+    const dinner = line('• Dinner', 20, 472, 100);
+    expect(canJoinTextBlock([breakfast], continuation, [])).toBe(true);
+    expect(canJoinTextBlock([breakfast], dinner, [])).toBe(false);
+    expect(canJoinTextBulletList([breakfast, continuation], dinner, [])).toBe(true);
+  });
+
+  it('does not join a short heading to the wider paragraph below it', () => {
+    expect(canJoinTextBlock(
+      [line('Overview', 20, 500, 55)],
+      line('This paragraph continues across the column', 20, 486, 220),
+      [],
+    )).toBe(false);
+  });
+
+  it('joins full paragraph lines and their short last line', () => {
+    const first = line('First full paragraph line', 20, 500, 210);
+    const second = line('Second full paragraph line', 20, 486, 205);
+    const last = line('Short ending', 20, 472, 80);
+    expect(canJoinTextBlock([first], second, [])).toBe(true);
+    expect(canJoinTextBlock([first, second], last, [])).toBe(true);
+  });
+
+  it('does not join a new item after a completed sentence', () => {
+    expect(canJoinTextBlock(
+      [line('First item.', 20, 500, 200)],
+      line('Second item', 20, 486, 195),
+      [],
+    )).toBe(false);
+  });
+});
+
+describe('block-local alignment', () => {
+  it('detects left, right, and centre from a block’s own lines', () => {
+    expect(detectBlockAlignment([
+      line('One', 20, 500, 180),
+      line('Two', 20.5, 486, 120),
+    ])).toBe('left');
+    expect(detectBlockAlignment([
+      line('One', 20, 500, 180),
+      line('Two', 80, 486, 120),
+    ])).toBe('right');
+    expect(detectBlockAlignment([
+      line('One', 20, 500, 180),
+      line('Two', 50, 486, 120),
+    ])).toBe('center');
+  });
+
+  it('keeps a single line’s existing page-bound alignment', () => {
+    expect(detectBlockAlignment([{ ...line('Date', 470, 500, 80), align: 'right' }]))
+      .toBe('right');
+  });
+});

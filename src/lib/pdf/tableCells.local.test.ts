@@ -51,6 +51,11 @@ interface Comparison {
   addedLines: string[];
   cellSplits: string[];
   rowSplits: string[];
+  localItemSplits: string[];
+  stretchedJoins: string[];
+  paragraphSplits: string[];
+  paragraphJoins: string[];
+  alignmentChanges: string[];
   unexplained: string[];
 }
 
@@ -108,6 +113,43 @@ function separatedLinePairs(before: readonly TextBlock[], after: readonly TextBl
   }));
 }
 
+function separatedBlockRunPairs(before: readonly TextBlock[], after: readonly TextBlock[]): string[] {
+  const owners = new Map<TextRun, number>();
+  after.forEach((block, blockIndex) => {
+    block.lines.forEach((line) => line.runs.forEach((run) => owners.set(run, blockIndex)));
+  });
+  return before.flatMap((block) => {
+    const runs = block.lines.flatMap((line) => line.runs);
+    return runs.slice(1).flatMap((right, index) => {
+      const left = runs[index];
+      if (!left || owners.get(left) === owners.get(right)) return [];
+      return [`${preview(left.text)} | ${preview(right.text)}`];
+    });
+  });
+}
+
+function blockRunKey(block: TextBlock, runIndexes: ReadonlyMap<TextRun, number>): string {
+  return block.lines
+    .flatMap((line) => line.runs)
+    .map((run) => runIndexes.get(run) ?? -1)
+    .sort((left, right) => left - right)
+    .join(',');
+}
+
+function alignmentChanges(
+  before: readonly TextBlock[],
+  after: readonly TextBlock[],
+  runs: readonly TextRun[],
+): string[] {
+  const runIndexes = new Map(runs.map((run, index) => [run, index]));
+  const beforeByRuns = new Map(before.map((block) => [blockRunKey(block, runIndexes), block]));
+  return after.flatMap((block) => {
+    const previous = beforeByRuns.get(blockRunKey(block, runIndexes));
+    if (!previous || previous.align === block.align) return [];
+    return [`${previous.align ?? 'left'} -> ${block.align ?? 'left'}: ${preview(block.text)}`];
+  });
+}
+
 afterEach(async () => {
   await Promise.all(openDocuments.splice(0).map((document) => document.destroy()));
 });
@@ -130,6 +172,11 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
       const afterLines: string[] = [];
       const cellSplits: string[] = [];
       const rowSplits: string[] = [];
+      const localItemSplits: string[] = [];
+      const stretchedJoins: string[] = [];
+      const paragraphSplits: string[] = [];
+      const paragraphJoins: string[] = [];
+      const changedAlignments: string[] = [];
       const unexplained: string[] = [];
 
       for (const expectedPage of expected.pages) {
@@ -149,23 +196,38 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
         rejectedUnderlineCandidates += unguardedLines.filter((line) => (
           line.orientation === 'horizontal' && !guardedKeys.has(ruleKey(line))
         )).length;
-        const unchangedLines = mergeRunsIntoLines(runs).map((line) => line.text);
-        const unchangedBlocks = groupRunsIntoBlocks(runs).map((block) => block.text);
+        const legacyLines = mergeRunsIntoLines(runs);
+        const legacyBlocks = groupRunsIntoBlocks(runs);
+        const unchangedLines = legacyLines.map((line) => line.text);
+        const unchangedBlocks = legacyBlocks.map((block) => block.text);
         expect(unchangedLines, `${file} page ${expectedPage.pageIndex + 1}: unswitched lines`)
           .toEqual(expectedPage.lines);
         expect(unchangedBlocks, `${file} page ${expectedPage.pageIndex + 1}: unswitched blocks`)
           .toEqual(expectedPage.blocks);
 
         const verticalRules = ruleLines.filter((line) => line.orientation === 'vertical');
-        const numberAwareLines = mergeRunsIntoLines(runs, { ruleLines: [] });
+        const localLines = mergeRunsIntoLines(runs, { ruleLines: [] });
         const editorLines = mergeRunsIntoLines(runs, { ruleLines: verticalRules });
+        const localBlocks = groupRunsIntoBlocks(runs, { ruleLines: [] });
         const verticalOnlyBlocks = groupRunsIntoBlocks(runs, { ruleLines: verticalRules });
         const editorBlocks = groupRunsIntoBlocks(runs, { ruleLines });
-        const pageCellSplits = separatedRunPairs(numberAwareLines, editorLines);
+        const pageLocalItemSplits = separatedRunPairs(legacyLines, localLines);
+        const pageStretchedJoins = separatedRunPairs(localLines, legacyLines);
+        const pageCellSplits = separatedRunPairs(localLines, editorLines);
+        const unexpectedCellJoins = separatedRunPairs(editorLines, localLines);
+        const pageParagraphSplits = separatedBlockRunPairs(legacyBlocks, localBlocks);
+        const pageParagraphJoins = separatedBlockRunPairs(localBlocks, legacyBlocks);
         const pageRowSplits = separatedLinePairs(verticalOnlyBlocks, editorBlocks);
+        const unexpectedRowJoins = separatedLinePairs(editorBlocks, verticalOnlyBlocks);
+        const pageAlignmentChanges = alignmentChanges(legacyBlocks, editorBlocks, runs);
+        localItemSplits.push(...pageLocalItemSplits.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
+        stretchedJoins.push(...pageStretchedJoins.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
         cellSplits.push(...pageCellSplits.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
+        paragraphSplits.push(...pageParagraphSplits.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
+        paragraphJoins.push(...pageParagraphJoins.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
         rowSplits.push(...pageRowSplits.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
-        const cellDelta = editorLines.length - numberAwareLines.length;
+        changedAlignments.push(...pageAlignmentChanges.map((value) => `page ${expectedPage.pageIndex + 1}: ${value}`));
+        const cellDelta = editorLines.length - localLines.length;
         const rowDelta = editorBlocks.length - verticalOnlyBlocks.length;
         if (cellDelta !== pageCellSplits.length) {
           unexplained.push(
@@ -175,6 +237,16 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
         if (rowDelta !== pageRowSplits.length) {
           unexplained.push(
             `page ${expectedPage.pageIndex + 1}: block delta ${rowDelta}, classified ${pageRowSplits.length}`,
+          );
+        }
+        if (unexpectedCellJoins.length > 0) {
+          unexplained.push(
+            `page ${expectedPage.pageIndex + 1}: vertical borders joined ${unexpectedCellJoins.length} boundaries`,
+          );
+        }
+        if (unexpectedRowJoins.length > 0) {
+          unexplained.push(
+            `page ${expectedPage.pageIndex + 1}: horizontal borders joined ${unexpectedRowJoins.length} boundaries`,
           );
         }
         before.push(...expectedPage.blocks);
@@ -209,8 +281,23 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
         addedLines: difference(afterLines, beforeLines),
         cellSplits,
         rowSplits,
+        localItemSplits,
+        stretchedJoins,
+        paragraphSplits,
+        paragraphJoins,
+        alignmentChanges: changedAlignments,
         unexplained,
       };
+      const classified = comparison.cellSplits.length
+        + comparison.rowSplits.length
+        + comparison.localItemSplits.length
+        + comparison.stretchedJoins.length
+        + comparison.paragraphSplits.length
+        + comparison.paragraphJoins.length
+        + comparison.alignmentChanges.length;
+      if ((comparison.removed.length > 0 || comparison.added.length > 0) && classified === 0) {
+        comparison.unexplained.push('changed boxes without a classified boundary or alignment change');
+      }
       comparisons.push(comparison);
       process.stdout.write(
         `${file} | boxes ${comparison.before} -> ${comparison.after}`
@@ -220,7 +307,12 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
       for (const value of comparison.added) process.stdout.write(`  NEW ${preview(value)}\n`);
       for (const value of comparison.cellSplits) process.stdout.write(`  (a) CELL ${value}\n`);
       for (const value of comparison.rowSplits) process.stdout.write(`  (b) ROW ${value}\n`);
-      for (const value of comparison.unexplained) process.stdout.write(`  (c) UNEXPLAINED ${value}\n`);
+      for (const value of comparison.localItemSplits) process.stdout.write(`  (c) ITEM ${value}\n`);
+      for (const value of comparison.stretchedJoins) process.stdout.write(`  (d) STRETCHED ${value}\n`);
+      for (const value of comparison.paragraphSplits) process.stdout.write(`  (e) PARAGRAPH SPLIT ${value}\n`);
+      for (const value of comparison.paragraphJoins) process.stdout.write(`  (f) PARAGRAPH JOIN ${value}\n`);
+      for (const value of comparison.alignmentChanges) process.stdout.write(`  (g) ALIGN ${value}\n`);
+      for (const value of comparison.unexplained) process.stdout.write(`  (?) UNEXPLAINED ${value}\n`);
       await document.destroy();
       openDocuments.splice(openDocuments.indexOf(document), 1);
     }
@@ -244,10 +336,6 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
       || value.startsWith('Bentota – Colombo After breakfast')
       || value.startsWith('Colombo – Airport One last Sri Lankan breakfast')
     ))).toEqual([true, true, true]);
-    // Day 3's newly separated description correctly rejoins its existing wrapped continuation.
-    // That replaces one extra baseline block even though only the three route/description rows split.
-    expect(sriLanka?.removed).toHaveLength(4);
-    expect(sriLanka?.added).toHaveLength(7);
     expect(sriLanka?.added.some((value) => value.startsWith('Nuwara Eliya – Ella'))).toBe(true);
     expect(sriLanka?.added.some((value) => value.startsWith('Bentota – Colombo'))).toBe(true);
     expect(sriLanka?.added.some((value) => value.startsWith('Colombo – Airport'))).toBe(true);
@@ -259,6 +347,11 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
 
     const cellSplitTotal = comparisons.reduce((sum, result) => sum + result.cellSplits.length, 0);
     const rowSplitTotal = comparisons.reduce((sum, result) => sum + result.rowSplits.length, 0);
+    const localItemSplitTotal = comparisons.reduce((sum, result) => sum + result.localItemSplits.length, 0);
+    const stretchedJoinTotal = comparisons.reduce((sum, result) => sum + result.stretchedJoins.length, 0);
+    const paragraphSplitTotal = comparisons.reduce((sum, result) => sum + result.paragraphSplits.length, 0);
+    const paragraphJoinTotal = comparisons.reduce((sum, result) => sum + result.paragraphJoins.length, 0);
+    const alignmentChangeTotal = comparisons.reduce((sum, result) => sum + result.alignmentChanges.length, 0);
     const unexplained = comparisons.flatMap((result) => result.unexplained);
     expect(cellSplitTotal).toBe(14);
     expect(rowSplitTotal).toBe(40);
@@ -273,6 +366,14 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
       + ` | rows ${rowSplitTotal} / predicted 33`
       + ` | unexplained ${unexplained.length}`
       + ` | horizontal underline candidates rejected ${rejectedUnderlineCandidates}\n`,
+    );
+    process.stdout.write(
+      `TASK74 STEP 2 local item splits ${localItemSplitTotal}`
+      + ` | stretched joins ${stretchedJoinTotal}`
+      + ` | paragraph splits ${paragraphSplitTotal}`
+      + ` | paragraph joins ${paragraphJoinTotal}`
+      + ` | alignment changes ${alignmentChangeTotal}`
+      + ` | unexplained ${unexplained.length}\n`,
     );
     process.stdout.write(
       'TASK74 VARIANCE the survey counted affected merged units; this test counts every separated boundary'

@@ -124,8 +124,8 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
       }
     }
 
-    expect(nonLeft).toBe(509);
-    expect(firstNarrowed).toBe(261);
+    expect(nonLeft).toBe(475);
+    expect(firstNarrowed).toBe(85);
     expect(reEditNarrowed).toBe(firstNarrowed);
     process.stdout.write(
       `TASK74 NEIGHBOUR REACH first ${firstNarrowed}/${nonLeft}`

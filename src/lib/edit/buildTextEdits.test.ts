@@ -23,6 +23,39 @@ const run: TextRun = {
   },
 };
 
+function sourceBlock(
+  lines: readonly { readonly text: string; readonly x: number; readonly y: number; readonly w: number }[],
+): TextBlock {
+  const textLines = lines.map((entry) => {
+    const sourceRun = {
+      ...run,
+      text: entry.text,
+      rect: { x: entry.x, y: entry.y, w: entry.w, h: run.style.fontSizePt },
+    };
+    return {
+      pageIndex: run.pageIndex,
+      text: entry.text,
+      rect: sourceRun.rect,
+      baselineY: entry.y,
+      style: run.style,
+      runs: [sourceRun],
+    };
+  });
+  const left = Math.min(...textLines.map((line) => line.rect.x));
+  const right = Math.max(...textLines.map((line) => line.rect.x + line.rect.w));
+  const bottom = Math.min(...textLines.map((line) => line.rect.y));
+  const top = Math.max(...textLines.map((line) => line.rect.y + line.rect.h));
+  return {
+    pageIndex: run.pageIndex,
+    text: textLines.map((line) => line.text).join('\n'),
+    rect: { x: left, y: bottom, w: right - left, h: top - bottom },
+    topBaselineY: Math.max(...textLines.map((line) => line.baselineY)),
+    lineHeightPt: 16,
+    style: run.style,
+    lines: textLines,
+  };
+}
+
 describe('buildTextEdits', () => {
   it('builds standalone wrapped free text without cover edits', () => {
     const style = { ...run.style, fontSizePt: 14 };
@@ -156,6 +189,79 @@ describe('buildTextEdits', () => {
     expect(result.texts.map((edit) => edit.z)).toEqual([22, 23, 24]);
     expect(result.texts.every((edit) => edit.boxHeight === 48)).toBe(true);
     expect(result.texts.every((edit) => edit.boxText === 'First second third')).toBe(true);
+  });
+
+  it('keeps unchanged prefix and suffix lines at their exact source positions', () => {
+    const block = sourceBlock([
+      { text: 'Top line', x: 40, y: 500, w: 110 },
+      { text: 'Old middle', x: 55, y: 484, w: 95 },
+      { text: 'Bottom line', x: 70, y: 468, w: 80 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      { text: 'Top line New middle Bottom line', style: run.style, width: 180, height: 48, dx: 0, dy: 0 },
+      ['Top line', 'New middle', 'Bottom line'],
+      20,
+    );
+
+    expect(result.texts.map((edit) => ({ x: edit.rect.x, y: edit.rect.y }))).toEqual([
+      { x: 40, y: 500 },
+      { x: 40, y: 484 },
+      { x: 70, y: 468 },
+    ]);
+  });
+
+  it('leaves every earlier line untouched when only the last line changes', () => {
+    const block = sourceBlock([
+      { text: 'Top line', x: 40, y: 500, w: 110 },
+      { text: 'Middle line', x: 55, y: 484, w: 95 },
+      { text: 'Old bottom', x: 70, y: 468, w: 80 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      { text: 'Top line Middle line New bottom', style: run.style, width: 180, height: 48, dx: 0, dy: 0 },
+      ['Top line', 'Middle line', 'New bottom'],
+      20,
+    );
+
+    expect(result.texts.slice(0, 2).map((edit) => edit.rect)).toEqual([
+      { x: 40, y: 500, w: 110, h: 12 },
+      { x: 55, y: 484, w: 95, h: 12 },
+    ]);
+    expect(result.texts[2]?.rect).toMatchObject({ x: 40, y: 468 });
+  });
+
+  it('fully reflows when no source display line still matches', () => {
+    const block = sourceBlock([
+      { text: 'Original first', x: 40, y: 500, w: 110 },
+      { text: 'Original second', x: 55, y: 484, w: 95 },
+      { text: 'Original third', x: 70, y: 468, w: 80 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      { text: 'Changed first Changed second Changed third', style: run.style, width: 180, height: 48, dx: 0, dy: 0 },
+      ['Changed first', 'Changed second', 'Changed third'],
+      20,
+    );
+
+    expect(result.texts.map((edit) => edit.rect.x)).toEqual([40, 40, 40]);
+    expect(result.texts.map((edit) => edit.rect.y)).toEqual([500, 484, 468]);
+  });
+
+  it('falls back to full re-layout when a preserved suffix would overlap new lines', () => {
+    const block = sourceBlock([
+      { text: 'Top line', x: 40, y: 500, w: 110 },
+      { text: 'Old middle', x: 40, y: 484, w: 95 },
+      { text: 'Bottom line', x: 40, y: 468, w: 80 },
+    ]);
+    const result = buildTextBlockEdits(
+      block,
+      { text: 'Top line New one New two Bottom line', style: run.style, width: 180, height: 64, dx: 0, dy: 0 },
+      ['Top line', 'New one', 'New two', 'Bottom line'],
+      20,
+    );
+
+    expect(result.texts.map((edit) => edit.rect.y)).toEqual([500, 484, 468, 452]);
   });
 
   it('keeps the user-selected font size and box dimensions authoritative', () => {

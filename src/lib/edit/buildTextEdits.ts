@@ -152,6 +152,96 @@ function baselinesForLines(
   return baselines;
 }
 
+interface TextLinePosition {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+}
+
+function wrappedText(line: string | WrappedTextLine): string {
+  return typeof line === 'string' ? line : line.text;
+}
+
+function preservedTextLinePositions(
+  block: TextBlock,
+  next: NextTextEdit,
+  wrappedLines: readonly (string | WrappedTextLine)[],
+  fullPositions: readonly TextLinePosition[],
+): readonly TextLinePosition[] {
+  if (block.lines.length === 0 || wrappedLines.length === 0) return fullPositions;
+  const nextTexts = wrappedLines.map(wrappedText);
+  let prefixLength = 0;
+  while (
+    prefixLength < block.lines.length
+    && prefixLength < nextTexts.length
+    && block.lines[prefixLength]?.text === nextTexts[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  while (
+    suffixLength < block.lines.length - prefixLength
+    && suffixLength < nextTexts.length - prefixLength
+    && block.lines[block.lines.length - 1 - suffixLength]?.text
+      === nextTexts[nextTexts.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+  if (prefixLength === 0 && suffixLength === 0) return fullPositions;
+
+  const positions = fullPositions.map((position) => ({ ...position }));
+  const preserve = (nextIndex: number, sourceIndex: number) => {
+    const source = block.lines[sourceIndex];
+    if (!source) return;
+    positions[nextIndex] = {
+      x: source.rect.x + next.dx,
+      y: source.baselineY + next.dy,
+      width: source.rect.w,
+    };
+  };
+  for (let index = 0; index < prefixLength; index += 1) preserve(index, index);
+  for (let offset = 0; offset < suffixLength; offset += 1) {
+    preserve(nextTexts.length - 1 - offset, block.lines.length - 1 - offset);
+  }
+
+  const middleEnd = nextTexts.length - suffixLength;
+  for (let index = prefixLength; index < middleEnd; index += 1) {
+    if (index === 0) continue;
+    const previous = wrappedLines[index - 1];
+    const current = wrappedLines[index];
+    const previousPosition = positions[index - 1];
+    if (!previous || !current || !previousPosition) continue;
+    const previousHeight = textBlockLineHeight(block, {
+      ...next.style,
+      fontSizePt: wrappedLineFontSize(previous, next.style),
+    });
+    const currentHeight = textBlockLineHeight(block, {
+      ...next.style,
+      fontSizePt: wrappedLineFontSize(current, next.style),
+    });
+    positions[index] = {
+      ...(positions[index] ?? { x: block.rect.x + next.dx, width: next.width }),
+      y: previousPosition.y - Math.max(previousHeight, currentHeight),
+    };
+  }
+
+  const overlaps = positions.slice(1).some((lower, index) => {
+    const upper = positions[index];
+    const upperLine = wrappedLines[index];
+    const lowerLine = wrappedLines[index + 1];
+    if (!upper || !upperLine || !lowerLine) return false;
+    const upperHeight = wrappedLineFontSize(upperLine, next.style);
+    const lowerHeight = wrappedLineFontSize(lowerLine, next.style);
+    const horizontalOverlap = Math.min(upper.x + upper.width, lower.x + lower.width)
+      - Math.max(upper.x, lower.x);
+    return horizontalOverlap > 0.01
+      && lower.y + lowerHeight > upper.y + 0.01
+      && upper.y + upperHeight > lower.y + 0.01;
+  });
+  return overlaps ? fullPositions : positions;
+}
+
 export function buildFreeTextEdits(
   pageIndex: number,
   rect: PdfRect,
@@ -233,18 +323,29 @@ export function buildTextBlockEdits(
   const alignWidthPt = next.alignWidthPt ?? block.alignWidthPt ?? next.width;
   const textLeft = usesAlignmentColumn ? alignLeftPt + next.dx : base.x + next.dx;
   const textWidth = usesAlignmentColumn ? alignWidthPt : next.width;
+  const fullPositions = wrappedLines.map<TextLinePosition>((_line, index) => ({
+    x: textLeft,
+    y: baselines[index] ?? firstBaseline,
+    width: textWidth,
+  }));
+  const positions = preservedTextLinePositions(block, next, wrappedLines, fullPositions);
   const texts = wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
     const spans = typeof line === 'string' ? undefined : line.spans;
     const fontSizePt = wrappedLineFontSize(line, next.style);
+    const position = positions[index] ?? fullPositions[index] ?? {
+      x: textLeft,
+      y: firstBaseline,
+      width: textWidth,
+    };
     return {
       id: id(),
       kind: 'text',
       pageIndex: block.pageIndex,
       rect: {
-        x: textLeft,
-        y: baselines[index] ?? firstBaseline,
-        w: textWidth,
+        x: position.x,
+        y: position.y,
+        w: position.width,
         h: fontSizePt,
       },
       z: z + covers.length + index,
@@ -258,8 +359,8 @@ export function buildTextBlockEdits(
       ...(next.boxWidthPt !== undefined ? { boxWidthPt: next.boxWidthPt } : {}),
       ...(usesAlignmentColumn ? {
         align,
-        alignLeftPt: textLeft,
-        alignWidthPt: textWidth,
+        alignLeftPt: position.x,
+        alignWidthPt: position.width,
       } : {}),
     };
   });

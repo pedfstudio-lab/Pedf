@@ -29,9 +29,11 @@ if (!enabled) {
 
 const task74Fixtures = {
   rishi: 'tmp/compress-tests/rishi-ilovepdf.pdf',
+  rahul: 'tmp/bullets/RAHUL_RAJPUT_RESUME.pdf',
   sriLanka: 'tmp/tables/Firgun_QT-H4SNASRX_SriLanka.pdf',
   fractions: 'tmp/tables/Fraction Chart.pdf',
   bhutan: "tmp/paragraphs/Bhutan December'26.pdf",
+  corporate: 'tmp/paragraphs/Corporate-Governance-edited (25).pdf',
 } as const;
 const task74Enabled = process.env.TASK74_REAL === '1'
   && Object.values(task74Fixtures).every((path) => existsSync(path));
@@ -210,7 +212,7 @@ describe.skipIf(!task74Enabled)('Task 74 Step 1 Revision 1 real borders', () => 
     ]);
     expect(sriLankaPage1.blocks).toHaveLength(31);
     expect(sriLankaPage2.blocks.map((block) => block.text)).toEqual(expect.arrayContaining([
-      'Nuwara Eliya – Ella',
+      'Nuwara Eliya – Ella\n– Yala',
       expect.stringMatching(/^After breakfast, proceed to Ambewela Railway Station/),
     ]));
     expect(fractions.blocks).toHaveLength(218);
@@ -227,5 +229,51 @@ describe.skipIf(!task74Enabled)('Task 74 Step 1 Revision 1 real borders', () => 
     const craneBlocks = page8.blocks.filter((block) => /Black-Necked\s*\n?Crane Centre/.test(block.text));
     expect(craneBlocks).toHaveLength(1);
     expect(craneBlocks[0]?.lines).toHaveLength(4);
+  }, 60_000);
+});
+
+describe.skipIf(!task74Enabled)('Task 74 Step 2 real text units', () => {
+  it('keeps the Bhutan stretched line in its paragraph and gives the crane block local geometry', async () => {
+    const [page6, page8] = await Promise.all([
+      editorPage(task74Fixtures.bhutan, 6),
+      editorPage(task74Fixtures.bhutan, 8),
+    ]);
+    const stretched = page6.blocks.find((block) => block.text.includes('After breakfast'));
+    expect(stretched, 'Bhutan page 6 stretched paragraph').toBeDefined();
+    expect(stretched?.lines).toHaveLength(4);
+    expect(stretched?.lines[0]?.text).toMatch(/^After breakfast, we leave/);
+
+    const dochula = page8.blocks.find((block) => block.text.startsWith('Our first major stop'));
+    expect(dochula, 'Bhutan page 8 Dochula paragraph').toBeDefined();
+    expect(dochula?.lines).toHaveLength(4);
+    expect(dochula?.text).toContain('chortens surrounded by');
+
+    const crane = page8.blocks.find((block) => /Black-Necked\s*\n?Crane Centre/.test(block.text));
+    expect(crane, 'Bhutan page 8 crane paragraph').toBeDefined();
+    expect(crane).toMatchObject({ align: 'left' });
+    expect(crane?.lines).toHaveLength(4);
+    expect(crane?.rect.w).toBeCloseTo(340.1, 0);
+    expect(crane?.alignLeftPt).toBeUndefined();
+    expect(crane?.alignWidthPt).toBeUndefined();
+  }, 60_000);
+
+  it('keeps the Rahul contact row as phone, email, and city click units', async () => {
+    const page = await editorPage(task74Fixtures.rahul, 1);
+    const texts = page.blocks.map((block) => block.text);
+    expect(texts).toEqual(expect.arrayContaining([
+      '9555737955',
+      'rahulrajput82143@gmail.com',
+      'Gurgaon',
+    ]));
+  }, 60_000);
+
+  it('keeps the Task 72 Corporate Governance paragraph unchanged in the editor path', async () => {
+    const page = await editorPage(task74Fixtures.corporate, 3);
+    const block = page.blocks.find((candidate) => (
+      candidate.text.startsWith('A number of Postgraduate Departments')
+    ));
+    expect(block, 'Corporate Governance page 3 paragraph').toBeDefined();
+    expect(block?.lines).toHaveLength(6);
+    expect(paragraphSeedText(block!)).toHaveLength(576);
   }, 60_000);
 });

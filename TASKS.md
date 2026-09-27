@@ -11711,7 +11711,8 @@ borders, the fill and every other cell stay exactly as they were, on screen as w
 
 Steps 1 → 7 in order. **Step 1 is the one that fixes the user's résumé, and it is the smallest.**
 
-**Step 1 — See every border.**
+**Step 1 — See every border.**  ✅ DONE by Codex with Revisions 1–4, reviewed, committed as `75deaaa` on
+`text-first` (2026-09-26). Not merged.
 In `src/lib/pdf/ruleLines.ts`:
 1. Lower `MIN_RULE_LENGTH_PT` from 72 to **8**, and keep every other filter as it is — the thickness cap
    (`MAX_RULE_THICKNESS_PT = 3`), the axis tolerance, the page-frame rejection and, above all, `isTextUnderline`,
@@ -11727,7 +11728,8 @@ In `src/lib/pdf/ruleLines.ts`:
 stop happening. **Check while building:** the underline guard must still reject every text underline — re-measure
 the 33 horizontal splits with the guard on and account for any that turn out to be leunderlines rather than borders.
 
-**Step 2 — The click unit, decided from a line and its neighbours.**
+**Step 2 — The click unit, decided from a line and its neighbours.**  🟡 BUILT by Codex on `text-first` (2026-09-27), reviewed, all sweeps green, **not committed** — see Revision 1 below. Start from
+`75deaaa`. Do Step 2 only: `textColumns.ts` stays until Step 3, and `textContent.ts` keeps its current signatures.
 New `src/lib/pdf/textUnits.ts`, pure functions, no PDF.js. It owns both decisions, with Step 1's borders as its
 strongest evidence.
 
@@ -11779,6 +11781,15 @@ applies to every document, because it is a property of the edit, not of the layo
 from the first line of `Corporate-Governance-edited (25).pdf` page 3 still re-flows the whole paragraph, so
 `TASK72_REAL=1` is unchanged; a block where only the last line changes leaves every earlier line untouched; an
 overlap forces the documented fallback.
+
+*What Step 2 must show before it is handed back.* On the user's own files: `Bhutan December'26.pdf` page 6's
+stretched line is **one** line inside one 4-line paragraph, and page 8's crane paragraph is one block, `align left`,
+**340.1 pt ± 1**, opening at its own width rather than the 736.9 pt it takes today; `RAHUL_RAJPUT_RESUME.pdf`'s
+contact row is **three** pieces; `Firgun_QT-H4SNASRX_SriLanka.pdf` page 1 is still **31** pieces with its four
+accommodation cells; `Fraction Chart.pdf` is still **218**; `Corporate-Governance-edited (25).pdf` page 3 is
+unchanged from Task 72. Then: the full suite; `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1` at **121 / 121**
+with **0** untouched lines changed and 0 skipped; `TASK70_TABLES=1` with every changed box classified and **nothing
+unexplained**; typecheck, lint, build. Report the numbers and stop — Step 3 is a separate handoff.
 
 **Step 3 — Delete the page-wide machinery.**
 Delete `src/lib/pdf/textColumns.ts` and its test. In `textContent.ts` delete the `columns` option, the `justified`
@@ -12217,3 +12228,88 @@ lands where you clicked and no popover appears. Press Done, then click a differe
 opens.
 
 **Land:** same branch, with Revisions 1 to 3.
+
+#### Task 74 — Step 2, Revision 1  🔲 TODO → same branch `text-first` — a list is not prose: never re-flow a block whose lines start with bullet markers   *(Easy · 2 hours)*
+
+**What the user hit.** On page 5 of `C:/Users/eddyu/Downloads/FIRGUN SRI 1.pdf`, clicking the "Vehicle Allocation"
+list opens all nine bullets as **one run-on paragraph** with the dots inline. Pressing **Done** would write that
+paragraph back, and the list would be gone from the document.
+
+**Measured** on that page — the grouping is right and the seed is wrong:
+
+```
+RUN y 438.7  "• A/C vehicle during the tours and transfers will …"
+RUN y 423.7  "• 1-4 pax -- SUV vehicle (Avanza / Xenia / Similar)"
+RUN y 408.7  "• 5-6 pax -- SUV vehicle + Separate Luggage Van"
+…nine separate baselines, every one starting with •
+
+BLOCK  lines 9  align left  own 231.8 pt
+```
+
+Step 2 groups them correctly as one nine-line block — a list is one editable unit, as the user asked. The failure
+comes one step later: `TextEditOverlay.tsx` seeds a left-aligned multi-line block with `paragraphSeedText(block)`,
+which joins every display line with spaces so a paragraph can re-flow. For a list that turns nine items into one
+paragraph.
+
+**Why the bullet feature did not catch it.** `bulletList.ts:193-195` requires the marker to be **its own run** —
+`TEXT_BULLET_CHARACTERS.has(markerText)` tests a whole run. In this file the dot is inside the text run
+(`"• A/C vehicle during…"` is one run), so no marker is found, no bullet mode, and the block falls through to the
+ordinary text path. Tasks 10H, 45, 64 and 67 Revision 2a are unaffected by this revision: lists whose dot is a
+separate run or a picture keep their existing bullet handling in full.
+
+**How widespread — measured over the 45 baseline files plus the user's file:** **4,755** blocks, **2,069** with
+more than one line, **102** of those carrying bullet markers, and **48** of those containing an item that wraps
+onto a further line. The rule below touches those 102 and nothing else.
+
+**What the user gets:** clicking a bullet list opens it as a list — one item per line, exactly as the page shows —
+and editing one item leaves the others where they are.
+
+**Change — the seed keeps a list's lines.**
+In `src/lib/edit/paragraphSeed.ts`, `paragraphSeedText` returns `block.text` unchanged when **any** of the block's
+lines starts with a bullet marker, using `startsWithBulletMarker` from `src/lib/pdf/textUnits.ts` (written in Step 2)
+rather than a second copy of the character list. Everything else in the function is untouched: a single-line block
+still returns `block.text`, and a block with no markers still joins its lines and rejoins a hyphenated word.
+
+**Checks**
+- *Seed* (`paragraphSeed.test.ts`): a nine-line block whose lines all start with `•` seeds with **eight** newlines
+  and no joining; a block where only the first line starts with `•` — an item wrapping onto continuation lines —
+  also seeds unchanged; a block with no markers still seeds as one flowing line with no newline, and still rejoins
+  `Postgra-` + `duate`; a single-line block is unchanged.
+- *Overlay* (`TextEditOverlay.test.tsx`): a left-aligned three-line bullet block opens showing three lines; a
+  left-aligned three-line prose block still opens as one flowing line.
+- *The user's file*, local, `TASK74_REAL=1` — copy `FIRGUN SRI 1.pdf` into `tmp/paragraphs/` first: page 5's
+  vehicle-allocation block is **9 lines**, and the text handed to the editor contains **8** newlines, so the
+  bullets are not flattened. An unchanged **Done** still writes nothing.
+- *Everything else still re-flows*: `TASK72_REAL=1` unchanged — `Corporate-Governance-edited (25).pdf` page 3 still
+  seeds to 576 characters with no newline at 447.6 pt.
+- *Unchanged elsewhere*: the full suite; `TASK66_SWEEP=1` at **121 / 121** with 0 untouched lines changed and 0
+  skipped; `TASK70_TABLES=1` unchanged at 45 files, 31 changed, **0 unexplained**; typecheck, lint, build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/edit/paragraphSeed.ts` + test | The one condition, using `startsWithBulletMarker` |
+| `src/lib/edit/paragraphReflow.local.test.ts` | The Firgun page-5 case |
+
+**Files that must not change:** `bulletList.ts` and the bullet feature — lists whose marker is a separate run or a
+picture keep their existing handling; `textUnits.ts` and the Step 2 grouping rules; `textContent.ts`;
+`ruleLines.ts`; `buildTextEdits.ts` and the unchanged-line preservation; the export; pictures; tools.
+
+**Guardrails:** a block with no bullet markers must still re-flow exactly as Task 72 makes it; the bullet feature's
+own lists must not change behaviour; no committed geometry changes — this revision only changes the text handed to
+the editor when a box opens.
+
+**Verify (user):** open `FIRGUN SRI 1.pdf` → page 5 → click the vehicle-allocation list: it opens with one bullet
+per line, not as a paragraph. Edit one item and press **Done**: the other items stay where they are. Then open
+`Corporate-Governance-edited (25).pdf` page 3 and confirm an ordinary paragraph still re-flows when a word is
+deleted.
+
+**Known limit:** inside a bullet item that wraps onto a second line — **48** blocks in the corpus — deleting words
+no longer pulls the continuation up, so a short line is left behind until it is tidied by hand. That is the
+pre-Task-72 behaviour, and it is the price of not flattening the list. A later task could teach `bulletList.ts` to
+recognise a marker embedded at the start of a run, which would give these lists the full bullet treatment —
+redrawn dots, indent, and removal of the old dots on export — but that changes what the export writes and belongs
+on its own.
+
+**Land:** same branch, committed with Step 2.
