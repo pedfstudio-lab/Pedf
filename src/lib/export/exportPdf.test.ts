@@ -3,8 +3,10 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
   beginText,
   degrees,
+  drawObject,
   endText,
   moveText,
+  popGraphicsState,
   PDFDict,
   PDFDocument,
   PDFHexString,
@@ -12,9 +14,11 @@ import {
   PDFOperator,
   PDFOperatorNames,
   PDFString,
+  pushGraphicsState,
   setFontAndSize,
   setWordSpacing,
   StandardFonts,
+  translate,
 } from 'pdf-lib';
 import { exportPdf } from './exportPdf';
 import {
@@ -252,7 +256,7 @@ end
   }
 }
 
-async function makeFormXObjectDocument(): Promise<EditDocument> {
+async function makeFormXObjectDocument(copies = 1): Promise<EditDocument> {
   const source = await PDFDocument.create({ updateMetadata: false });
   const sourcePage = source.addPage([320, 400]);
   const sourceFont = await source.embedFont(StandardFonts.Helvetica);
@@ -263,6 +267,19 @@ async function makeFormXObjectDocument(): Promise<EditDocument> {
   if (!embeddedPage) throw new Error('The Form XObject fixture page was not embedded.');
   const page = pdf.addPage([320, 400]);
   page.drawPage(embeddedPage);
+  if (copies > 1) {
+    const xObjects = page.node.Resources()?.lookup(PDFName.of('XObject'), PDFDict);
+    const [name] = xObjects?.keys() ?? [];
+    if (!name) throw new Error('The Form XObject fixture resource was not registered.');
+    for (let index = 1; index < copies; index += 1) {
+      page.pushOperators(
+        pushGraphicsState(),
+        translate(0, 0),
+        drawObject(name.asString().slice(1)),
+        popGraphicsState(),
+      );
+    }
+  }
   return {
     originalBytes: await pdf.save(),
     pages: [{
@@ -724,6 +741,75 @@ describe('exportPdf', () => {
     } finally {
       await reopened.destroy();
     }
+  });
+
+  it('does not draw a text cover whose named replacements were all removed', async () => {
+    const doc = await makeEditorBuiltTextDocument();
+    const sampleBackground = vi.fn(() => ({ r: 1, g: 1, b: 1 }));
+    doc.sampleBackground = sampleBackground;
+
+    const result = await exportPdf(doc);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.redaction).toMatchObject({ removedItems: 1, skippedPages: 0 });
+    expect(sampleBackground).not.toHaveBeenCalled();
+  });
+
+  it('still draws a text cover when one named replacement was not removed', async () => {
+    const doc = await makeEditorBuiltTextDocument();
+    const cover = doc.edits.find((edit): edit is CoverEdit => edit.kind === 'cover');
+    expect(cover?.replaces).toHaveLength(1);
+    if (!cover?.replaces?.[0]) throw new Error('The editor fixture cover is missing its replacement.');
+    doc.edits = doc.edits.map((edit) => edit === cover ? {
+      ...cover,
+      replaces: [
+        ...cover.replaces!,
+        { text: 'NOT PRESENT', rect: { ...cover.replaces![0]!.rect, y: 280 } },
+      ],
+    } : edit);
+    const sampleBackground = vi.fn(() => ({ r: 1, g: 1, b: 1 }));
+    doc.sampleBackground = sampleBackground;
+
+    const result = await exportPdf(doc);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.redaction).toMatchObject({ removedItems: 1, skippedPages: 0 });
+    expect(sampleBackground).toHaveBeenCalledOnce();
+  });
+
+  it('always draws a cover that also carries an image replacement', async () => {
+    const doc = await makeEditorBuiltTextDocument();
+    doc.edits = doc.edits.map((edit) => edit.kind === 'cover' ? {
+      ...edit,
+      replacesImages: [{ kind: 'image', rect: edit.rect }],
+    } : edit);
+    const sampleBackground = vi.fn(() => ({ r: 1, g: 1, b: 1 }));
+    doc.sampleBackground = sampleBackground;
+
+    await exportPdf(doc);
+
+    expect(sampleBackground).toHaveBeenCalledOnce();
+  });
+
+  it('draws every cover and raises a warning when text removal is explicitly refused', async () => {
+    const doc = await makeFormXObjectDocument(2);
+    const cover = doc.edits.find((edit): edit is CoverEdit => edit.kind === 'cover');
+    expect(cover).toBeDefined();
+    if (!cover) throw new Error('The repeated Form fixture is missing its cover.');
+    doc.edits = [
+      ...doc.edits.map((edit) => edit === cover ? { ...cover, sampleBackground: true } : edit),
+      { ...cover, id: 'second-refused-cover', z: cover.z + 1, sampleBackground: true },
+    ];
+    const sampleBackground = vi.fn(() => ({ r: 1, g: 1, b: 1 }));
+    doc.sampleBackground = sampleBackground;
+
+    const result = await exportPdf(doc);
+
+    expect(result.redaction).toMatchObject({ removedItems: 0, skippedPages: 1 });
+    expect(result.warnings).toEqual([
+      expect.stringMatching(/could not be removed.*painted more than once/),
+    ]);
+    expect(sampleBackground).toHaveBeenCalledTimes(2);
   });
 
   it('edits one bordered-table cell without changing neighboring values or borders', async () => {

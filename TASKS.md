@@ -11804,17 +11804,35 @@ and draws every unsatisfied one exactly as today. A refused page is unchanged: c
 Verified already: editing a table cell and exporting leaves the original words gone from the file with **0**
 warnings, and the plain render of that page is crisp.
 
-**Step 5 — Redraw the page you edited, so the screen matches the file.**
-This is what makes Step 4 visible, and without it a table still *looks* wiped in the app. After an edit commits,
-re-export that page and redraw its canvas from the result, then draw the remaining edit layer on top of a page that
-no longer contains the old words — so no cover is painted on screen either.
+**Step 5 — Edit text on the real page, not on a painted rectangle.**
+Paragraph edits, heading edits, table-cell edits and list edits must not show the sampled white/grey patch when
+their original PDF glyphs can be removed safely. This is universal for eligible selectable PDF text; it is not a
+Bhutan-only rule and it does not depend on detecting a photograph underneath the text.
+
+When the user selects text, build a page-scoped clean preview offscreen: retain the photograph, colour, table
+borders and every unrelated edit, remove only the selected source glyphs, and omit the selected replacement text.
+Swap that complete preview into the canvas atomically, then place a transparent text editor over it. Read and use
+the source text's actual paint colour, so white text such as `BHUTAN` remains white. Use a thin visual frame around
+the editable text and float the toolbar outside it; never fill the layout or alignment rectangle.
+
+The clean preview changes presentation only. Paragraph seeding and reflow, heading alignment and preserved display
+lines, table-cell boundaries, list-item wrapping, widths, baselines, neighbour limits and committed PDF geometry
+continue through the existing paths. Clicking Done without a text, style, size or position change remains a true
+no-op: no replacement, reflow, Undo entry, change count or meaningful autosave.
+
+Do not rebuild the PDF on every keystroke. The transparent DOM editor supplies immediate feedback while typing.
+Render once when the editor opens and once after a changed edit commits. On changed Done, keep the clean page and
+DOM text visible until the committed page render is ready, then swap atomically. If glyph removal, text-paint
+recovery, page export or rendering is unsafe or fails, fall back to today's cover + overlay with the edit intact.
+
+This promise is for **text** edits. Existing-PDF image movement, replacement and deletion keep their current image
+patches: an image can contain the only copy of the pixels being removed, so Step 5 must not pretend it can recreate
+them. Added free text needs no source cover and remains unchanged.
+
 Measured in Step 0 (Node canvas, a browser proxy): exporting the **whole** document takes 180 ms on an 84-page
 2.9 MB file and **1,866 ms** on the 21-page 61 MB brochure; exporting **that page alone** takes 74 ms and 537 ms;
-re-opening and redrawing takes 53 ms and 299 ms.
-So: build a **page-scoped export** (one page plus its edits, which does not exist yet), run it on a short idle
-delay after the user stops typing rather than on every keystroke, and keep the current overlay as the immediate
-feedback until the redraw lands. If the redraw fails for any reason, fall back to today's behaviour — cover and
-overlay — so a slow or broken redraw can never lose an edit.
+re-opening and redrawing takes 53 ms and 299 ms. The full state machine, eligibility rules, files and checks are
+written out in the detailed Step 5 below.
 
 **Step 6 — Tests, and account for every piece that moves.**
 - *Borders* (`ruleLines.test.ts`): a 20 pt divider is a border; a path of six rectangles yields six candidates; a
@@ -12391,3 +12409,444 @@ covered by the right-edge test, and two bullets are kept apart by the marker rul
 **Known limit:** two stacked, unrelated, full-width lines of the same style and spacing — an address block, say —
 join into one piece. They did before Step 2 as well; the sentence guard was the only thing separating them, and it
 cost 320 real paragraphs to do it.
+
+#### Task 74 — Step 4  ✅ DONE by Codex, reviewed by Claude (2026-09-28), branch `patch-free` — an export stops painting over words it already removed   *(Medium · 1 day)*
+
+**Result.** `TASK74_PATCH`: 45 files, **335 covers emitted, 335 skipped, 0 drawn, 0 pages refused** — every patch gone,
+none dropped without the removal proven first. `TASK66_SWEEP`: 47 files, 242 pages, **121 / 121** round trips, 807
+removed, **0** untouched lines changed, **0** skipped, **0 removed images**. `TASK70_TABLES`: 45 files, 31 changed.
+Full suite **1,292 passed / 32 skipped**; typecheck, lint clean. Pixel checks pass on all three cases.
+
+**Review note.** The `replacesImages` condition is enforced structurally rather than by a check: a cover carrying
+`replacesImages` never enters `textCoverEdits`, so it can never be marked satisfied and can never be skipped. The
+inlined item matching is an exact expansion of `itemMatchesCover` — same acceptance set — and the added
+`matched.length === 0` guard fails closed. Satisfaction is recorded only inside the success branch of the same
+page's `try`, after `tree.apply()` returned, so no cover can be skipped while its words survive.
+
+**What the user hit.** Editing one header cell of a price table left a grey rectangle across three cells and wiped
+the dividers between them. Editing a heading over a photo left a flat patch on the photo. Editing a cell in a
+bordered table erased the cell's border. In every case the words themselves were replaced correctly — the damage
+was the rectangle painted over them.
+
+**Why it is painted at all.** Before Task 67 the export could not remove text, so it hid the old words under a
+sampled rectangle. Task 67 made removal real: `planCoveredGlyphRemoval` rewrites the page's content stream and
+deletes exactly the glyphs a cover replaces. The rectangle stayed anyway, and now hides nothing — it only covers
+whatever the old words were sitting on.
+
+| Measured | |
+|---|---|
+| Removal works, on every test file | `TASK66_SWEEP`: 47 files, 242 pages, **121 / 121** round trips, **807** pieces of text removed, **0** refusals |
+| Verified end to end | editing the `JECRC University…` cell and exporting leaves the original words gone from the file with **0** warnings, and the rendered page is crisp |
+| What the patch costs | on `FIRGUN SRI 1.pdf` the header row's two dividers disappear under one grey rectangle; on any bordered table the cell border goes with it |
+
+**What the user gets:** editing text leaves everything around it untouched in the saved file — table borders and
+fills, coloured backgrounds, the edge of a photo. Nothing is painted where the old words were, because they are
+gone.
+
+**Change 1 — the removal plan says which covers it satisfied.**
+`planCoveredGlyphRemoval` (`src/lib/export/coveredGlyphs.ts`) already matches each cover's `replaces` entries to
+the glyphs it removes. Report that per cover: add `satisfied: readonly boolean[]` to `CoveredGlyphPlan`, one entry
+per cover in the order they were passed, true only when **every** entry of that cover's `replaces` was removed. A
+cover with no `replaces` is never satisfied. A skipped plan satisfies nothing.
+
+**Change 2 — the export skips a satisfied cover.**
+In `src/lib/export/exportPdf.ts`, once a page's rewrite has been applied successfully and `textReason` is unset,
+drop from the page's edit list every **text** cover the plan marked satisfied, then draw the rest exactly as today.
+Three conditions, all required, or the cover is drawn:
+1. the page's text rewrite succeeded — no `textReason`, no skip;
+2. the plan marked that cover satisfied;
+3. the cover carries **no** `replacesImages` — a cover that also hides a deleted picture must still be painted,
+   because a removed image leaves a hole and Task 48's patch is what fills it.
+
+**Change 3 — nothing else about covers changes.**
+`drawCover` (`handlers/cover.ts`), `sampleBackground`, the ink-hugging geometry from Task 66 Revision 1, and the
+image patches from Tasks 48 and 68 are untouched. The editor still draws its on-screen cover: the page beneath the
+overlay is still the original, so the old words must still be hidden while you work. **Step 5 is what removes that**
+— until then, the saved file is cleaner than the preview, and that asymmetry is expected.
+
+**Checks**
+- *Unit* (`coveredGlyphs.test.ts`): a cover whose every replaced item is removed reports satisfied; a cover with one
+  item left behind does not; a cover with no `replaces` does not; a skipped plan reports none satisfied.
+- *Unit* (`exportPdf.test.ts`): a satisfied text cover is not drawn; an unsatisfied one is; a cover carrying
+  `replacesImages` is always drawn; when the page is refused, **every** cover is drawn and the warning is raised.
+  Force a refusal explicitly rather than waiting for one to occur naturally.
+- *The border survives, proved in pixels*: on `tmp/tables/Firgun_QT-H4SNASRX_SriLanka.pdf`, edit one accommodation
+  cell, export, render that page at 3× through `@napi-rs/canvas`, and assert the pixels along the cell's border are
+  **unchanged** from the same render of the original. Today they are erased. Do the same for one header divider of
+  the price table in `tmp/paragraphs/FIRGUN SRI 1.pdf`.
+- *The photo survives*: edit a heading that sits over a photo on `Bhutan December'26.pdf`, export, and assert the
+  photo's pixels outside the text's own ink are unchanged.
+- *Nothing leaks*: after each of those edits, the replaced word must not appear in the exported page's extracted
+  text — the Ctrl+F guarantee, asserted.
+- *Corpus accounting*, local (`TASK74_PATCH=1`): across the 45 baseline files, apply one text edit per page that has
+  text, export, and report per file — covers emitted, covers skipped, covers drawn, and pages refused. **Every
+  drawn cover must have a reason**: either the page was refused or the cover was unsatisfied. Print the totals and
+  any cover drawn without one; a cover drawn without a reason fails the task.
+- *Unchanged elsewhere*: `TASK66_SWEEP=1` at **121 / 121** with **0** untouched lines changed, **0** skipped and
+  **0 removed images** — that last number is the guard that no picture is being deleted; `TASK70_TABLES=1` at 45
+  files, 31 changed, 0 unexplained; `TASK74_REAL=1` and `TASK72_REAL=1` unchanged; the full suite; typecheck, lint,
+  build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/export/coveredGlyphs.ts` + test | Change 1 — report `satisfied` per cover |
+| `src/lib/export/exportPdf.ts` + test | Change 2 — skip satisfied text covers when the rewrite succeeded |
+| a new local test for the corpus accounting | The `TASK74_PATCH=1` sweep above |
+
+**Files that must not change:** `handlers/cover.ts`; `colorSample.ts`; `inkExtent.ts` and the ink-hugging geometry;
+`coveredImages.ts` and every image patch (Tasks 48, 68, 69, 71) — a deleted picture still needs its patch;
+`buildTextEdits.ts`; the editor and its on-screen cover; `textContent.ts`; `textUnits.ts`; `ruleLines.ts`; bullets;
+tools; saved projects.
+
+**Guardrails:** a cover may be skipped **only** when the page's rewrite succeeded and every word it replaces is
+proven gone; a refused page must behave exactly as today, patch and warning included; a cover that also replaces a
+picture is always drawn; no exported file may contain a word the user removed; saved projects from before this
+change must still export correctly, since the cover edits they carry are unchanged in shape.
+
+**Verify (user):** open `FIRGUN SRI 1.pdf` → edit one cell of the price table → **Export** → open the exported file:
+the two dividers between the header cells are still there and the grey rectangle is gone. Then `Bhutan
+December'26.pdf` → edit a heading sitting on a photo → export → the photo is untouched behind the new text. Then
+the Sri Lanka quote → edit an accommodation cell → the table's borders and fill survive. In each case also press
+Ctrl+F in the exported file for the word you replaced — no match.
+
+**Known limits:** on screen the patch is still drawn while you edit, because the page underneath is still the
+original — the exported file will look cleaner than the preview until Step 5; a page the export refuses to rewrite
+still gets its patch, with the existing warning, and across the 47 test files that currently happens zero times;
+deleting a **picture** still paints a patch, which is correct — there is nothing behind it to reveal.
+
+**Land:** branch `patch-free` from `main`. Commit: `An export stops painting over words it removed (Task 74,
+Step 4)`. Merge only after the pixel checks pass and the user's own three files verify.
+
+#### Task 74 — Step 5, written out  🔲 TODO → branch `live-page-preview` (from `patch-free`, after Step 4) — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+
+**What the user hit.** On `Bhutan December'26.pdf`, clicking the white `BHUTAN` heading opens a large opaque white
+rectangle, changes the extracted white text to black and hides most of the photograph. The editor no longer
+resembles the PDF, so the user cannot tell what is being edited or how the final page will look.
+
+This is not specific to Bhutan:
+- text over a photograph receives one sampled rectangle that destroys the photograph while editing;
+- text over a coloured or textured area receives one flat colour;
+- a table-cell cover can hide its borders and fill;
+- a heading's layout/alignment box can be much wider than its visible letters, making the rectangle enormous;
+- `extractTextRuns` currently assigns black to every run because PDF.js text content does not expose paint colour
+  reliably, so white source text opens as black.
+
+Step 4 fixes the **exported file** by not drawing a cover after its original glyphs were removed successfully. It
+does not fix the editor because `PageCanvas` still shows the original PDF page underneath the editing overlay.
+Step 5 makes the in-app page use the same clean rendering principle.
+
+**What the user gets.** Paragraph edits, heading edits, table-cell edits and list edits do not show the white/grey
+patch when their original PDF text can be removed safely. The photograph, colour, table borders and surrounding
+content remain visible. Only the selected source glyphs disappear from a temporary clean page preview, and the
+editable replacement is drawn transparently over that real background.
+
+For the Bhutan heading:
+- the photograph remains visible;
+- `BHUTAN` stays white;
+- a thin blue frame follows the visible heading rather than filling its alignment region;
+- resize/move handles sit on that frame;
+- the formatting toolbar floats outside the frame and stays inside the page;
+- no opaque editor background is drawn;
+- while typing, only the selected heading changes;
+- on Done, the clean committed page becomes the normal page view.
+
+This is universal for **eligible selectable PDF text**. It does not inspect the background and create a
+Bhutan/image special case. The same path is used over white pages, photographs, colours, gradients and tables.
+Text baked into a raster image, converted to vector outlines or refused by the glyph-removal safety checks is not
+silently treated as safe text; it keeps the current fallback.
+
+**The central rule — removal, layout and appearance are different things.**
+
+The current editor lets one rectangle perform several unrelated jobs. Step 5 keeps three concepts separate:
+1. **Source-removal geometry** identifies the original PDF glyphs to remove. Only the glyph-removal/export pipeline
+   consumes it.
+2. **Layout geometry** controls paragraph wrapping, heading alignment, neighbour width, movement and committed PDF
+   coordinates.
+3. **Visual editor geometry** draws the blue frame and handles around the visible editable text.
+
+Tightening the visual frame must never change the layout rectangle. In particular, making the Bhutan frame follow
+the word must not change its centring, alignment width, baseline, exported position or re-edit position. A
+paragraph keeps its reflow width even though its editor background is transparent. Removing the painted rectangle
+must not make a paragraph behave like a heading or a heading behave like a paragraph.
+
+**Change 1 — read the source text's real paint colour.**
+
+`extractTextRuns` currently hard-codes `color: { r: 0, g: 0, b: 0 }`. Add a text-paint reader beside
+`textContent.ts`. It walks the PDF.js operator list in paint order and tracks:
+- fill colour;
+- DeviceGray, DeviceRGB and DeviceCMYK changes;
+- graphics-state save and restore;
+- text objects and text-show operations;
+- fill versus stroke text-rendering modes where the application can represent them safely.
+
+Map that paint state back to the extracted runs without changing their text, rectangles, font references or
+grouping. A white PDF heading must produce a white `TextStyle`; the browser editor and exported replacement then
+use the same white.
+
+Where one editable block contains multiple source colours, preserve them as rich-text spans rather than flattening
+the block to one representative colour. Add an optional colour override to `TextSpan`; old saved projects without
+it remain valid. Pattern-filled, gradient-filled or stroke-only text that cannot be represented confidently is
+marked unsupported. Do not guess a colour and silently produce the wrong result; use the legacy editor fallback
+for that selection.
+
+This change reads paint only. It must not change grouping, line detection, alignment, font choice or glyph-removal
+matching.
+
+**Change 2 — create one page-scoped preview exporter.**
+
+Add an entry point beside `exportPdf.ts` that receives:
+- the pristine source bytes;
+- the live `PagePlan`;
+- one live page identity/index;
+- the committed edits belonging to that page;
+- optional transient edits used only to prepare an editor;
+- optional text-edit IDs to omit from the preview.
+
+It returns one temporary renderable page and uses the same handlers, embedded fonts, glyph-removal plan,
+satisfied-cover result, rotation and page geometry as the real export.
+
+It must not:
+- export every page of the document;
+- modify the edit store;
+- create an Undo entry;
+- increment the document change count;
+- trigger project autosave;
+- become part of the saved project.
+
+For an original block, the editing preview removes that block's source glyphs but draws no replacement and no
+satisfied cover. For a previously edited block, it keeps the original-glyph removal and every unrelated edit but
+omits the selected replacement text. That reveals the real page behind the selected text while it is re-edited.
+
+If the selected cover is unsatisfied, also replaces an image, the page rewrite is refused or the paint cannot be
+represented safely, the preview is not clean. Use the existing cover-based fallback.
+
+**Change 3 — give each page an explicit rendering state.**
+
+`PageCanvas` owns these states:
+- `original` — the untouched PDF.js page when the page has no committed edits;
+- `committed` — a page-scoped render containing the current committed edits;
+- `preparing-edit` — the current canvas remains visible while an offscreen clean editing preview is built;
+- `editing` — the clean page is visible and the selected text comes from the transparent editor;
+- `committing` — the DOM text remains visible while the new committed page is rendered;
+- `fallback` — the current cover + text overlay is used because a clean preview was not safe.
+
+Every replacement is rendered offscreen first. Swap only a complete render into the visible canvas; never clear
+the page while waiting and never expose a blank or half-painted page.
+
+Give each request a generation token. If the user selects another block, closes the editor, changes zoom, performs
+Undo/Redo, changes page or opens another document, discard any older result even if it finishes later. Rebuild
+only the affected page.
+
+**Full interaction workflow**
+
+**1. Idle page.** A page without edits continues to use its normal PDF.js render. A page with committed edits uses
+its latest clean committed render. Invisible click targets stay above the canvas but add no visible background.
+
+**2. Select text.** In the first frame, select the same `TextBlock` or bullet list as today, draw the thin visual
+frame, leave the current canvas intact and start the page-scoped clean-preview request. Add nothing to edit
+history. `activeCoverGeometry` may still calculate removal/ink information, but its rectangles are not rendered as
+visible `<div>` elements in clean mode.
+
+While preparation runs, keep the page visible. Focus the full editor only when the clean page is ready, so
+keystrokes cannot disappear into an editor the user cannot see. If preparation crosses a short threshold, show a
+small `Preparing text…` status near the toolbar — never a white rectangle over the document.
+
+**3. Open the clean editor.** Atomically swap in the prepared page, on which the selected original glyphs are gone
+but the photograph, colour, borders, other content and unrelated edits remain. Mount and focus
+`TextEditOverlay`.
+
+In clean mode:
+- its root background is transparent;
+- no sampled active cover is mounted;
+- the source text colour is used;
+- its frame is visual only;
+- the toolbar floats outside the frame where page space permits;
+- handles do not cover neighbouring text;
+- caret, selection, shortcuts, movement, resizing and formatting continue to work.
+
+Do not export or redraw after each keystroke. The transparent DOM editor supplies immediate feedback over the clean
+page. The page-scoped render runs when the editor opens and after a changed edit commits, not repeatedly while the
+user types.
+
+**4. Edit a paragraph.** Keep the existing paragraph path:
+- soft PDF line breaks still form the same editor seed;
+- typing still reflows through `wrapNextText`;
+- Done still builds committed lines through `buildTextBlockEdits`;
+- width, height, line height, neighbour limits and overlap fallback remain;
+- only the selected paragraph changes.
+
+The missing patch changes what is visible behind the editor; it does not change how the paragraph wraps.
+
+**5. Edit a heading or short field.** Keep the existing heading path:
+- centred text remains centred against its recorded alignment region;
+- right-aligned text remains right-aligned;
+- preserved display lines remain preserved;
+- baseline, alignment width and committed geometry remain authoritative;
+- the tighter frame does not become the exported width;
+- a heading does not acquire paragraph reflow.
+
+`BHUTAN` can therefore keep the wide alignment region required for centring while its visible frame follows the
+actual word.
+
+**6. Edit a table cell.** Keep the cell as the same local text unit found by Steps 1 and 2. Its paragraph/short
+field behaviour, width and boundaries are unchanged. The clean page retains the cell's fill and borders, so no
+rectangle may span or erase adjacent cells while the editor is open.
+
+**7. Edit a bullet list.** Keep the existing list path:
+- items remain separate;
+- markers retain their positions;
+- wrapping stays inside the selected item/list;
+- overflow against the next section is still rejected;
+- `No room — the next section is in the way` keeps the editor open.
+
+The clean preview removes only the selected list's source glyphs. Neighbouring items and sections remain.
+
+**8. Done without a change.** This remains a true no-op. For original text, discard the temporary preview and
+restore the cached idle canvas. Create no cover or text edits, no Undo entry, no change count and no meaningful
+autosave. Do not reflow, move or replace anything.
+
+For already edited text, return to the same committed render that existed before the click. Do not replace its
+edit IDs, z-order, geometry, text or styles. Escape and Cancel follow the same rule.
+
+Formatting, moving or resizing is a real change. Merely opening the editor or toolbar is not.
+
+**9. Done after a change.** Use the existing commit path:
+- serialize the editor content and rich spans;
+- run the same paragraph, heading, cell or list wrapping logic;
+- build the same cover and text edits;
+- replace the previous edit group once;
+- create exactly one Undo step.
+
+Keep the active clean page and DOM text visible while rendering the committed page offscreen. That page removes
+the original glyphs, skips every Step 4 satisfied text cover, draws the replacement with its committed style and
+includes all other edits. When ready, swap it into the canvas and remove the DOM editor atomically. There must be
+no frame containing both old and new text and no frame in which the replacement disappears.
+
+**10. Preview failure after Done.** The edit remains committed. Never discard input because preview rendering
+failed. Fall back to the original or last valid canvas plus the required cover and committed text overlay. Undo,
+save, export and re-edit continue to work. A preview failure is a presentation failure, not an edit-store failure.
+
+**11. Re-edit committed text.** Build an editing preview that retains the original-glyph removal and every
+unrelated edit but omits the selected replacement. Seed the editor from `boxText`, `boxSpans`, saved style,
+dimensions and alignment metadata. Unchanged Done restores the same committed render; changed Done replaces the
+same edit group once.
+
+**12. Undo, Redo, reset, zoom and saved projects.**
+- Undo and Redo rebuild only the affected page for the restored edit state.
+- Reset returns pages to their original PDF.js render.
+- Zoom re-renders the current preview source at the new zoom/DPR without changing PDF geometry.
+- Scrolling and visible-page lazy rendering remain.
+- Preview canvases, temporary PDFs, request tokens and caches are never saved.
+- Reopening a project lazily rebuilds committed previews only for visible pages containing edits.
+- Older projects without optional span-colour data remain valid.
+
+Release temporary PDF.js documents, object URLs, offscreen canvases and bitmaps when replaced. Keep only a small,
+bounded cache around visible and recently edited pages.
+
+**Toolbar and frame**
+- thin blue outline with small move/resize handles;
+- no frame fill;
+- toolbar above when space exists and below otherwise;
+- toolbar clamped inside the page;
+- toolbar dimensions never enlarge the PDF/editor rectangle;
+- keep Done, Cancel, family, size, bold and italic;
+- show the active text colour as a compact swatch;
+- preserve per-selection colour as a rich span where needed.
+
+Deleting all content and pressing Done is a real deletion. Pressing Done with the original content untouched is
+not.
+
+**Eligibility and fallback**
+
+Clean text editing requires all of these:
+1. the selection is real extracted PDF text;
+2. every source glyph can be matched;
+3. the glyph-removal plan satisfies every source item;
+4. the cover does not also replace an image;
+5. the page-scoped rewrite succeeds;
+6. the paint can be represented safely;
+7. the temporary page opens and renders.
+
+If any condition fails, use the existing cover-based editor. Never partially remove a word, reveal duplicate text,
+delete an image or display a guessed result. Eligibility is based on text/rewrite safety, not on whether the
+background looks like a photograph.
+
+**Image boundary.** This step removes the visible patch from safely removable **text** edits: paragraphs, headings,
+cells and lists. It does not remove the established patches for moving, replacing or deleting existing PDF
+images. An image can contain the only copy of the pixels being removed, so the application cannot promise to
+reconstruct the background. Added free text has no source cover and is unchanged.
+
+**Checks**
+- *Text paint*: white, black, RGB, grayscale and CMYK source text retain their colours; save/restore returns to the
+  previous colour; mixed colours become spans; unsupported paint is rejected rather than guessed.
+- *Page preview*: only the requested live page is produced; unrelated edits remain; the active replacement is
+  omitted; its source glyphs are removed; its satisfied cover is absent.
+- *Fallback*: unsatisfied removal, refused rewrite, `replacesImages`, unsupported paint, export failure and render
+  failure all retain the current safe path and the user's edit.
+- *Atomic rendering*: the visible page is never cleared while a preview is prepared; stale work cannot replace a
+  newer selection, zoom, Undo state or document.
+- *No per-keystroke export*: typing changes only the DOM editor until Done.
+- *Paragraph changed*: a normal multi-line paragraph reflows exactly as before, without a visible patch.
+- *Paragraph unchanged*: open and press Done — zero edits, zero Undo entries, unchanged count, geometry and pixels.
+- *Heading changed*: centred and right-aligned headings keep alignment, baseline and exported position, without a
+  visible patch.
+- *Heading unchanged*: open and press Done — no replacement and no movement.
+- *Cell changed and unchanged*: the same rules, with border and fill pixels intact.
+- *List changed and unchanged*: the same item wrapping, markers, overflow and no-op behaviour.
+- *Re-edit*: no original or committed text doubles; unchanged Done retains edit IDs and geometry.
+- *Undo/Redo*: each rebuilds the page corresponding to the restored edit state.
+- *Zoom*: frame, caret, text, handles and canvas remain aligned at every supported zoom/DPR.
+- *Saved project*: paragraph, heading, cell and list previews rebuild without modifying history.
+- *Bhutan visual test*: while `BHUTAN` is open, photo pixels outside the original glyph ink match the original;
+  replacement text is white; no opaque rectangle exists.
+- *Table visual test*: while editing and after committing a Sri Lanka cell, borders/fills remain unchanged.
+- *Plain-page test*: a normal black paragraph on white edits/reflows normally, with no spacing change.
+- *No-op pixel test*: click a paragraph, heading, cell and list; press Done without typing; before/after pages are
+  pixel-identical.
+- *Export parity*: after a commit, the in-app page matches the same page from the full exported PDF.
+- *Corpus*, local `TASK74_PREVIEW=1`: report clean-preview successes and every fallback reason. A clean preview
+  whose pixels differ from the corresponding Step 4 export outside replacement ink fails.
+- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1`; `TASK70_TABLES=1`; full suite;
+  typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/textPaint.ts` + test | Read the source text's actual paint state |
+| `src/lib/export/exportPagePreview.ts` + test | Produce one edited page without exporting the whole document |
+| `src/lib/pdf/pagePreviewController.ts` + test | Preview states, cancellation, caching and stale-result protection |
+| a local `TASK74_PREVIEW` test | Pixel and fallback accounting over the real-PDF corpus |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` | Attach safely decoded colour to runs; grouping stays untouched |
+| `src/lib/export/types.ts` | Optional per-span colour, backwards compatible |
+| `src/lib/edit/richText.ts` | Preserve source/user span colours |
+| `src/lib/export/handlers/text.ts` | Draw optional span colours |
+| `src/lib/export/exportPdf.ts` | Share its page-writing core with preview export |
+| `src/components/PageCanvas.tsx` | Render/swap original, editing and committed page states |
+| `src/components/OverlayLayer.tsx` | Request clean previews; do not display active covers in clean mode |
+| `src/components/TextEditOverlay.tsx` | Transparent mode, visual frame, toolbar placement and colour swatch |
+| corresponding tests | Workflow, no-op, fallback, geometry, re-edit, Undo/Redo and zoom |
+
+**Files whose behaviour must not change:** `textUnits.ts` grouping; `buildTextEdits.ts` wrapping and committed
+geometry; `ruleLines.ts`; `coveredImages.ts` and every image-removal patch; `PagePlan`; edit-history semantics;
+project autosave/restoration; final full-document export guarantees.
+
+**Verify (user):**
+1. Bhutan → click `BHUTAN`: photograph visible, heading white, thin frame/toolbar, no rectangle.
+2. Press Done unchanged: identical page, no new Undo.
+3. Change one character and press Done: still centred/white, photograph untouched, Undo restores it.
+4. Change a normal paragraph enough to wrap: same reflow as today, no patch and no unrelated movement.
+5. Open that paragraph and press Done unchanged: no reflow, replacement, autosave change or Undo.
+6. Edit a bordered cell: borders/fill remain during editing, after Done and after export.
+7. Edit a list item: same item boundaries and overflow behaviour, no patch.
+8. Reopen every changed item: no old-text duplicate, no painted rectangle, same committed geometry/style.
+
+**Land:** only after Step 4 is complete, every fallback has a reason, the pixel checks pass and the user approves
+the Bhutan, paragraph, table-cell and list workflow. Do not commit while this remains an unapproved planning draft.

@@ -145,6 +145,7 @@ describe('covered glyph planning', () => {
     const plan = await planFor(fixture.bytes, [{ rect: { x: 45, y: 415, w: 130, h: 30 } }]);
 
     expect(plan.skipped).toBe(false);
+    expect(plan.satisfied).toEqual([false]);
     expect(plan.removedItems).toBe(1);
     expect(plan.rewrites).toHaveLength(1);
     expect(plan.rewrites[0]?.streamKey).toBe('page:0');
@@ -169,6 +170,32 @@ describe('covered glyph planning', () => {
 
     expect(plan.skipped).toBe(false);
     expect(plan.removedItems).toBe(1);
+    expect(plan.satisfied).toEqual([true]);
+  });
+
+  it('does not satisfy a cover when one named replacement was left behind', async () => {
+    const fixture = await generatedPage();
+    const plan = await planFor(fixture.bytes, [{
+      rect: { x: 0, y: 0, w: 400, h: 500 },
+      replaces: [
+        { text: 'REMOVE ME', rect: fixture.removeRect },
+        { text: 'NOT PRESENT', rect: { ...fixture.removeRect, y: 390 } },
+      ],
+    }]);
+
+    expect(plan.skipped).toBe(false);
+    expect(plan.removedItems).toBe(1);
+    expect(plan.satisfied).toEqual([false]);
+  });
+
+  it('never satisfies a cover with no named replacements', async () => {
+    const fixture = await generatedPage();
+    const plan = await planFor(fixture.bytes, [{
+      rect: { x: 45, y: 415, w: 130, h: 30 },
+      replaces: [],
+    }]);
+
+    expect(plan.satisfied).toEqual([false]);
   });
 
   it('uses the corrected geometry fallback for a 72%-height legacy cover', async () => {
@@ -226,6 +253,7 @@ describe('covered glyph planning', () => {
 
     expect(plan.skipped).toBe(true);
     expect(plan.reason).toMatch(/counts differ/);
+    expect(plan.satisfied).toEqual([false]);
   });
 
   it('plans text painted through a Form XObject', async () => {

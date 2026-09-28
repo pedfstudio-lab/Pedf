@@ -6,7 +6,7 @@ import { pdfjs } from '@/lib/pdf/worker';
 import { makePageContext } from './context';
 import { HANDLERS } from './registry';
 import type { EditHandler } from './registry';
-import type { EditDocument, ExportRedactionResult } from './types';
+import type { CoverEdit, EditDocument, ExportRedactionResult } from './types';
 import {
   rewriteTextShowOperator,
   serializeContentStream,
@@ -109,6 +109,7 @@ async function removeCoveredContent(
   doc: EditDocument,
   editsByPage: Map<number, EditDocument['edits']>,
   warnings: string[],
+  satisfiedTextCovers: Set<CoverEdit>,
   textEnabled: boolean,
   imagesEnabled: boolean,
 ): Promise<ExportRedactionResult> {
@@ -192,11 +193,13 @@ async function removeCoveredContent(
           const operatorList = await sourcePage.getOperatorList({ annotationMode: 0 });
           const viewport = sourcePage.getViewport({ scale: 1, rotation: 0 });
           const pageEdits = editsByPage.get(pageIndex) ?? [];
-          const textCovers = pageEdits.flatMap((edit) => (
+          const textCoverEdits = pageEdits.filter((edit): edit is CoverEdit => (
             edit.kind === 'cover' && edit.replacesImages === undefined
-              ? [{ rect: edit.rect, replaces: edit.replaces }]
-              : []
           ));
+          const textCovers = textCoverEdits.map((edit) => ({
+            rect: edit.rect,
+            replaces: edit.replaces,
+          }));
           const imageCovers = pageEdits.flatMap((edit) => (
             edit.kind === 'cover' && edit.replacesImages
               ? [{ rect: edit.rect, replacesImages: edit.replacesImages }]
@@ -258,6 +261,10 @@ async function removeCoveredContent(
           if (!textReason && !imageReason) {
             removedImageRefs.push(...tree.apply(rewritten, imagePlan?.removedResources));
             removedItems += textPlan?.removedItems ?? 0;
+            textPlan?.satisfied.forEach((satisfied, index) => {
+              const cover = textCoverEdits[index];
+              if (satisfied && cover) satisfiedTextCovers.add(cover);
+            });
             removedImages += imagePlan?.removedImages ?? 0;
           } else if (!textReason && textPlan) {
             const textOnly = new Map<string, Uint8Array>();
@@ -275,6 +282,10 @@ async function removeCoveredContent(
             if (!textReason) {
               tree.apply(textOnly);
               removedItems += textPlan.removedItems;
+              textPlan.satisfied.forEach((satisfied, index) => {
+                const cover = textCoverEdits[index];
+                if (satisfied && cover) satisfiedTextCovers.add(cover);
+              });
             }
           } else if (!imageReason && imagePlan) {
             const imageOnly = new Map<string, Uint8Array>();
@@ -359,11 +370,13 @@ export async function exportPdf(
   }
   const editsByPage = groupBy(doc.edits, (edit) => edit.pageIndex);
   const warnings: string[] = [];
+  const satisfiedTextCovers = new Set<CoverEdit>();
   const redaction = await removeCoveredContent(
     pdf,
     doc,
     editsByPage,
     warnings,
+    satisfiedTextCovers,
     internal.removeCoveredText ?? REMOVE_COVERED_TEXT,
     internal.removeCoveredImages ?? REMOVE_COVERED_IMAGES,
   );
@@ -378,7 +391,9 @@ export async function exportPdf(
 
     const page = pdf.getPage(pageIndex);
     const context = makePageContext({ pdf, page, geometry, doc, warnings });
-    const sortedEdits = [...pageEdits].sort((left, right) => left.z - right.z);
+    const sortedEdits = pageEdits
+      .filter((edit) => !(edit.kind === 'cover' && satisfiedTextCovers.has(edit)))
+      .sort((left, right) => left.z - right.z);
 
     for (const edit of sortedEdits) {
       const handler = HANDLERS[edit.kind] as EditHandler;

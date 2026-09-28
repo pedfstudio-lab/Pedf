@@ -54,6 +54,7 @@ export interface CoveredGlyphPlan {
   readonly reason?: string;
   readonly removedItems: number;
   readonly rewrites: readonly CoveredGlyphRewrite[];
+  readonly satisfied: readonly boolean[];
 }
 
 export interface TextRemovalCover {
@@ -75,8 +76,14 @@ const TEXT_SHOW = new Set([
   OPS.nextLineSetSpacingShowText,
 ]);
 
-function skipped(reason: string): CoveredGlyphPlan {
-  return { skipped: true, reason, removedItems: 0, rewrites: [] };
+function skipped(reason: string, coverCount: number): CoveredGlyphPlan {
+  return {
+    skipped: true,
+    reason,
+    removedItems: 0,
+    rewrites: [],
+    satisfied: Array.from({ length: coverCount }, () => false),
+  };
 }
 
 function glyphsIn(value: unknown, output: PdfJsGlyph[] = []): PdfJsGlyph[] {
@@ -347,26 +354,30 @@ export function planCoveredGlyphRemoval(
       item !== null && typeof item === 'object' && 'str' in item &&
       typeof (item as { str?: unknown }).str === 'string'
     ));
-    if (contentItems.every((item) => item.str.trim() === '')) return skipped('the page has no text');
+    if (contentItems.every((item) => item.str.trim() === '')) {
+      return skipped('the page has no text', covers.length);
+    }
 
     const walk = streamOperators(roots);
     const rawOperators = walk.operators;
     const pdfOperators = pdfTextOperators(operatorList);
     if (rawOperators.length !== pdfOperators.length) {
-      return skipped('the content-stream and PDF.js text-show counts differ');
+      return skipped('the content-stream and PDF.js text-show counts differ', covers.length);
     }
     const mapped = mapTextItemsToOperators(items, operatorList);
-    if (!mapped || mapped.length !== items.length) return skipped('PDF.js text-item mapping failed');
+    if (!mapped || mapped.length !== items.length) {
+      return skipped('PDF.js text-item mapping failed', covers.length);
+    }
 
     const byteRanges = new Map<number, GlyphBytes>();
     for (let ordinal = 0; ordinal < pdfOperators.length; ordinal += 1) {
       const pdfOperator = pdfOperators[ordinal];
       const rawOperator = rawOperators[ordinal];
       if (!pdfOperator || !rawOperator || pdfOperator.glyphs.some((glyph) => glyph.vmetric !== undefined)) {
-        return skipped('the page uses unsupported vertical or missing glyph data');
+        return skipped('the page uses unsupported vertical or missing glyph data', covers.length);
       }
       const glyphBytes = glyphByteRanges(rawOperator, pdfOperator.glyphs);
-      if (!glyphBytes) return skipped('glyph codes do not match the content stream');
+      if (!glyphBytes) return skipped('glyph codes do not match the content stream', covers.length);
       byteRanges.set(ordinal, glyphBytes);
     }
 
@@ -380,6 +391,9 @@ export function planCoveredGlyphRemoval(
       }))
     ));
     const removedByOrdinal = new Map<number, Set<number>>();
+    const removedReplacements = covers.map((cover) => (
+      cover.replaces?.map(() => false) ?? []
+    ));
     let cursor = 0;
     let removedItems = 0;
     for (const item of items) {
@@ -396,16 +410,35 @@ export function planCoveredGlyphRemoval(
           return skipped(
             `a text item does not match its text-show glyphs (${JSON.stringify(text.slice(0, 20))}`
             + ` expected ${JSON.stringify(character)}, found ${JSON.stringify(next?.character ?? null)})`,
+            covers.length,
           );
         }
         matched.push(next);
       }
       const rect = textItemRect(item as TextItemLike, viewport);
-      if (!rect || !itemMatchesCover(text, rect, covers)) continue;
+      if (!rect) continue;
+      const matchedReplacements: Array<{ coverIndex: number; replacementIndex: number }> = [];
+      let covered = false;
+      covers.forEach((cover, coverIndex) => {
+        if (cover.replaces === undefined) {
+          if (itemIsCovered(rect, [cover.rect])) covered = true;
+          return;
+        }
+        cover.replaces.forEach((replacement, replacementIndex) => {
+          if (!matchesReplacement(text, rect, replacement)) return;
+          covered = true;
+          matchedReplacements.push({ coverIndex, replacementIndex });
+        });
+      });
+      if (!covered || matched.length === 0) continue;
       for (const { ordinal, glyphIndex } of matched) {
         const removed = removedByOrdinal.get(ordinal) ?? new Set<number>();
         removed.add(glyphIndex);
         removedByOrdinal.set(ordinal, removed);
+      }
+      for (const { coverIndex, replacementIndex } of matchedReplacements) {
+        const replacementState = removedReplacements[coverIndex];
+        if (replacementState) replacementState[replacementIndex] = true;
       }
       removedItems += 1;
     }
@@ -416,11 +449,11 @@ export function planCoveredGlyphRemoval(
       const rawOperator = rawOperators[ordinal];
       const glyphBytes = byteRanges.get(ordinal);
       if (!pdfOperator || !rawOperator || !glyphBytes || pdfOperator.fontSize === 0) {
-        return skipped('text spacing information is incomplete');
+        return skipped('text spacing information is incomplete', covers.length);
       }
       // A form stamped twice would need two different results from one stream.
       if ((walk.invocations.get(rawOperator.streamKey) ?? 0) !== 1) {
-        return skipped('a Form XObject is painted more than once on the page');
+        return skipped('a Form XObject is painted more than once on the page', covers.length);
       }
       const characterSpacing = (pdfOperator.charSpacing / pdfOperator.fontSize) * 1000;
       const wordSpacing = (pdfOperator.wordSpacing / pdfOperator.fontSize) * 1000;
@@ -432,7 +465,7 @@ export function planCoveredGlyphRemoval(
         pdfOperator.wordSpacing !== 0 &&
         glyphBytes.byteWidth > 1 &&
         [...removed].some((index) => pdfOperator.glyphs[index]?.originalCharCode === 32)
-      ) return skipped('word spacing cannot be measured for multi-byte spaces');
+      ) return skipped('word spacing cannot be measured for multi-byte spaces', covers.length);
       const advances = pdfOperator.glyphs.map((glyph) => (
         glyph.width + characterSpacing + (spaced(glyph) ? wordSpacing : 0)
       ));
@@ -444,9 +477,16 @@ export function planCoveredGlyphRemoval(
         advanceThousandths: advances,
       });
     }
-    return { skipped: false, removedItems, rewrites };
+    const satisfied = covers.map((cover, coverIndex) => (
+      Boolean(
+        cover.replaces
+        && cover.replaces.length > 0
+        && removedReplacements[coverIndex]?.every(Boolean),
+      )
+    ));
+    return { skipped: false, removedItems, rewrites, satisfied };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return skipped(`the page content could not be parsed (${message})`);
+    return skipped(`the page content could not be parsed (${message})`, covers.length);
   }
 }
