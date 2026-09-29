@@ -12599,7 +12599,11 @@ cannot fail (Task 74, Step 4a)`. Merge to `main` once the control render proves 
 
 ---
 
-#### Task 74 — Step 5a  🔲 TODO → branch `text-appearance` **from `main`, after Step 4a is merged** (so it inherits Step 4a's working pixel tests) — text keeps its own appearance, and you can change its colour   *(Medium · 2–3 days)*
+#### Task 74 — Step 5a  🔲 TODO → branch `text-appearance` **from `main`, after Task 75 is merged** — text keeps its own appearance, and you can change its colour   *(Medium · 2–3 days)*
+
+*Step 4a is already on `main`, so its working pixel tests are inherited. **Task 75 goes first**, not this step:
+typing the wrong characters is corruption, and colour is cosmetic. Task 75 also settles which font the editor may
+draw through, which this step must not contradict — see the guardrail below.*
 
 *Step 5 was written as one 3–4 day change. It lands as 5a, 5b and 5c instead: the colour and weight half fixes the
 **exported file** and should not wait behind a canvas state machine, and one commit touching paint, a new page
@@ -13409,6 +13413,14 @@ naming every font affected and every substitution caused.
 | `src/lib/pdf/glyphNameDecoding.ts` + test | Recover characters from a font's `/Differences` glyph names |
 | `src/lib/pdf/previewFontSafety.ts` + test | Decide whether a pdf.js face may be drawn through |
 | a local `TASK75_GLYPHS` test | The three-layer checks and the corpus reports |
+| a shared local-test render helper | See below |
+
+**Housekeeping — one copy of the render helper, not four.** Step 4a's absolute `standardFontDataUrl` resolution
+already exists twice, in `patchFreeExport.local.test.ts` and `typedGlyphPixels.local.test.ts`, and this task's
+layer-3 check plus Step 5d's movement table each need it again. Extract the resolution, the prerequisite reporting
+and the page-render-to-`ImageData` helper into one shared local-test module and have all of them use it, rather
+than adding a third and fourth copy. Behaviour must not change: `TASK74_PATCH=1` stays at 45 files, 335 emitted,
+335 skipped, 0 drawn, 0 refused.
 
 **Existing files that change**
 
