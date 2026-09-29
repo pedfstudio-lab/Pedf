@@ -11831,8 +11831,15 @@ them. Added free text needs no source cover and remains unchanged.
 
 Measured in Step 0 (Node canvas, a browser proxy): exporting the **whole** document takes 180 ms on an 84-page
 2.9 MB file and **1,866 ms** on the 21-page 61 MB brochure; exporting **that page alone** takes 74 ms and 537 ms;
-re-opening and redrawing takes 53 ms and 299 ms. The full state machine, eligibility rules, files and checks are
-written out in the detailed Step 5 below.
+re-opening and redrawing takes 53 ms and 299 ms.
+
+**Step 5 lands in three parts, behind one preparation step.** The colour and weight half fixes the **exported
+file** and must not wait behind a canvas state machine, and one commit touching paint, a new page exporter, page
+states and the toolbar cannot be bisected when it goes wrong. The authoritative specs are below:
+**Step 4a** — give the pixel tests their fonts and assert the replacement is drawn, so 5a and 5b can be verified
+at all; **Step 5a** — text keeps its own colour and weight, plus a colour control; **Step 5b** — the clean page
+preview, the state machine, eligibility and fallbacks; **Step 5c** — the live visual frame and the toolbar.
+Build them in that order. Where this outline and those sections differ, the sections win.
 
 **Step 6 — Tests, and account for every piece that moves.**
 - *Borders* (`ruleLines.test.ts`): a 20 pt divider is a border; a path of six rectangles yields six candidates; a
@@ -12518,249 +12525,439 @@ deleting a **picture** still paints a patch, which is correct — there is nothi
 
 **Land:** branch `patch-free` from `main`. Commit: `An export stops painting over words it removed (Task 74,
 Step 4)`. Merge only after the pixel checks pass and the user's own three files verify.
+#### Task 74 — Step 4a  🔲 TODO → branch `pixel-tests-can-fail` **from `main`** — a pixel test that cannot see the new words cannot fail   *(Easy · 1 hour)*
 
-#### Task 74 — Step 5, written out  🔲 TODO → branch `live-page-preview` (from `patch-free`, after Step 4) — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+*Each of Steps 4a, 5a, 5b and 5c branches from `main` and is merged back once verified, so every step inherits the
+ones before it without a chain of dependent branches. Step 4 is already on `main`.*
 
-**What the user hit.** On `Bhutan December'26.pdf`, clicking the white `BHUTAN` heading opens a large opaque white
-rectangle, changes the extracted white text to black and hides most of the photograph. The editor no longer
-resembles the PDF, so the user cannot tell what is being edited or how the final page will look.
+**What went wrong.** Checking `DUTEES PRICE LIST APR26.pdf` through the Step 4 export, the edited cell rendered
+empty. The content stream, the page's `/Font` dictionary and the CropBox were all searched before the cause turned
+out to be the renderer rather than the file: `PATCH FREE` sat in the exported page at x 337.90, y 400.77, size 8.00,
+width 51.11, drawn `0 0 0 rg`, with `/Helvetica-Bold-7098480789` present in the page's resources. It appeared the
+moment the renderer was given the standard fonts.
 
-This is not specific to Bhutan:
-- text over a photograph receives one sampled rectangle that destroys the photograph while editing;
-- text over a coloured or textured area receives one flat colour;
-- a table-cell cover can hide its borders and fill;
-- a heading's layout/alignment box can be much wider than its visible letters, making the rectangle enormous;
-- `extractTextRuns` currently assigns black to every run because PDF.js text content does not expose paint colour
-  reliably, so white source text opens as black.
+**Why.** A replacement is drawn in a standard font. Helvetica, Times and Courier are *named* in a PDF, not carried
+inside it, and every viewer is required to supply them. pdf.js in Node supplies them only when told where they
+live, through `standardFontDataUrl`. `renderPage` in `patchFreeExport.local.test.ts` does not pass it, so every
+replacement in every pixel render we have ever made has drawn as nothing.
 
-Step 4 fixes the **exported file** by not drawing a cover after its original glyphs were removed successfully. It
-does not fix the editor because `PageCanvas` still shows the original PDF page underneath the editing overlay.
-Step 5 makes the in-app page use the same clean rendering principle.
+| Measured | |
+|---|---|
+| The file was always right | `PATCH FREE` extracts from the exported page at x 337.90, y 400.77, size 8.00, width 51.11 |
+| The renderer was wrong | the same page rendered with `standardFontDataUrl` shows the text, with every border and fill intact |
+| What the pixel tests prove today | borders survive, photo survives, old word gone — **nothing about the new word** |
 
-**What the user gets.** Paragraph edits, heading edits, table-cell edits and list edits do not show the white/grey
-patch when their original PDF text can be removed safely. The photograph, colour, table borders and surrounding
-content remain visible. Only the selected source glyphs disappear from a temporary clean page preview, and the
-editable replacement is drawn transparently over that real background.
+**What this costs.** If replacement drawing broke completely — edit a cell, press Done, export, the cell comes out
+blank — every pixel case in `patchFreeExport.local.test.ts` would still pass. Step 5a is entirely about how
+replacement text looks, and Step 5b's headline check is that the app's page matches the exported page; with text
+invisible, that check passes by comparing two blanks.
 
-For the Bhutan heading:
-- the photograph remains visible;
-- `BHUTAN` stays white;
-- a thin blue frame follows the visible heading rather than filling its alignment region;
-- resize/move handles sit on that frame;
-- the formatting toolbar floats outside the frame and stays inside the page;
-- no opaque editor background is drawn;
-- while typing, only the selected heading changes;
-- on Done, the clean committed page becomes the normal page view.
+**Change 1 — give the renderer its fonts.** `renderPage` passes `standardFontDataUrl`, resolved as an **absolute
+URL with a trailing slash from `import.meta.url` and the installed `pdfjs-dist/standard_fonts` directory**. Do not
+use a working-directory-relative `node_modules/...` string: Vitest, a worktree and CI are not required to start
+from the same directory. Apply the same resolved URL to every other local test that renders standard-font text for
+pixel comparison.
 
-This is universal for **eligible selectable PDF text**. It does not inspect the background and create a
-Bhutan/image special case. The same path is used over white pages, photographs, colours, gradients and tables.
-Text baked into a raster image, converted to vector outlines or refused by the glyph-removal safety checks is not
-silently treated as safe text; it keeps the current fallback.
+**Change 2 — assert the new words are drawn against the right control.** For each pixel case, render two otherwise
+identical exports: the real edit, and a control that keeps the same cover/source-glyph removal but omits only the
+replacement `TextEdit`. Compare those two renders inside the replacement rectangle. The real render must add ink,
+and the bounding box of those added pixels must stay inside the replacement rectangle rather than appearing beside
+it. Do not use only the original PDF as the control: pixels changed by removing the old word are not proof that the
+new word was drawn. The existing original-versus-export "changed pixels outside the text ink" measurements remain
+unchanged.
 
-**The central rule — removal, layout and appearance are different things.**
+**Checks**
+- The three existing pixel cases pass, now with the replacement visibly drawn.
+- The no-`TextEdit` control fails the replacement-ink assertion in **every** pixel case without editing product
+  code.
+- A missing standard-font directory **skips with a stated reason** rather than passing silently.
+- `TASK74_PATCH=1` unchanged: 45 files, 335 emitted, 335 skipped, 0 drawn, 0 refused.
+- Full suite; typecheck; lint.
 
-The current editor lets one rectangle perform several unrelated jobs. Step 5 keeps three concepts separate:
-1. **Source-removal geometry** identifies the original PDF glyphs to remove. Only the glyph-removal/export pipeline
-   consumes it.
-2. **Layout geometry** controls paragraph wrapping, heading alignment, neighbour width, movement and committed PDF
-   coordinates.
-3. **Visual editor geometry** draws the blue frame and handles around the visible editable text.
+**Existing files that change**
 
-Tightening the visual frame must never change the layout rectangle. In particular, making the Bhutan frame follow
-the word must not change its centring, alignment width, baseline, exported position or re-edit position. A
-paragraph keeps its reflow width even though its editor background is transparent. Removing the painted rectangle
-must not make a paragraph behave like a heading or a heading behave like a paragraph.
+| File | Change |
+|---|---|
+| `src/lib/export/patchFreeExport.local.test.ts` | Both changes |
+| any other local test rendering pages for pixel comparison | Change 1 only |
 
-**Change 1 — read the source text's real paint colour.**
+**Files that must not change:** all product code. This step changes tests only.
 
-`extractTextRuns` currently hard-codes `color: { r: 0, g: 0, b: 0 }`. Add a text-paint reader beside
-`textContent.ts`. It walks the PDF.js operator list in paint order and tracks:
-- fill colour;
-- DeviceGray, DeviceRGB and DeviceCMYK changes;
-- graphics-state save and restore;
-- text objects and text-show operations;
-- fill versus stroke text-rendering modes where the application can represent them safely.
+**Guardrails:** no product behaviour changes; a missing font directory skips loudly rather than passing.
+
+**Land:** branch `pixel-tests-can-fail` from `main`. Commit: `A pixel test that cannot see the new words
+cannot fail (Task 74, Step 4a)`. Merge to `main` once the control render proves every pixel case can fail.
+
+---
+
+#### Task 74 — Step 5a  🔲 TODO → branch `text-appearance` **from `main`, after Step 4a is merged** (so it inherits Step 4a's working pixel tests) — text keeps its own appearance, and you can change its colour   *(Medium · 2–3 days)*
+
+*Step 5 was written as one 3–4 day change. It lands as 5a, 5b and 5c instead: the colour and weight half fixes the
+**exported file** and should not wait behind a canvas state machine, and one commit touching paint, a new page
+exporter, page states and the toolbar cannot be bisected when it goes wrong — which is how Step 2 took down the
+bullet lists. Codex reviewed the split and its implementation corrections are folded in below, marked
+**(Codex review)**.*
+
+**What the user hit.** Two complaints, one cause.
+
+*Colour.* Editing the white `BHUTAN` heading on `Bhutan December'26.pdf` returns it black — "after editing, it
+changed the color to black". The exported file has black text where white text was, and always has. This is not the
+patch and not Step 4.
+
+*Weight.* Editing two cells of `DUTEES PRICE LIST APR26.pdf` — `50 to 149 pcs` → `50 to 149 pc` and `Rs. 180/-` →
+`Rs. 190/-` — returned both visibly bolder than the untouched cells beside them, and the user had not asked for
+bold.
+
+**Why.** `extractTextRuns` assigns every run the same colour (`textContent.ts:352` and `:558`):
+
+```ts
+// PDF.js text content does not expose fill color reliably.
+color: { r: 0, g: 0, b: 0 },
+```
+
+And `fontStyleFromProgram` calls a font bold when `usWeightClass >= 600`, OR-ed with the `head.macStyle` bold bit.
+A semibold at 600 is therefore bold, and `standardFontFor` substitutes Helvetica-Bold at 700 — heavier than what
+was there. Because detection says bold, the editor's **B** button is already lit before the user touches anything.
+
+A third, opposite mistake sits beside them. `sampleBackground` (`OverlayLayer.tsx:480`) takes the **dominant colour
+inside the block's own rectangle** as the colour of what is behind it. On the Bhutan heading the giant white letters
+dominate, so it samples white and paints a white rectangle over the photograph — the box in the user's screenshot.
+All three are the same confusion: **the text's own appearance and its surroundings are not told apart.**
+
+| Measured | |
+|---|---|
+| Every run is black | two hard-coded sites, `textContent.ts:352` and `:558` |
+| Every block on DUTEES page 3 is bold | `"50 to 149 pcs"`, `"150 to 299 pcs"`, `"Rs. 182/-"`, `"Wholesale Price"` all `bold true`, `fontName "sans-serif"`, `nameSaysBold false` |
+| The fonts say otherwise | `RFDewi-Semibold` `usWeightClass 600`, `macStyle 0x0`; `RFDewi-Ultrabold` `800`, `macStyle 0x0`; `RFDewi-LightItalic` `300`, `macStyle 0x2`; `JosefinSans-Thin` `100` |
+| The threshold change is bounded | across 46 files and **185** distinct embedded fonts: **74** under 600, **25** at 600–699, **58** at 700+, **28** with no OS/2 table. **All 25 in the 600–699 band are in the user's price list**; no other file has a single font there |
+| The patch takes the text's colour | Bhutan page 1's heading rect samples to white because its own glyphs dominate |
+
+**What the user gets.** White headings stay white and blue table headers stay blue, in the editor **and in the
+exported file**. Semibold text stops coming back bolder than its neighbours, and **B** is no longer lit on text that
+was never bold. A colour swatch in the toolbar shows the real colour of what is selected and changes it. Scanned
+PDFs' invisible text layer stops being treated as editable text.
+
+**Change 1 — read the real paint state.**
+Add a text-paint reader beside `textContent.ts`. It walks the PDF.js operator list in paint order and tracks fill
+colour; DeviceGray, DeviceRGB and DeviceCMYK changes; graphics-state save and restore; text objects and text-show
+operations; and fill versus stroke text-rendering modes where the application can represent them safely.
 
 Map that paint state back to the extracted runs without changing their text, rectangles, font references or
-grouping. A white PDF heading must produce a white `TextStyle`; the browser editor and exported replacement then
-use the same white.
-
-Where one editable block contains multiple source colours, preserve them as rich-text spans rather than flattening
-the block to one representative colour. Add an optional colour override to `TextSpan`; old saved projects without
-it remain valid. Pattern-filled, gradient-filled or stroke-only text that cannot be represented confidently is
-marked unsupported. Do not guess a colour and silently produce the wrong result; use the legacy editor fallback
-for that selection.
+grouping. A white PDF heading must produce a white `TextStyle`; the editor and the exported replacement then use the
+same white. Where one editable block contains multiple source colours, preserve them as rich-text spans rather than
+flattening the block to one representative colour: add an optional colour override to `TextSpan`; old saved projects
+without it remain valid. Pattern-filled, gradient-filled or stroke-only text that cannot be represented confidently
+is marked **unsupported** — do not guess a colour and silently produce the wrong result.
 
 This change reads paint only. It must not change grouping, line detection, alignment, font choice or glyph-removal
 matching.
 
-**Change 2 — create one page-scoped preview exporter.**
+**Change 2 — recognise invisible text.**
+Text-rendering mode 3 paints nothing; it is the hidden searchable layer over a scanned page. The reader records it.
+**Open with a measurement**: how many of the 45 baseline files contain mode-3 text, how many text items it covers,
+and whether `extractTextRuns` currently returns them. Report the numbers before changing behaviour. If we do extract
+them, mode-3 runs are excluded from editable blocks — a user must not be able to edit, or cause us to draw, words
+that were never meant to be seen.
 
-Add an entry point beside `exportPdf.ts` that receives:
-- the pristine source bytes;
-- the live `PagePlan`;
-- one live page identity/index;
-- the committed edits belonging to that page;
-- optional transient edits used only to prepare an editor;
-- optional text-edit IDs to omit from the preview.
+**Change 3 — separate the weight already inside the font from bold the user applies.**  **(Codex review)**
+The first draft proposed letting `macStyle` decide whenever the `head` table is present. That is worse than today's
+rule: `RFDewi-Ultrabold` carries `usWeightClass 800` with `macStyle 0x0`, so a genuinely heavy face would become
+regular. Moving the threshold from 600 to 700 fixes the DUTEES semibold case, but is not enough by itself:
+`drawSpanWithPageFont` currently adds a synthetic outline whenever `style.bold` is true. Reusing an already
+Ultrabold source font and then applying that outline makes it heavier a second time.
 
-It returns one temporary renderable page and uses the same handlers, embedded fonts, glyph-removal plan,
-satisfied-cover result, rotation and page geometry as the real export.
+Record two different facts:
 
-It must not:
-- export every page of the document;
-- modify the edit store;
-- create an Undo entry;
-- increment the document change count;
-- trigger project autosave;
-- become part of the saved project.
+1. **`sourceBold`** — optional, backwards-compatible metadata saying that the selected source face already contains
+   a bold weight. For a usable font program it is
+   `usWeightClass >= 700 OR macStyle bold bit`; with no usable program, fall back to
+   `classifyFontStyle(fontName)`. A zero `macStyle` bit never vetoes a real weight. A 600 semibold source records
+   `sourceBold: false`; an 800 Ultrabold source records `sourceBold: true`.
+2. **`bold`** — the desired state of the editor's **B** control. On first open it equals `sourceBold`; after that it
+   changes only when the user changes formatting.
+
+Use those facts when drawing:
+
+- when `bold === sourceBold`, reuse the source `fontRef` with **no synthetic weight** — the face already looks as
+  intended;
+- when `bold && !sourceBold`, apply the existing synthetic-bold path (or the bold standard-font fallback);
+- when `!bold && sourceBold`, do not reuse a source face that is intrinsically bold; use a compatible regular
+  source face if one can be proved, otherwise use the regular standard-font fallback;
+- a missing `sourceBold` in an old saved project follows the legacy behaviour, so old projects export identically.
+
+Carry optional `sourceBold` through source styles and rich spans so mixed-font text does not lose the distinction.
+Report, across the 45 baseline files, every block whose initial **B** state changes, grouped by the font that caused
+it. The expected change is bounded to the measured DUTEES semibold blocks; every other change must be named and
+explained.
+
+**Change 4 — do not sample the text as its own background.**
+`sampleBackground` measures the dominant colour of the region **outside** the block's ink rather than inside its
+rectangle, reusing the ink-extent machinery from Task 66 Revision 1. On a photograph it returns the photograph's
+tone; on a table cell it returns the cell's fill. This matters until Step 5b removes the on-screen patch, and it
+also governs the patch the **export** still draws on a refused page.
+
+**Change 5 — the colour control.**
+The existing toolbar gains one control, placed after the family select and before Cancel:
+
+- a compact **swatch** showing the colour of the current selection, or of the whole box when nothing is selected —
+  so the user can see what we read from the file;
+- clicking it opens a small panel: a row of common colours (black, white, a grey ramp and the basic hues) for
+  one-click use, plus a full colour input for anything else;
+- choosing a colour applies it to the selection as a rich span, or to the whole box when the selection is empty;
+- the panel is keyboard reachable and dismissable with Escape, like the other toolbar controls;
+- the chosen colour is written to the edit, survives Undo and Redo, is saved in the project, and is drawn by
+  `handlers/text.ts` on export;
+- where Change 1 marked the source paint unsupported, the swatch shows no colour and the user may set one.
+
+This is the **existing** toolbar. Its position, size and floating behaviour are Step 5c's work and must not change
+here. **(Codex review)** This control is the one optional part of 5a: if the step must be shortened, cut the panel
+and keep the swatch read-only. Source-colour preservation — Changes 1 to 4 — is not optional.
+
+**Change 6 — confirm bold and italic land.**
+`applyFontSize` updates the base style (`setStyle(v => ({ ...v, fontSizePt }))`); `applyInlineStyle` only calls
+`document.execCommand` and never touches it, while `serializeRichText` seeds every span from that base style. Add
+tests for four cases — bold on with a selection, bold off with a selection, bold toggled with a collapsed caret, and
+italic likewise — asserting the committed style and spans. If any case does not produce the expected result, fix it;
+if all pass, the tests remain as a guard.
+
+**Checks**
+- *Text paint*: white, black, DeviceRGB, DeviceGray and DeviceCMYK source text retain their colours; save/restore
+  returns to the previous colour; a block with two colours becomes two spans; unsupported paint is rejected rather
+  than guessed.
+- *Invisible text*: the measurement is reported; a page whose only text is mode 3 yields no editable blocks; a page
+  mixing visible and mode-3 text yields only the visible ones.
+- *Weight*: `usWeightClass` 600 alone gives `sourceBold: false`; **800 with `macStyle 0x0` gives
+  `sourceBold: true`**; `macStyle` bold with a low weight is true; name classification is used only when no usable
+  program exists; the corpus report shows no unexplained change.
+- *No double bold*: unchanged Semibold and Ultrabold source faces reuse their original font without
+  `FillAndOutline`; turning **B** on for a non-bold source applies weight once; turning **B** off for an intrinsically
+  bold source does not reuse the bold face and produces visibly regular output.
+- *Background*: on Bhutan page 1 the heading's sampled colour is the photograph's tone, not white; on a table cell
+  it is the cell's fill; a block on plain white still samples white.
+- *Colour control*: the swatch shows the source colour; a colour applied to a selection produces one span; applied
+  with no selection it covers the box; Undo restores the previous colour; a saved and reopened project keeps it.
+- *Export colour*, not only editor colour: a white heading exports white, a blue cell header exports blue, and a
+  user-chosen colour exports as chosen. Assert in pixels, which Step 4a made possible.
+- *Old projects*: a project saved before this change opens and exports identically.
+- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1` at 121/121, 807 removed, 0 skipped,
+  0 removed images; `TASK70_TABLES=1` at 45 files, 31 changed, 0 unexplained; `TASK74_PATCH=1` at 335/335; full
+  suite; typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/textPaint.ts` + test | Read the source text's actual paint state, including mode 3 |
+| a local `TASK74_APPEARANCE` test | The invisible-text and weight-change corpus reports |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + test | Attach decoded colour to runs; the weight threshold; grouping untouched |
+| `src/lib/export/types.ts` | Optional per-style/per-span colour and `sourceBold`, backwards compatible |
+| `src/lib/edit/richText.ts` + test | Carry source/user span colours and intrinsic-weight metadata |
+| `src/lib/export/handlers/text.ts` + test | Draw span colours and apply only user-requested synthetic weight |
+| `src/lib/export/embeddedFont.ts` + test | Do not synthetically embolden a source face that is already bold |
+| `src/lib/export/englishFont.ts` + test | Unchanged logic; new expectations from the weight threshold |
+| `src/components/OverlayLayer.tsx` | `sampleBackground` measures outside the ink |
+| `src/components/TextEditOverlay.tsx` + test | The colour swatch and its panel; the bold/italic tests |
+
+**Files that must not change:** `textUnits.ts` grouping; `ruleLines.ts`; `bulletList.ts` and everything
+bullet-shaped; `buildTextEdits.ts` geometry and wrapping; `textLayout.ts`; `textEditSession.ts` and the
+unchanged-edit guard; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and every image patch; the toolbar's
+position and floating behaviour; all tools; `PagePlan`.
+
+**Guardrails:** a colour is used only when it was decoded confidently, never guessed; grouping, line detection and
+alignment are identical before and after; initial **B** state may not change outside the measured price-list cases
+without that change being named; a zero `macStyle` bit may never make a heavy font regular; an intrinsic heavy face
+may never receive synthetic bold merely because it is intrinsically heavy; no saved project becomes unreadable;
+glyph-removal matching is untouched, so Step 4's guarantees hold unchanged.
+
+**Verify (user):**
+1. Bhutan → click `BHUTAN` → the heading is white, not black → Done → export → still white.
+2. FIRGUN price table → click `PRICE PER ADULT` → it is blue → export → blue.
+3. DUTEES price list → click `50 to 149 pcs` → **B is not lit** → change a character → export → the cell matches
+   the weight of its neighbours; then edit an Ultrabold heading → it stays heavy but does not become heavier;
+   turn **B** off → the replacement becomes regular rather than reusing the Ultrabold face.
+4. Any text → click the swatch → pick a colour → only the selected words change → Done → export → the colour is
+   there.
+5. A scanned PDF → no invisible words are clickable.
+6. Open a paragraph, press Done without typing → nothing changes.
+
+**Known limits:** the white box is still drawn on screen — 5b removes it; a heading still comes back in Helvetica
+rather than its own typeface; letter-spaced headings still lose their word gaps; gradient- and pattern-filled text
+is refused rather than approximated, and must be coloured by hand.
+
+**Land:** branch `text-appearance`. Commit: `Text keeps its own colour and weight, and you can change the colour
+(Task 74, Step 5a)`. Merge after the corpus reports show no unexplained change and the user's six checks pass.
+
+---
+
+#### Task 74 — Step 5b  🔲 TODO → branch `live-page-preview` **from `main`, after Step 5a is merged** — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+
+**What the user hit.** Clicking the white `BHUTAN` heading opens a large opaque rectangle that hides most of the
+photograph. Clicking a table cell paints a rectangle across its fill and dividers while the editor is open. The
+editor no longer resembles the PDF, so the user cannot tell what is being edited or how the page will look.
+
+Not specific to Bhutan: text over a photograph gets one sampled rectangle that destroys the photograph while
+editing; text over a coloured or textured area gets one flat colour; a table-cell cover can hide its borders and
+fill; a heading's alignment box can be far wider than its visible letters, making the rectangle enormous.
+
+Step 4 fixed the **exported file** by not drawing a cover whose glyphs were removed. It does not fix the editor,
+because `PageCanvas` still shows the original PDF page underneath the overlay. Step 5b makes the in-app page use the
+same clean-rendering principle. This is universal for **eligible selectable PDF text**: it does not inspect the
+background and create an image special case, and the same path is used over white pages, photographs, colours,
+gradients and tables. Text baked into a raster image, converted to outlines, or refused by the glyph-removal safety
+checks keeps the current fallback.
+
+**The central rule — removal, layout and appearance are different things.**
+The current editor lets one rectangle do several unrelated jobs. Three concepts stay separate:
+
+1. **Source-removal geometry** identifies the original glyphs to remove. Only the glyph-removal and export pipeline
+   consumes it.
+2. **Layout geometry** controls paragraph wrapping, heading alignment, neighbour width, movement and committed PDF
+   coordinates.
+3. **Visual editor geometry** draws the frame and handles around the visible editable text.
+
+Tightening the visual frame must never change the layout rectangle. A paragraph keeps its reflow width even though
+its editor background is transparent. Removing the painted rectangle must not make a paragraph behave like a heading
+or a heading behave like a paragraph.
+
+**Change 0 — measure the cost before designing a cache.**  **(Codex review)**
+Task 74 Step 0 measured a whole-page export at **74 ms** on a normal file and **537 ms** on the 61 MB
+`Bhutan December'26.pdf`, with a re-open and redraw at **53 ms** and **299 ms**. That is one number covering three
+different things. Split it and report each, for a small file and for the 61 MB file, at the zoom levels the app
+uses:
+
+1. loading the source page and its operator list;
+2. building the stream tree and applying the rewrite;
+3. rendering to canvas.
+
+Only then design the cache, and cache the part that is actually heavy. Turning on edit mode can preload only the
+**page-shared ingredients** — source parsing, operator list, stream tree and reusable page resources. It cannot
+prebuild one final clean page without knowing which block the user will choose. Hover, keyboard focus and
+pointer-down start the block-specific preview; touch must not depend on hover.
+
+The first draft promised both "focus only when the clean page is ready" and "the user can type immediately" — a
+contradiction. Preloading reduces the wait but cannot guarantee that a mouse, keyboard or touch user will not type
+first. A replay buffer is rejected deliberately: this application handles Indian-language input, and replaying
+buffered keystrokes through an IME composition can drop or reorder characters.
+
+Resolve it with a real editor, not a replay buffer. On activation, mount and focus the actual `contenteditable`
+**synchronously** in `preparing-edit`, seeded exactly as the final editor will be. While the original page still
+contains the source word, suppress only the editor's glyph paint so the word is not doubled; keep its caret,
+selection frame and native composition state alive. Input and IME composition update the real DOM value normally.
+When the clean page is ready, atomically swap the canvas and reveal the editor's current glyphs — including anything
+already typed. If preparation fails, switch to the legacy cover and reveal that same live editor value. No
+keystroke is replayed and no composition is restarted.
+
+Measure two different targets: focus must occur in the activation event/next animation frame, and a warmed clean
+preview should replace the page within **100 ms** on the 61 MB file. If the second target is unreachable, report
+the measured wait and show `Preparing text…`; input must still be retained.
+
+**Change 1 — one page-scoped preview exporter.**
+Add an entry point beside `exportPdf.ts` receiving the pristine source bytes; the live `PagePlan`; one live page
+index; the committed edits belonging to that page; optional transient edits used only to prepare an editor; and
+optional text-edit IDs to omit from the preview. It returns one temporary renderable page, using the same handlers,
+embedded fonts, glyph-removal plan, satisfied-cover result, rotation and page geometry as the real export.
+
+It must not export every page of the document, modify the edit store, create an Undo entry, increment the document
+change count, trigger project autosave, or become part of the saved project.
 
 For an original block, the editing preview removes that block's source glyphs but draws no replacement and no
 satisfied cover. For a previously edited block, it keeps the original-glyph removal and every unrelated edit but
-omits the selected replacement text. That reveals the real page behind the selected text while it is re-edited.
+omits the selected replacement. That reveals the real page behind the selected text while it is re-edited.
 
-If the selected cover is unsatisfied, also replaces an image, the page rewrite is refused or the paint cannot be
-represented safely, the preview is not clean. Use the existing cover-based fallback.
+If the selected cover is unsatisfied, also replaces an image, the page rewrite is refused, or the paint cannot be
+represented safely, the preview is not clean — use the existing cover-based fallback.
 
-**Change 3 — give each page an explicit rendering state.**
-
+**Change 2 — give each page an explicit rendering state.**
 `PageCanvas` owns these states:
+
 - `original` — the untouched PDF.js page when the page has no committed edits;
 - `committed` — a page-scoped render containing the current committed edits;
-- `preparing-edit` — the current canvas remains visible while an offscreen clean editing preview is built;
+- `preparing-edit` — the current canvas stays visible while the real focused editor captures native input with its
+  glyph paint suppressed and an offscreen clean preview is built;
 - `editing` — the clean page is visible and the selected text comes from the transparent editor;
-- `committing` — the DOM text remains visible while the new committed page is rendered;
-- `fallback` — the current cover + text overlay is used because a clean preview was not safe.
+- `committing` — the DOM text stays visible while the new committed page is rendered;
+- `fallback` — the current cover and text overlay are used because a clean preview was not safe.
 
-Every replacement is rendered offscreen first. Swap only a complete render into the visible canvas; never clear
-the page while waiting and never expose a blank or half-painted page.
+Every replacement is rendered offscreen first. Swap only a complete render into the visible canvas; never clear the
+page while waiting and never expose a blank or half-painted page.
 
 Give each request a generation token. If the user selects another block, closes the editor, changes zoom, performs
-Undo/Redo, changes page or opens another document, discard any older result even if it finishes later. Rebuild
+Undo or Redo, changes page or opens another document, discard any older result even if it finishes later. Rebuild
 only the affected page.
 
-**Full interaction workflow**
+**The workflow**
 
-**1. Idle page.** A page without edits continues to use its normal PDF.js render. A page with committed edits uses
-its latest clean committed render. Invisible click targets stay above the canvas but add no visible background.
-
-**2. Select text.** In the first frame, select the same `TextBlock` or bullet list as today, draw the thin visual
-frame, leave the current canvas intact and start the page-scoped clean-preview request. Add nothing to edit
-history. `activeCoverGeometry` may still calculate removal/ink information, but its rectangles are not rendered as
-visible `<div>` elements in clean mode.
-
-While preparation runs, keep the page visible. Focus the full editor only when the clean page is ready, so
-keystrokes cannot disappear into an editor the user cannot see. If preparation crosses a short threshold, show a
-small `Preparing text…` status near the toolbar — never a white rectangle over the document.
-
-**3. Open the clean editor.** Atomically swap in the prepared page, on which the selected original glyphs are gone
-but the photograph, colour, borders, other content and unrelated edits remain. Mount and focus
-`TextEditOverlay`.
-
-In clean mode:
-- its root background is transparent;
-- no sampled active cover is mounted;
-- the source text colour is used;
-- its frame is visual only;
-- the toolbar floats outside the frame where page space permits;
-- handles do not cover neighbouring text;
-- caret, selection, shortcuts, movement, resizing and formatting continue to work.
-
-Do not export or redraw after each keystroke. The transparent DOM editor supplies immediate feedback over the clean
-page. The page-scoped render runs when the editor opens and after a changed edit commits, not repeatedly while the
-user types.
-
-**4. Edit a paragraph.** Keep the existing paragraph path:
-- soft PDF line breaks still form the same editor seed;
-- typing still reflows through `wrapNextText`;
-- Done still builds committed lines through `buildTextBlockEdits`;
-- width, height, line height, neighbour limits and overlap fallback remain;
-- only the selected paragraph changes.
-
-The missing patch changes what is visible behind the editor; it does not change how the paragraph wraps.
-
-**5. Edit a heading or short field.** Keep the existing heading path:
-- centred text remains centred against its recorded alignment region;
-- right-aligned text remains right-aligned;
-- preserved display lines remain preserved;
-- baseline, alignment width and committed geometry remain authoritative;
-- the tighter frame does not become the exported width;
-- a heading does not acquire paragraph reflow.
-
-`BHUTAN` can therefore keep the wide alignment region required for centring while its visible frame follows the
-actual word.
-
-**6. Edit a table cell.** Keep the cell as the same local text unit found by Steps 1 and 2. Its paragraph/short
-field behaviour, width and boundaries are unchanged. The clean page retains the cell's fill and borders, so no
-rectangle may span or erase adjacent cells while the editor is open.
-
-**7. Edit a bullet list.** Keep the existing list path:
-- items remain separate;
-- markers retain their positions;
-- wrapping stays inside the selected item/list;
-- overflow against the next section is still rejected;
-- `No room — the next section is in the way` keeps the editor open.
-
-The clean preview removes only the selected list's source glyphs. Neighbouring items and sections remain.
-
-**8. Done without a change.** This remains a true no-op. For original text, discard the temporary preview and
-restore the cached idle canvas. Create no cover or text edits, no Undo entry, no change count and no meaningful
-autosave. Do not reflow, move or replace anything.
-
-For already edited text, return to the same committed render that existed before the click. Do not replace its
-edit IDs, z-order, geometry, text or styles. Escape and Cancel follow the same rule.
-
-Formatting, moving or resizing is a real change. Merely opening the editor or toolbar is not.
-
-**9. Done after a change.** Use the existing commit path:
-- serialize the editor content and rich spans;
-- run the same paragraph, heading, cell or list wrapping logic;
-- build the same cover and text edits;
-- replace the previous edit group once;
-- create exactly one Undo step.
-
-Keep the active clean page and DOM text visible while rendering the committed page offscreen. That page removes
-the original glyphs, skips every Step 4 satisfied text cover, draws the replacement with its committed style and
-includes all other edits. When ready, swap it into the canvas and remove the DOM editor atomically. There must be
-no frame containing both old and new text and no frame in which the replacement disappears.
-
-**10. Preview failure after Done.** The edit remains committed. Never discard input because preview rendering
-failed. Fall back to the original or last valid canvas plus the required cover and committed text overlay. Undo,
-save, export and re-edit continue to work. A preview failure is a presentation failure, not an edit-store failure.
-
-**11. Re-edit committed text.** Build an editing preview that retains the original-glyph removal and every
-unrelated edit but omits the selected replacement. Seed the editor from `boxText`, `boxSpans`, saved style,
-dimensions and alignment metadata. Unchanged Done restores the same committed render; changed Done replaces the
-same edit group once.
-
-**12. Undo, Redo, reset, zoom and saved projects.**
-- Undo and Redo rebuild only the affected page for the restored edit state.
-- Reset returns pages to their original PDF.js render.
-- Zoom re-renders the current preview source at the new zoom/DPR without changing PDF geometry.
-- Scrolling and visible-page lazy rendering remain.
-- Preview canvases, temporary PDFs, request tokens and caches are never saved.
-- Reopening a project lazily rebuilds committed previews only for visible pages containing edits.
-- Older projects without optional span-colour data remain valid.
-
-Release temporary PDF.js documents, object URLs, offscreen canvases and bitmaps when replaced. Keep only a small,
-bounded cache around visible and recently edited pages.
-
-**Toolbar and frame**
-- thin blue outline with small move/resize handles;
-- no frame fill;
-- toolbar above when space exists and below otherwise;
-- toolbar clamped inside the page;
-- toolbar dimensions never enlarge the PDF/editor rectangle;
-- keep Done, Cancel, family, size, bold and italic;
-- show the active text colour as a compact swatch;
-- preserve per-selection colour as a rich span where needed.
-
-Deleting all content and pressing Done is a real deletion. Pressing Done with the original content untouched is
-not.
+1. **Idle page.** A page without edits keeps its normal PDF.js render; a page with committed edits uses its latest
+   clean committed render. Invisible click targets stay above the canvas and add no visible background.
+2. **Select text.** In the first frame, select the same `TextBlock` or bullet list as today, draw the visual frame,
+   leave the current canvas intact, mount/focus the real editor and start or join the block-specific clean-preview
+   request. Add nothing to edit history. `activeCoverGeometry` may still compute removal and ink information, but
+   its rectangles are not rendered as visible elements in clean mode. Until the clean page lands, suppress the
+   editor's glyph paint while its DOM value, caret and IME composition remain live. If preparation crosses a short
+   threshold, show `Preparing text…` near the toolbar — never a white rectangle over the document.
+3. **Open the clean editor.** Atomically swap in the prepared page, on which the selected original glyphs are gone
+   but the photograph, colour, borders, other content and unrelated edits remain. Keep the already mounted and
+   focused `TextEditOverlay`; do not remount it. In clean mode its root background is transparent, no sampled active
+   cover is mounted, the source text colour from Step 5a is used, and its frame remains visual only. Reveal its
+   current glyphs so an in-progress composition survives the canvas swap. Caret, selection, shortcuts, movement,
+   resizing and formatting continue to work. Toolbar placement and the tight live frame remain Step 5c's work. Do
+   not export or redraw after each keystroke — the transparent DOM editor is the immediate feedback. The
+   page-scoped render runs when the editor opens and after a changed edit commits, never repeatedly while the user
+   types.
+4. **Edit a paragraph.** Keep the existing paragraph path: soft PDF line breaks still form the same editor seed;
+   typing still reflows through `wrapNextText`; Done still builds committed lines through `buildTextBlockEdits`;
+   width, height, line height, neighbour limits and overlap fallback all remain; only the selected paragraph
+   changes. The missing patch changes what is visible behind the editor; it does not change how the paragraph wraps.
+5. **Edit a heading or short field.** Centred text remains centred against its recorded alignment region;
+   right-aligned text remains right-aligned; preserved display lines remain preserved; baseline, alignment width
+   and committed geometry remain authoritative; a later tighter visual frame never becomes the exported width; a heading
+   does not acquire paragraph reflow. `BHUTAN` keeps the wide alignment region required for centring; Step 5c later
+   tightens only its visible frame around the live word.
+6. **Edit a table cell.** The cell stays the same local text unit found by Steps 1 and 2, with its
+   paragraph/short-field behaviour, width and boundaries unchanged. The clean page retains the cell's fill and
+   borders, so no rectangle may span or erase adjacent cells while the editor is open.
+7. **Edit a bullet list.** Items remain separate; markers retain their positions; wrapping stays inside the
+   selected item or list; overflow against the next section is still rejected; `No room — the next section is in
+   the way` keeps the editor open. The clean preview removes only the selected list's source glyphs; neighbouring
+   items and sections remain.
+8. **Done without a change.** This remains a true no-op. For original text, discard the temporary preview and
+   restore the cached idle canvas: create no cover or text edits, no Undo entry, no change count and no meaningful
+   autosave, and do not reflow, move or replace anything. For already-edited text, return to the same committed
+   render that existed before the click, keeping its edit IDs, z-order, geometry, text and styles. Escape and
+   Cancel follow the same rule. Formatting, moving or resizing is a real change; merely opening the editor or the
+   toolbar is not.
+9. **Done after a change.** Use the existing commit path: serialize the editor content and rich spans; run the same
+   paragraph, heading, cell or list wrapping logic; build the same cover and text edits; replace the previous edit
+   group once; create exactly one Undo step. Keep the active clean page and DOM text visible while rendering the
+   committed page offscreen — that page removes the original glyphs, skips every Step 4 satisfied text cover, draws
+   the replacement with its committed style and includes all other edits. When ready, swap it into the canvas and
+   remove the DOM editor atomically. There must be no frame containing both old and new text, and no frame in
+   which the replacement disappears.
+10. **Preview failure after Done.** The edit remains committed. Never discard input because preview rendering
+    failed. Fall back to the original or last valid canvas plus the required cover and committed text overlay.
+    Undo, save, export and re-edit continue to work. **A preview failure is a presentation failure, not an
+    edit-store failure.**
+11. **Re-edit committed text.** Build an editing preview that retains the original-glyph removal and every
+    unrelated edit but omits the selected replacement. Seed the editor from `boxText`, `boxSpans`, saved style,
+    dimensions and alignment metadata. Unchanged Done restores the same committed render; changed Done replaces the
+    same edit group once.
+12. **Undo, Redo, reset, zoom and saved projects.** Undo and Redo rebuild only the affected page for the restored
+    edit state. Reset returns pages to their original PDF.js render. Zoom re-renders the current preview source at
+    the new zoom and DPR without changing PDF geometry. Scrolling and visible-page lazy rendering remain. Preview
+    canvases, temporary PDFs, request tokens and caches are never saved. Reopening a project lazily rebuilds
+    committed previews only for visible pages containing edits. Older projects without optional span-colour data
+    remain valid. Release temporary PDF.js documents, object URLs, offscreen canvases and bitmaps when replaced,
+    and keep only a small, bounded cache around visible and recently edited pages.
 
 **Eligibility and fallback**
 
 Clean text editing requires all of these:
+
 1. the selection is real extracted PDF text;
 2. every source glyph can be matched;
 3. the glyph-removal plan satisfies every source item;
@@ -12770,83 +12967,172 @@ Clean text editing requires all of these:
 7. the temporary page opens and renders.
 
 If any condition fails, use the existing cover-based editor. Never partially remove a word, reveal duplicate text,
-delete an image or display a guessed result. Eligibility is based on text/rewrite safety, not on whether the
-background looks like a photograph.
+delete an image or display a guessed result. **Eligibility is based on text and rewrite safety, not on whether the
+background looks like a photograph.**
 
 **Image boundary.** This step removes the visible patch from safely removable **text** edits: paragraphs, headings,
-cells and lists. It does not remove the established patches for moving, replacing or deleting existing PDF
-images. An image can contain the only copy of the pixels being removed, so the application cannot promise to
-reconstruct the background. Added free text has no source cover and is unchanged.
+cells and lists. It does not remove the established patches for moving, replacing or deleting existing PDF images.
+An image can contain the only copy of the pixels being removed, so the application cannot promise to reconstruct
+the background. Added free text has no source cover and is unchanged.
 
 **Checks**
-- *Text paint*: white, black, RGB, grayscale and CMYK source text retain their colours; save/restore returns to the
-  previous colour; mixed colours become spans; unsupported paint is rejected rather than guessed.
+- *Timing and input*: Change 0's three-way split is reported for a small file and the 61 MB file at each zoom the
+  app uses before any cache exists. Focus occurs in the activation event/next frame for mouse, keyboard and touch.
+  A warmed clean-page swap targets 100 ms on the 61 MB file; if it misses, report the measured wait.
+- *IME during preparation*: type and compose English, Devanagari and one additional supported Indian script before
+  the clean page lands; the final editor contains exactly the composed text, with no replay, loss, duplication or
+  composition restart. A forced preview failure reveals the same live value in the fallback editor.
 - *Page preview*: only the requested live page is produced; unrelated edits remain; the active replacement is
-  omitted; its source glyphs are removed; its satisfied cover is absent.
+  omitted; its source glyphs are removed; its satisfied cover is absent; the edit store, Undo stack, change count
+  and autosave are untouched.
 - *Fallback*: unsatisfied removal, refused rewrite, `replacesImages`, unsupported paint, export failure and render
-  failure all retain the current safe path and the user's edit.
+  failure each retain the current safe path **and the user's edit**.
 - *Atomic rendering*: the visible page is never cleared while a preview is prepared; stale work cannot replace a
   newer selection, zoom, Undo state or document.
 - *No per-keystroke export*: typing changes only the DOM editor until Done.
 - *Paragraph changed*: a normal multi-line paragraph reflows exactly as before, without a visible patch.
 - *Paragraph unchanged*: open and press Done — zero edits, zero Undo entries, unchanged count, geometry and pixels.
 - *Heading changed*: centred and right-aligned headings keep alignment, baseline and exported position, without a
-  visible patch.
-- *Heading unchanged*: open and press Done — no replacement and no movement.
+  visible patch. *Heading unchanged*: no replacement and no movement.
 - *Cell changed and unchanged*: the same rules, with border and fill pixels intact.
 - *List changed and unchanged*: the same item wrapping, markers, overflow and no-op behaviour.
 - *Re-edit*: no original or committed text doubles; unchanged Done retains edit IDs and geometry.
 - *Undo/Redo*: each rebuilds the page corresponding to the restored edit state.
-- *Zoom*: frame, caret, text, handles and canvas remain aligned at every supported zoom/DPR.
+- *Zoom*: frame, caret, text, handles and canvas remain aligned at every supported zoom and DPR.
 - *Saved project*: paragraph, heading, cell and list previews rebuild without modifying history.
-- *Bhutan visual test*: while `BHUTAN` is open, photo pixels outside the original glyph ink match the original;
-  replacement text is white; no opaque rectangle exists.
-- *Table visual test*: while editing and after committing a Sri Lanka cell, borders/fills remain unchanged.
-- *Plain-page test*: a normal black paragraph on white edits/reflows normally, with no spacing change.
-- *No-op pixel test*: click a paragraph, heading, cell and list; press Done without typing; before/after pages are
-  pixel-identical.
+- *Bhutan visual test*: while `BHUTAN` is open, photo pixels outside the original glyph ink match the original; the
+  replacement is white; no opaque rectangle exists.
+- *Table visual test*: while editing and after committing a Sri Lanka cell, borders and fills remain unchanged.
+- *Plain-page test*: a normal black paragraph on white edits and reflows normally, with no spacing change.
+- *No-op pixel test*: click a paragraph, heading, cell and list; press Done without typing; before and after pages
+  are pixel-identical.
 - *Export parity*: after a commit, the in-app page matches the same page from the full exported PDF.
 - *Corpus*, local `TASK74_PREVIEW=1`: report clean-preview successes and every fallback reason. A clean preview
-  whose pixels differ from the corresponding Step 4 export outside replacement ink fails.
-- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1`; `TASK70_TABLES=1`; full suite;
-  typecheck; lint; build.
+  whose pixels differ from the corresponding Step 4 export outside replacement ink **fails the task**.
+- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1`; `TASK70_TABLES=1`; `TASK74_PATCH=1`;
+  full suite; typecheck; lint; build.
 
 **New files**
 
 | File | Why |
 |---|---|
-| `src/lib/pdf/textPaint.ts` + test | Read the source text's actual paint state |
 | `src/lib/export/exportPagePreview.ts` + test | Produce one edited page without exporting the whole document |
 | `src/lib/pdf/pagePreviewController.ts` + test | Preview states, cancellation, caching and stale-result protection |
 | a local `TASK74_PREVIEW` test | Pixel and fallback accounting over the real-PDF corpus |
+| a local timing test for Change 0 | The three-way split of the page-preview cost |
 
 **Existing files that change**
 
 | File | Change |
 |---|---|
-| `src/lib/pdf/textContent.ts` | Attach safely decoded colour to runs; grouping stays untouched |
-| `src/lib/export/types.ts` | Optional per-span colour, backwards compatible |
-| `src/lib/edit/richText.ts` | Preserve source/user span colours |
-| `src/lib/export/handlers/text.ts` | Draw optional span colours |
-| `src/lib/export/exportPdf.ts` | Share its page-writing core with preview export |
-| `src/components/PageCanvas.tsx` | Render/swap original, editing and committed page states |
-| `src/components/OverlayLayer.tsx` | Request clean previews; do not display active covers in clean mode |
-| `src/components/TextEditOverlay.tsx` | Transparent mode, visual frame, toolbar placement and colour swatch |
-| corresponding tests | Workflow, no-op, fallback, geometry, re-edit, Undo/Redo and zoom |
+| `src/lib/export/exportPdf.ts` | Share its page-writing core with the preview exporter |
+| `src/components/PageCanvas.tsx` + test | Render and swap original, editing and committed page states |
+| `src/components/OverlayLayer.tsx` + test | Request clean previews; do not display active covers in clean mode |
+| `src/components/TextEditOverlay.tsx` + test | Transparent mode |
 
-**Files whose behaviour must not change:** `textUnits.ts` grouping; `buildTextEdits.ts` wrapping and committed
-geometry; `ruleLines.ts`; `coveredImages.ts` and every image-removal patch; `PagePlan`; edit-history semantics;
-project autosave/restoration; final full-document export guarantees.
+**Files that must not change:** `textUnits.ts` grouping; `buildTextEdits.ts` wrapping and committed geometry;
+`ruleLines.ts`; `coveredImages.ts` and every image-removal patch; `coveredGlyphs.ts`; `PagePlan`; edit-history
+semantics; project autosave and restoration; the final full-document export guarantees; the toolbar's placement,
+which is Step 5c's work.
+
+**Guardrails:** no edit is ever lost to a preview failure; no page is ever shown blank or half-drawn; a stale render
+can never replace a newer one; an unchanged Done remains pixel-identical; the preview never writes to the edit
+store, the Undo stack or the saved project; a refused page behaves exactly as today, patch and warning included.
 
 **Verify (user):**
-1. Bhutan → click `BHUTAN`: photograph visible, heading white, thin frame/toolbar, no rectangle.
+1. Bhutan → click `BHUTAN`: photograph visible, heading white, editor controls visible, no rectangle; Step 5c
+   tightens the frame and moves the toolbar.
 2. Press Done unchanged: identical page, no new Undo.
-3. Change one character and press Done: still centred/white, photograph untouched, Undo restores it.
-4. Change a normal paragraph enough to wrap: same reflow as today, no patch and no unrelated movement.
+3. Change one character and press Done: still centred and white, photograph untouched, Undo restores it.
+4. Change a paragraph enough to wrap: same reflow as today, no patch, nothing unrelated moves.
 5. Open that paragraph and press Done unchanged: no reflow, replacement, autosave change or Undo.
-6. Edit a bordered cell: borders/fill remain during editing, after Done and after export.
+6. Edit a bordered cell: borders and fill remain during editing, after Done, and after export.
 7. Edit a list item: same item boundaries and overflow behaviour, no patch.
-8. Reopen every changed item: no old-text duplicate, no painted rectangle, same committed geometry/style.
+8. Reopen every changed item: no old-text duplicate, no rectangle, same committed geometry and style.
+9. On the 61 MB Bhutan file, click a heading and start typing immediately, including through an IME — focus is
+   immediate, no character is lost, and the live value appears when the clean page swaps in.
 
-**Land:** only after Step 4 is complete, every fallback has a reason, the pixel checks pass and the user approves
-the Bhutan, paragraph, table-cell and list workflow. Do not commit while this remains an unapproved planning draft.
+**Known limits:** deleting or moving a **picture** still paints a patch, which is correct — there is nothing behind
+it to reveal; a page the rewrite refuses keeps today's cover and warning, which across 47 files happens zero times;
+the frame still follows the layout region rather than the letters until Step 5c; the font and the word gaps are
+untouched.
+
+**Land:** branch `live-page-preview`. Commit: `Edit text on the real page, not on a painted rectangle (Task 74,
+Step 5b)`. Merge only after every fallback has a reason, the pixel checks pass, and the user approves the Bhutan,
+paragraph, table-cell and list workflow.
+
+---
+
+#### Task 74 — Step 5c  🔲 TODO → branch `editor-frame` **from `main`, after Step 5b is merged** — the frame follows the words, and the toolbar stays out of the way   *(Medium · 1–2 days)*
+
+**What the user hit.** Editing `UTKARSH TANEJA` on the résumé, the editor box reaches well below the heading and
+swallows the top of `Travel Operations | Tour Coordination | Destination Management`. The frame is drawn around the
+block's layout region, not around the letters, and the toolbar sits over the document.
+
+**Why.** The frame is the layout rectangle. For a heading, that rectangle spans the alignment column needed for
+centring — far wider and taller than the visible word.
+
+**What the user gets.** A thin outline around the words actually on screen, with handles on it, and a toolbar that
+floats clear of the text.
+
+**Change 1 — the frame follows the live text, not the original glyphs or the full-width element.**
+**(Codex review)** The first draft measured the block's original ink extent. That is stale the moment the user
+types. Measuring the `contenteditable` element itself is also wrong: it is deliberately `w-full`, so its element
+rectangle remains the layout width rather than hugging the letters.
+
+Create a DOM `Range` covering the editor's current text nodes and inline spans, read its client rectangles, and use
+their union as the visual ink frame. Recompute it after input, `compositionupdate`/`compositionend`, formatting,
+soft wrapping, font load, zoom and resize — alongside `resizeToContent`, but without using the editable element's
+own bounding rectangle. A multi-line paragraph unions its live line rectangles; an empty editor uses a stated
+minimum/caret frame so its controls remain reachable.
+
+**This is visual only.** Per the central rule in Step 5b, tightening the frame must not change centring, alignment
+width, baseline, reflow width, exported position or re-edit position. `BHUTAN` keeps its wide alignment region for
+centring while its frame follows the word.
+
+**Change 2 — frame and toolbar.**
+A thin blue outline with small move and resize handles; no frame fill; the toolbar above when space exists and
+below otherwise; the toolbar clamped inside the page; toolbar dimensions never enlarging the PDF or editor
+rectangle; Done, Cancel, family, size, bold, italic and Step 5a's colour swatch all kept; handles that do not cover
+neighbouring text.
+
+Deleting all content and pressing Done is a real deletion. Pressing Done with the original content untouched is
+not.
+
+**Checks**
+- *Geometry is untouched*: for a centred heading, a right-aligned heading, a paragraph, a cell and a list, the
+  committed `rect`, `alignLeftPt`, `alignWidthPt`, baseline and exported position are **identical** to Step 5b's,
+  with the frame tightened.
+- *The frame is live*: type into a heading until it is shorter, let a paragraph gain a line, apply inline
+  formatting and complete an IME composition — the union of the text `Range` client rectangles matches the frame
+  after each change, within a stated tolerance.
+- *The layout element is not the frame*: the editor remains `w-full` where layout requires it, while a one-word
+  heading's frame is narrower; an empty editor retains the minimum/caret frame.
+- *The frame encloses the ink and no more*, within that tolerance, on a centred heading, a right-aligned heading, a
+  wrapped paragraph and a one-word cell.
+- *The résumé case*: with `UTKARSH TANEJA` open, the pixels of the line below it are unchanged from the idle page.
+- *The toolbar*: above where there is room, below where there is not, never outside the page, at the top and bottom
+  edges of a page and at every supported zoom.
+- *Unchanged elsewhere*: the whole of Step 5b's check list re-run; full suite; typecheck; lint; build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/components/TextEditOverlay.tsx` + test | The live visual frame, handles and toolbar placement |
+| `src/components/OverlayLayer.tsx` + test | Stop drawing the layout rectangle as the frame |
+
+**Files that must not change:** everything in Step 5b's list, plus `buildTextEdits.ts` and every committed-geometry
+path — this step may not alter a single exported coordinate.
+
+**Guardrails:** the visual frame is presentation only; if any committed coordinate changes, the step has failed.
+
+**Verify (user):** open `UTKARSH TANEJA` — the frame hugs the name and the line below it is fully visible; type to
+shorten it and the frame follows; open `BHUTAN` — the frame hugs the word, and after Done it is still centred
+exactly as before; at the top and bottom of a page the toolbar stays on screen.
+
+**Known limits:** the font and the word gaps remain untouched.
+
+**Land:** branch `editor-frame` from `main`. Commit: `The frame follows the live words and the toolbar
+stays out of the way (Task 74, Step 5c)`. Merge only after no committed coordinate changes, the full Step 5b checks
+still pass and the user's résumé/Bhutan/top-and-bottom toolbar checks pass.
