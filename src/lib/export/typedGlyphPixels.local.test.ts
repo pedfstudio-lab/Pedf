@@ -26,11 +26,13 @@ async function pageGeometry(reader: PDFDocumentProxy): Promise<EditDocument['pag
   const pages: EditDocument['pages'] = [];
   for (let index = 0; index < reader.numPages; index += 1) {
     const page = await reader.getPage(index + 1);
+    const [left = 0, bottom = 0, right = 0, top = 0] = page.view;
     pages.push({
       pageIndex: index,
-      widthPt: page.view[2]! - page.view[0]!,
-      heightPt: page.view[3]! - page.view[1]!,
-      rotation: page.rotate,
+      widthPt: right - left,
+      heightPt: top - bottom,
+      rotation: ((page.rotate % 360) + 360) % 360 as 0 | 90 | 180 | 270,
+      boxOffset: { x: left, y: bottom },
     });
   }
   return pages;

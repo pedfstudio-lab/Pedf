@@ -9,11 +9,21 @@ const baselinePath = 'tmp/tables/baseline.json';
 const enabled = process.env.UNDECODABLE === '1' && existsSync(baselinePath);
 if (!enabled) process.stdout.write('Undecodable-text sweep skipped: set UNDECODABLE=1.\n');
 
-/** Characters that cannot have come from real text: C0/C1 controls and the replacement char. */
-const BAD = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F�]/;
+/**
+ * Characters that cannot have come from real text: C0 and C1 controls, and the
+ * replacement character. Tab, newline and carriage return are legitimate.
+ * Checked by code point rather than by a regular expression, which would need
+ * literal control characters in its source.
+ */
+function isUndecodable(codePoint: number): boolean {
+  if (codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d) return false;
+  if (codePoint <= 0x1f) return true;
+  if (codePoint >= 0x7f && codePoint <= 0x9f) return true;
+  return codePoint === 0xfffd;
+}
 
 function badChars(text: string): string[] {
-  return [...text].filter((c) => BAD.test(c));
+  return [...text].filter((c) => isUndecodable(c.codePointAt(0) ?? 0));
 }
 
 describe.runIf(enabled)('blocks whose text cannot be decoded', () => {
