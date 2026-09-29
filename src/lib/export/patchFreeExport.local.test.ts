@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
@@ -8,7 +10,7 @@ import { buildTextBlockEdits, buildTextEdits } from '@/lib/edit/buildTextEdits';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import type { TextBlock } from '@/lib/pdf/textContent';
-import type { CoverEdit, Edit, EditDocument, PdfRect } from './types';
+import type { CoverEdit, Edit, EditDocument, PdfRect, TextEdit } from './types';
 import { planCoveredGlyphRemoval } from './coveredGlyphs';
 import { exportPdf } from './exportPdf';
 import { buildPageStreamTree } from './formStreams';
@@ -19,14 +21,30 @@ const fixtures = {
   priceHeader: 'tmp/paragraphs/FIRGUN SRI 1.pdf',
   photoHeading: "tmp/paragraphs/Bhutan December'26.pdf",
 } as const;
+const standardFontDataDirectory = fileURLToPath(
+  new URL('../../../node_modules/pdfjs-dist/standard_fonts/', import.meta.url),
+);
+// The Node PDF.js font factory passes this value to fs.readFile after appending
+// the font filename, so it needs an absolute filesystem path with a separator.
+const standardFontDataUrl = standardFontDataDirectory.endsWith(sep)
+  ? standardFontDataDirectory
+  : `${standardFontDataDirectory}${sep}`;
 const optionalCanvas = await import('@napi-rs/canvas').catch(() => undefined);
-const enabled = process.env.TASK74_PATCH === '1'
-  && existsSync(baselinePath)
-  && Object.values(fixtures).every(existsSync)
-  && Boolean(optionalCanvas);
+const missingPrerequisites = [
+  ...(process.env.TASK74_PATCH === '1' ? [] : ['TASK74_PATCH=1']),
+  ...(existsSync(baselinePath) ? [] : [`baseline ${baselinePath}`]),
+  ...Object.entries(fixtures)
+    .filter(([, path]) => !existsSync(path))
+    .map(([name, path]) => `${name} fixture ${path}`),
+  ...(optionalCanvas ? [] : ['optional @napi-rs/canvas']),
+  ...(existsSync(standardFontDataDirectory)
+    ? []
+    : [`PDF.js standard-font directory ${standardFontDataDirectory}`]),
+];
+const enabled = missingPrerequisites.length === 0;
 if (!enabled) {
   process.stdout.write(
-    'Task 74 patch-free export check skipped: set TASK74_PATCH=1 with the baseline, three fixtures, and canvas present.\n',
+    `Task 74 patch-free export check skipped: missing ${missingPrerequisites.join(', ')}.\n`,
   );
 }
 
@@ -51,6 +69,11 @@ interface PixelCase {
   readonly surface: 'border' | 'photo';
 }
 
+interface PixelDifference {
+  readonly count: number;
+  readonly bounds?: PdfRect;
+}
+
 const pixelCases: readonly PixelCase[] = [
   {
     label: 'Sri Lanka accommodation cell',
@@ -65,7 +88,7 @@ const pixelCases: readonly PixelCase[] = [
     file: fixtures.priceHeader,
     pageNumber: 4,
     find: 'PRICE PER ADULT',
-    replacement: 'PATCH FREE PRICE',
+    replacement: 'PATCH FREE',
     surface: 'border',
   },
   {
@@ -109,7 +132,11 @@ async function pageText(bytes: Uint8Array, pageNumber: number): Promise<string> 
 async function renderPage(bytes: Uint8Array, pageNumber: number, scale = 3): Promise<RenderedPage> {
   const createCanvas = optionalCanvas?.createCanvas;
   if (!createCanvas) throw new Error('Optional @napi-rs/canvas is unavailable.');
-  const reader = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  const reader = await getDocument({
+    data: bytes.slice(),
+    standardFontDataUrl,
+    verbosity: 0,
+  }).promise;
   const page = await reader.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
   const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
@@ -144,14 +171,18 @@ function toPixelRect(rendered: RenderedPage, rect: PdfRect, padding = 0): PdfRec
   return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
-function differentPixelCount(
+function pixelDifference(
   before: ImageData,
   after: ImageData,
   include: (x: number, y: number) => boolean,
-): number {
+): PixelDifference {
   expect(after.width).toBe(before.width);
   expect(after.height).toBe(before.height);
   let changed = 0;
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
   for (let y = 0; y < before.height; y += 1) {
     for (let x = 0; x < before.width; x += 1) {
       if (!include(x, y)) continue;
@@ -161,14 +192,65 @@ function differentPixelCount(
         || before.data[offset + 1] !== after.data[offset + 1]
         || before.data[offset + 2] !== after.data[offset + 2]
         || before.data[offset + 3] !== after.data[offset + 3]
-      ) changed += 1;
+      ) {
+        changed += 1;
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x);
+        bottom = Math.max(bottom, y);
+      }
     }
   }
-  return changed;
+  return {
+    count: changed,
+    ...(changed > 0 ? {
+      bounds: { x: left, y: top, w: right - left + 1, h: bottom - top + 1 },
+    } : {}),
+  };
 }
 
 function contains(rect: PdfRect, x: number, y: number): boolean {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+}
+
+function containsRect(outer: PdfRect, inner: PdfRect): boolean {
+  return inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.x + inner.w - 1 <= outer.x + outer.w
+    && inner.y + inner.h - 1 <= outer.y + outer.h;
+}
+
+function unionRects(rects: readonly PdfRect[]): PdfRect {
+  const first = rects[0];
+  if (!first) throw new Error('A replacement must contain at least one TextEdit rectangle.');
+  let left = first.x;
+  let bottom = first.y;
+  let right = first.x + first.w;
+  let top = first.y + first.h;
+  for (const rect of rects.slice(1)) {
+    left = Math.min(left, rect.x);
+    bottom = Math.min(bottom, rect.y);
+    right = Math.max(right, rect.x + rect.w);
+    top = Math.max(top, rect.y + rect.h);
+  }
+  return { x: left, y: bottom, w: right - left, h: top - bottom };
+}
+
+function assertReplacementInk(
+  control: ImageData,
+  candidate: ImageData,
+  replacementRect: PdfRect,
+  label: string,
+): void {
+  const difference = pixelDifference(control, candidate, () => true);
+  expect(difference.count, `${label}: replacement adds visible ink`).toBeGreaterThan(0);
+  expect(difference.bounds, `${label}: replacement ink has a pixel bounding box`).toBeDefined();
+  if (!difference.bounds) return;
+  expect(
+    containsRect(replacementRect, difference.bounds),
+    `${label}: replacement ink ${JSON.stringify(difference.bounds)}`
+      + ` stays inside its own rectangle ${JSON.stringify(replacementRect)}`,
+  ).toBe(true);
 }
 
 function rectKey(pageIndex: number, rect: PdfRect): string {
@@ -246,6 +328,17 @@ describe.skipIf(!enabled)('Task 74 patch-free export', () => {
         return { r: 1, g: 1, b: 1 };
       },
     });
+    const replacementEdits = edits.filter((edit): edit is TextEdit => edit.kind === 'text');
+    const controlSampled: PdfRect[] = [];
+    const control = await exportPdf({
+      originalBytes,
+      pages,
+      edits: edits.filter((edit) => edit.kind !== 'text'),
+      sampleBackground: (_pageIndex, rect) => {
+        controlSampled.push(rect);
+        return { r: 1, g: 1, b: 1 };
+      },
+    });
     if (process.env.TASK74_PATCH_WRITE === '1') {
       await mkdir('tmp/task74-patch', { recursive: true });
       await writeFile(
@@ -257,22 +350,42 @@ describe.skipIf(!enabled)('Task 74 patch-free export', () => {
     expect(result.redaction.skippedPages, spec.label).toBe(0);
     expect(result.redaction.removedItems, spec.label).toBeGreaterThan(0);
     expect(sampled, `${spec.label}: no redundant patch is sampled`).toEqual([]);
+    expect(control.warnings, `${spec.label}: no-TextEdit control`).toEqual(result.warnings);
+    expect(control.redaction, `${spec.label}: no-TextEdit control`).toEqual(result.redaction);
+    expect(controlSampled, `${spec.label}: control samples no redundant patch`).toEqual([]);
 
     const text = await pageText(result.bytes, spec.pageNumber);
     expect(normalized(text), `${spec.label}: old block text is gone`)
       .not.toContain(normalized(target.text));
     expect(text, `${spec.label}: replacement text is present`).toContain(spec.replacement);
 
-    const [before, after] = await Promise.all([
+    const [before, after, withoutReplacement] = await Promise.all([
       renderPage(originalBytes, spec.pageNumber),
       renderPage(result.bytes, spec.pageNumber),
+      renderPage(control.bytes, spec.pageNumber),
     ]);
     try {
+      // One device pixel allows for raster rounding at the TextEdit rectangle edge.
+      const replacementRect = toPixelRect(
+        after,
+        unionRects(replacementEdits.map((edit) => edit.rect)),
+        1,
+      );
+      // The cover-only export is a mutation control: it must fail the exact
+      // assertion that proves the real export drew the replacement words.
+      expect(() => assertReplacementInk(
+        withoutReplacement.image,
+        withoutReplacement.image,
+        replacementRect,
+        spec.label,
+      )).toThrow();
+      assertReplacementInk(withoutReplacement.image, after.image, replacementRect, spec.label);
+
       // Two PDF points cover glyph antialiasing without reaching the enclosing cell rules.
       const textMask = toPixelRect(before, target.rect, 6);
-      const changedOutsideText = differentPixelCount(before.image, after.image, (x, y) => (
+      const changedOutsideText = pixelDifference(before.image, after.image, (x, y) => (
         !contains(textMask, x, y)
-      ));
+      )).count;
       if (spec.surface === 'photo') {
         expect(changedOutsideText, `${spec.label}: photo pixels outside text ink`).toBe(0);
       } else {
@@ -282,7 +395,11 @@ describe.skipIf(!enabled)('Task 74 patch-free export', () => {
         ).toBe(0);
       }
     } finally {
-      await Promise.all([before.reader.destroy(), after.reader.destroy()]);
+      await Promise.all([
+        before.reader.destroy(),
+        after.reader.destroy(),
+        withoutReplacement.reader.destroy(),
+      ]);
     }
   }, 120_000);
 
