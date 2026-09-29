@@ -11833,13 +11833,22 @@ Measured in Step 0 (Node canvas, a browser proxy): exporting the **whole** docum
 2.9 MB file and **1,866 ms** on the 21-page 61 MB brochure; exporting **that page alone** takes 74 ms and 537 ms;
 re-opening and redrawing takes 53 ms and 299 ms.
 
-**Step 5 lands in three parts, behind one preparation step.** The colour and weight half fixes the **exported
-file** and must not wait behind a canvas state machine, and one commit touching paint, a new page exporter, page
-states and the toolbar cannot be bisected when it goes wrong. The authoritative specs are below:
-**Step 4a** — give the pixel tests their fonts and assert the replacement is drawn, so 5a and 5b can be verified
-at all; **Step 5a** — text keeps its own colour and weight, plus a colour control; **Step 5b** — the clean page
-preview, the state machine, eligibility and fallbacks; **Step 5c** — the live visual frame and the toolbar.
-Build them in that order. Where this outline and those sections differ, the sections win.
+**Step 5 lands in four parts, behind two smaller ones.** The colour and weight half fixes the **exported file** and
+must not wait behind a canvas state machine, and one commit touching paint, a new page exporter, page states and the
+toolbar cannot be bisected when it goes wrong. Build in this order; the authoritative specs are the sections
+themselves, and where this outline differs from them, **the sections win**:
+
+1. **Step 4a** — give the pixel tests their fonts and a control render, so every step after it can actually fail.
+2. **Task 75** — text decoding and typed-glyph safety. A separate task, not part of Step 5, and it goes **first**:
+   typing the wrong characters is corruption, and cosmetic work should not queue ahead of it.
+3. **Step 5a** — text keeps its own colour and weight, plus a colour control. The export font gate stays shut.
+4. **Step 5b** — the clean page preview, the state machine, eligibility, fallbacks and a measured worker experiment.
+5. **Step 5c** — the live visual frame and the toolbar.
+6. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
+   Without it 5a–5c look much better and occasional movement and spacing differences remain.
+
+The original typeface is not any of these — that is the font work, which reuses a page's own embedded font. It is
+what makes an edited heading look identical rather than merely close, and it belongs after 5c.
 
 **Step 6 — Tests, and account for every piece that moves.**
 - *Borders* (`ruleLines.test.ts`): a 20 pt divider is a border; a path of six rectangles yields six candidates; a
@@ -12763,10 +12772,24 @@ if all pass, the tests remain as a guard.
 | `src/components/OverlayLayer.tsx` | `sampleBackground` measures outside the ink |
 | `src/components/TextEditOverlay.tsx` + test | The colour swatch and its panel; the bold/italic tests |
 
-**Files that must not change:** `textUnits.ts` grouping; `ruleLines.ts`; `bulletList.ts` and everything
-bullet-shaped; `buildTextEdits.ts` geometry and wrapping; `textLayout.ts`; `textEditSession.ts` and the
-unchanged-edit guard; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and every image patch; the toolbar's
-position and floating behaviour; all tools; `PagePlan`.
+**Files that must not change:** `embeddedFont.ts` and export font selection — see the guardrail below;
+`textStyleCss.ts` and the editor's font stack, which belongs to Task 75; `textUnits.ts` grouping; `ruleLines.ts`;
+`bulletList.ts` and everything bullet-shaped; `buildTextEdits.ts` geometry and wrapping; `textLayout.ts`;
+`textEditSession.ts` and the unchanged-edit guard; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and
+every image patch; the toolbar's position and floating behaviour; all tools; `PagePlan`.
+
+**Guardrail — the export font gate stays shut.**  **(Codex review)**
+It was proposed that this step also tighten the export's font-reuse check as a prerequisite, on the theory that an
+unsafe embedded font is what turns a typed `2` into a `W`. It is not: rendering
+`0123456789 ABCDEFGHIJKLM` into `DUTEES PRICE LIST APR26.pdf` through that page's own font, at 4×, draws every
+character correctly, and the same characters extract correctly from the exported file. The fault is in the
+**browser preview's** font stack (`textStyleCss.ts` puts the pdf.js face first), which Task 75 owns.
+
+So: **Step 5a must not change `embeddedFont.ts` or export font selection.** Task 75 may change export reuse only
+when a rendered-pixel test proves the *exported* font draws the wrong glyph. Extraction faults or browser-preview
+faults alone are not sufficient evidence. Any change to the export gate requires a corpus report naming every font
+affected and every substitution it causes. Tightening that gate on the present evidence would switch typefaces
+across files we have never measured, to fix a fault that is not in the export.
 
 **Guardrails:** a colour is used only when it was decoded confidently, never guessed; grouping, line detection and
 alignment are identical before and after; initial **B** state may not change outside the measured price-list cases
@@ -12855,6 +12878,18 @@ keystroke is replayed and no composition is restarted.
 Measure two different targets: focus must occur in the activation event/next animation frame, and a warmed clean
 preview should replace the page within **100 ms** on the 61 MB file. If the second target is unreachable, report
 the measured wait and show `Preparing text…`; input must still be retained.
+
+**Change 0b — a worker, only if measurement earns it.**  **(Codex review)**
+Preparing the clean page off the main thread may matter more than preparing it faster. Measure **two separate
+numbers**, not one: total wall-clock time to produce the page, and **how long the main thread is blocked**. A worker
+that is no faster overall — or slightly slower — still transforms how the editor feels, because typing, caret
+movement and the toolbar stay responsive throughout.
+
+Measure the transfer cost before assuming a worker helps. Structured-cloning the 61 MB brochure into a worker may
+cost more than the work it moves; report the cost of a transferable `ArrayBuffer` against the cost of the clone, and
+whether pdf-lib and the pdf.js legacy build run in a worker in this project at all. **If the numbers do not earn
+it, say so in the result and keep the work on the main thread** behind the preloading in Change 0 — the worker is a
+hypothesis to be tested, not a design decision already taken.
 
 **Change 1 — one page-scoped preview exporter.**
 Add an entry point beside `exportPdf.ts` receiving the pristine source bytes; the live `PagePlan`; one live page
@@ -13136,3 +13171,273 @@ exactly as before; at the top and bottom of a page the toolbar stays on screen.
 **Land:** branch `editor-frame` from `main`. Commit: `The frame follows the live words and the toolbar
 stays out of the way (Task 74, Step 5c)`. Merge only after no committed coordinate changes, the full Step 5b checks
 still pass and the user's résumé/Bhutan/top-and-bottom toolbar checks pass.
+
+---
+
+#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
+
+*Steps 5a to 5c make editing look right. This step makes it land right. Without it they will look much better and
+occasional movement and spacing differences will remain, because the DOM — not our model — still decides where the
+committed text goes.*
+
+**What the user hit.** Two things, one cause.
+
+*Gaps collapse.* On `Bhutan December'26.pdf` page 1 the heading is three separate pieces:
+`"N E W"` at x 82.3 width 151.7, `"Y E A R ’ S"` at x 284.2 width 265.0, `"T R I P"` at x 599.5 — **50.2 pt** and
+**50.3 pt** of air between them. `lineText` (`textContent.ts:101`) adds exactly one space whatever the gap, so a
+45 pt space of about 12.5 pt replaces 50.2 pt. The line loses ~76 pt and the words run together:
+`NEWYEAR’STRIPS`.
+
+*Text moves.* We store a text **rectangle** and then correct it with CSS, so the committed position is partly the
+browser's opinion. Any small disagreement between what the DOM lays out and what the export draws shows up as the
+text shifting when Done is pressed.
+
+**Why the obvious fix is dead, measured.** Filling each gap with as many spaces as it is wide was measured across
+the 45 baseline files: **12,461** merged gaps, **8,711** unchanged at one space, **3,750** widened, and **1,265 of
+9,208 lines** changed. The letter-spaced-heading case is **5 gaps in the whole corpus**. It would rewrite 1,265
+correct lines — mostly justified prose, whose wide gaps are stretched spaces that a re-flow must not reproduce — to
+fix five. Two different things produce a wide gap and no width threshold can separate them.
+
+| Measured | |
+|---|---|
+| The gaps are real and large | 50.2 pt and 50.3 pt between the three heading pieces on Bhutan page 1 |
+| The spaces fix is dead | 1,265 of 9,208 lines would change to fix 5 gaps |
+| The positions are already in hand | every `TextLine` carries `runs`, each with its own x and width; `lineText` reads them, decides yes/no on a space, and discards the numbers |
+
+**What the user gets:** a letter-spaced heading keeps its spacing; pressing Done moves nothing; re-opening an edit
+finds it exactly where it was; and the exported page matches the screen.
+
+**The rule.** The **DOM collects keystrokes. Our model decides the committed PDF position.** Nothing about where
+text lands may be read back out of a browser layout.
+
+**Change 0 — measure what moves today, before changing anything.**
+Report, in PDF points, the movement of a block's baseline and left edge across: open, one keystroke, Done, reopen,
+each supported zoom, and export. Do it for a centred heading, a right-aligned heading, a wrapped paragraph, a table
+cell and a bullet item. **For text the user did not change, every one of those numbers must already be 0**; any
+that is not is a defect this step must name and fix. Publish the table — it is the baseline the rest of the step is
+measured against.
+
+**Change 1 — keep what the PDF measured.**
+Carry, per run and per line, the values we currently throw away: the text matrix, the baseline in PDF space, the
+exact horizontal origin, the alignment region, the font's ascent and descent, character spacing, word spacing and
+line spacing. Add them as optional fields so a project saved before this change still opens and exports
+identically.
+
+`lineText` keeps returning the same string — **the extracted text does not change**, so search, Ask, grouping,
+table detection and bullets are untouched, and none of the 1,265 lines moves.
+
+**Change 2 — re-emit the gaps instead of inventing them.**
+On export, lay a line out from its pieces using the **measured gaps between them**, not a re-typeset string. For a
+piece the user did not touch, its own width is unchanged, so the measured gaps put it back exactly where it was.
+For a piece the user retyped, the following pieces shift by the width difference and every gap keeps the size the
+designer gave it. There is no threshold and nothing to tune, because no gap is ever computed — only reproduced.
+
+Where a line's pieces cannot be matched to the edited text — the user retyped the whole line, or the font size
+changed — fall back to today's re-typesetting for that line and record the reason.
+
+**Change 3 — one layout decision, used by both.**
+The committed geometry comes from our layout of the text, and the export draws from that same result. The preview
+may differ by less than a stated tolerance while typing, but **Done may never consult the DOM for a position**. This
+is the change that removes "the text jumped when I pressed Done".
+
+Do **not** take over line breaking inside the editable element. Keeping `contenteditable` responsible for what the
+user sees while typing is deliberate: native caret, selection, spellcheck, accessibility and — most importantly —
+IME composition for Devanagari and the other supported Indian scripts come free from it, and re-earning them is not
+a cost this step should take on. The model owns the committed result; the browser owns the typing experience.
+
+**Checks**
+- *Nothing moves*: Change 0's table, re-run, is **0 pt** for every unchanged case at every zoom; a changed case
+  moves only in the direction and amount the edit implies.
+- *Identical, not close*: for unchanged text the exported baseline and horizontal origin are byte-identical to the
+  source's, asserted as numbers rather than by eye.
+- *The heading*: editing `T R I P` → `T R I P S` on Bhutan page 1 leaves `"N E W"` at x 82.3 and `"Y E A R ’ S"` at
+  x 284.2, with both 50 pt gaps intact, proved in pixels against the original render outside the edited piece.
+- *A retyped piece*: replacing `N E W` with a wider word shifts the following pieces by the width difference and
+  keeps both gaps at their measured size; nothing overlaps.
+- *Centred and right-aligned*: a heading whose piece changes width stays anchored to its alignment region.
+- *Prose is untouched*: a justified paragraph re-flows exactly as it does after Step 5c — its stretched spaces are
+  **not** reproduced, because a re-flow invalidates them.
+- *Extraction is untouched*: the text of all 9,208 lines across the 45 files is identical before and after, asserted
+  as a whole-corpus comparison. A single changed line fails the step.
+- *Old projects*: a project saved before this change opens, exports and re-edits identically.
+- *Fallback*: a line whose pieces cannot be matched records a reason and re-typesets; the corpus report counts them.
+- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1`; `TASK70_TABLES=1`; `TASK74_PATCH=1`;
+  `TASK74_PREVIEW=1`; full suite; typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/textMetrics.ts` + test | Carry the matrix, baseline, ascent/descent and spacing off the page |
+| `src/lib/edit/lineComposition.ts` + test | Lay a line out from its pieces and their measured gaps |
+| a local `TASK74_POSITION` test | Change 0's movement table and the fallback accounting |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textContent.ts` + test | Carry the measured values; `lineText`'s **string is unchanged** |
+| `src/lib/export/types.ts` | Optional per-run metrics, backwards compatible |
+| `src/lib/edit/buildTextEdits.ts` + test | Committed geometry from the model, not from the DOM |
+| `src/lib/edit/textLayout.ts` + test | One layout result, shared with the export |
+| `src/lib/export/handlers/text.ts` + test | Draw a line from its pieces and gaps |
+| `src/components/TextEditOverlay.tsx` + test | Stop contributing positions to the commit |
+
+**Files that must not change:** `textUnits.ts` grouping; `ruleLines.ts`; `bulletList.ts` and everything
+bullet-shaped; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and every image patch; `embeddedFont.ts` and
+export font selection; the extracted text of any line; edit-history semantics; autosave and project restoration;
+all tools; `PagePlan`.
+
+**Guardrails:** the extracted text of every line is identical before and after; for unchanged text the committed
+baseline and origin are identical, not approximate; a gap is only ever reproduced, never computed from a threshold;
+`contenteditable` keeps responsibility for typing, caret, selection and IME; no saved project becomes unreadable; a
+line that cannot be composed from its pieces falls back and says so.
+
+**Verify (user):**
+1. Bhutan page 1 → change `TRIP` to `TRIPS` → the gaps between `N E W`, `Y E A R ’ S` and `T R I P S` are as wide as
+   they were.
+2. Any heading → press Done → nothing shifts, at any zoom.
+3. A justified paragraph → edit it → it re-flows as before, with no odd spacing.
+4. Re-open every edit above → each is exactly where you left it.
+5. Export → the page matches the screen.
+6. Open anything, press Done without typing → nothing changes at all.
+
+**Known limits:** a line the user retypes entirely cannot keep gaps that belonged to text that no longer exists, and
+re-typesets; changing a heading's font size scales its gaps by the size ratio rather than preserving them exactly;
+the substituted typeface is the font work's business, not this step's.
+
+**Land:** branch `text-position` from `main`. Commit: `The position, the spacing and the baseline are ours (Task 74,
+Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case, the whole-corpus text comparison
+is identical, and the user's six checks pass.
+
+---
+
+### Task 75 — text decoding and typed-glyph safety  🔲 TODO → branch `typed-glyph-safety` **from `main`, after Step 4a is merged** — what you press is what you get, on every PDF   *(Medium · 1 day)*
+
+**What the user hit.** Editing a cell of `DUTEES PRICE LIST APR26.pdf`: *"if I type any word, it takes a different
+word. For example, if I am typing number 2, it writes W. If I am writing number 4, it writes O."* It happens
+**2 or 3 times out of 10**, on this file and no other, and only when a word is deleted and retyped. The screenshot
+also shows a line break the user never asked for.
+
+**Two different faults, measured separately.**  **(Codex review)**
+
+*Fault A — the browser preview draws through the PDF's own font face.* `textStyleCss.ts` puts it first:
+
+```ts
+function fontFamily(style: TextStyle): string {
+  const fallback = CSS_FAMILIES[classifyFontFamily(style.fontName)];
+  if (!style.fontRef) return fallback;
+  const embedded = style.fontRef.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  return `"${embedded}", ${fallback}`;   // the pdf.js face, first
+}
+```
+
+pdf.js installs that face from the PDF's embedded program with a mapping built for the character codes the document
+actually uses. Characters the page never contained are outside its contract, so the browser can draw an unrelated
+glyph while the stored value is correct. This is why switching the family to Serif and back to Sans cured it: the
+family change drops `fontRef`, so the box stops using that face — and Sans, which was broken before, then worked.
+
+*Fault B — some extracted text is not text at all.* Blocks arrive carrying C0 control characters, because pdf.js
+could not map those font codes to Unicode. They are invisible in the edit box but occupy string positions, so the
+caret and what the user sees disagree: typing lands in the wrong place, deleting appears to do nothing and then
+removes a visible character, and a stray line break can appear.
+
+| Measured | |
+|---|---|
+| The export is **not** at fault | typed `2468 PQRS` into 12 blocks → the exported file contains `2468 PQRS` in all 12 |
+| Nor is the exported glyph | `0123456789 ABCDEFGHIJKLM` drawn through that page's own font at 4× renders correctly |
+| The fonts are capable | `RFDewi` TT0/TT1 carry **582** glyphs each with a Unicode cmap; every one of `0-9` and `A-Z` maps to a real glyph |
+| Fault B's spread | **267 of 1,313** blocks in the user's file (**20.3%**, which is the reported 2-3 in 10); **0** blocks in the other **45** files, out of 5,664 |
+| Where the editor's font comes from | `textStyleCss.test.ts` asserts `'"g_d0_f2", "Times New Roman", Times, serif'` |
+
+**What the user gets:** every character typed is the character that appears, on every file; cells whose text cannot
+be decoded are either recovered as real letters or are not offered for editing, rather than silently corrupting.
+
+**The rule — three layers, tested separately.**  **(Codex review)** A fix must be proved at each layer, because a
+fault at one hides a fault at another and fixing only Fault B would leave the user's typing still wrong:
+
+1. what text was **extracted** from the PDF;
+2. what text is **stored** in the editor's DOM;
+3. what glyph is **visibly drawn**, on screen and in the export.
+
+**Change 1 — prove the preview face before using it.**
+Before putting a pdf.js face in front of the fallback stack, test that it maps the characters in play to the glyphs
+they should be. Use it when proved; fall back to the generic family when not. Never draw through an unproven face.
+
+The same stack feeds `textStyleToCanvasFont`, which is how text **width** is measured, so this also governs box
+sizing and wrapping. Report, across the 45 baseline files plus the user's, how many blocks currently use a pdf.js
+face, how many still qualify after the check, and every measured width that changes.
+
+**Change 2 — recover the text we can, refuse the text we cannot.**
+Where a simple font carries an `/Encoding` `/Differences` array, its glyph **names** give the characters directly —
+code 21 named `l` is an `l` — so build that mapping ourselves where pdf.js's failed. Where nothing can be recovered,
+mark the block undecodable: it is not offered as an editable click target, and the reason is stated rather than
+silent.
+
+Open by measuring how many of the 267 blocks Change 2 recovers, so the number that must be refused is known rather
+than assumed.
+
+**Change 3 — the export gate is not touched.**
+`embeddedFont.ts` and export font selection stay exactly as they are. The evidence above shows the export draws
+correctly; a preview fault is not grounds to change what the export reuses. This task may change the export gate
+**only** if a rendered-pixel test proves the exported font draws the wrong glyph, and only with a corpus report
+naming every font affected and every substitution caused.
+
+**Checks**
+- *Layer 1, extraction*: a block whose codes decode through `/Differences` yields real letters; a block that cannot
+  be decoded is flagged, not silently passed on.
+- *Layer 2, the DOM*: no editable box ever contains a C0 control character or `U+FFFD`, asserted over every block of
+  all 46 files.
+- *Layer 3, the glyph*: typing `0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ` into a DUTEES cell renders those characters
+  on screen and in the exported page — asserted in **pixels**, which Step 4a made possible, and in extracted text.
+- *The reported case*: typing `2` produces `2`; typing `4` produces `4`; typing `P` produces `P`.
+- *Deleting*: deleting a word and retyping it leaves the caret and the text in agreement, with no stray line break —
+  asserted 20 times in a row on an affected DUTEES cell, since the fault is intermittent.
+- *Undecodable blocks*: they are not click targets; the count matches the recovery measurement; the stated reason is
+  shown.
+- *Widths*: every block whose measured width changes is reported and explained; none of the 45 baseline files gains
+  an unexplained change.
+- *No-op survives*: opening an affected cell and pressing Done without typing still produces no edit at all.
+- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1` at 121/121 with 0 removed images;
+  `TASK70_TABLES=1` at 45 files, 31 changed, 0 unexplained; `TASK74_PATCH=1` at 335/335; full suite; typecheck;
+  lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/glyphNameDecoding.ts` + test | Recover characters from a font's `/Differences` glyph names |
+| `src/lib/pdf/previewFontSafety.ts` + test | Decide whether a pdf.js face may be drawn through |
+| a local `TASK75_GLYPHS` test | The three-layer checks and the corpus reports |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/edit/textStyleCss.ts` + test | Use a pdf.js face only when proved safe, for display and for measurement |
+| `src/lib/pdf/textContent.ts` + test | Decode where possible; mark what cannot be decoded |
+| `src/components/OverlayLayer.tsx` + test | Do not offer an undecodable block as editable |
+
+**Files that must not change:** `embeddedFont.ts` and export font selection; `coveredGlyphs.ts` and its matching, so
+Step 4's guarantees hold; `textUnits.ts` grouping and `ruleLines.ts` — a decoded block may change its own text, but
+the grouping **rules** do not change; `bulletList.ts`; `buildTextEdits.ts` geometry; `coveredImages.ts` and every
+image patch; all tools; `PagePlan`.
+
+**Guardrails:** no editable box may contain a character that is not real text; a pdf.js face is drawn through only
+when proved safe for the characters in play; a block that cannot be decoded is refused with a stated reason rather
+than silently edited; the export path and Step 4's removal guarantees are untouched; the other 45 files must show
+no unexplained change in text, grouping or measured width.
+
+**Verify (user):** open `DUTEES PRICE LIST APR26.pdf`, click the cell that misbehaved, delete a word and retype it
+at normal speed, ten times over — every character is the one pressed, with no stray line break and no need to
+touch the font dropdown. Then edit a cell on the FIRGUN price table, the résumé and the Bhutan brochure and confirm
+nothing about them changed.
+
+**Known limits:** a block whose characters cannot be recovered is not editable, and on the user's file some of the
+267 will fall into that category — the recovery measurement says how many; while an unproven face is refused the
+edit box shows the fallback typeface rather than the page's own, which Task 74's font work addresses; the substituted
+export typeface is unchanged by this task.
+
+**Land:** branch `typed-glyph-safety` from `main`. Commit: `What you press is what you get (Task 75)`. Merge after
+all three layers pass, the recovery and width reports show no unexplained change across the 45 baseline files, and
+the user's own ten-times retype on the price list is clean.
