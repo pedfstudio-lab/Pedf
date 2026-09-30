@@ -67,6 +67,7 @@ interface PixelCase {
   readonly find: string;
   readonly replacement: string;
   readonly surface: 'border' | 'photo';
+  readonly appearance?: 'white' | 'blue';
 }
 
 interface PixelDifference {
@@ -90,6 +91,7 @@ const pixelCases: readonly PixelCase[] = [
     find: 'PRICE PER ADULT',
     replacement: 'PATCH FREE',
     surface: 'border',
+    appearance: 'blue',
   },
   {
     label: 'Bhutan photo heading',
@@ -98,6 +100,7 @@ const pixelCases: readonly PixelCase[] = [
     find: 'N E W',
     replacement: 'PATCH FREE TRIP',
     surface: 'photo',
+    appearance: 'white',
   },
 ];
 
@@ -220,6 +223,37 @@ function containsRect(outer: PdfRect, inner: PdfRect): boolean {
     && inner.y + inner.h - 1 <= outer.y + outer.h;
 }
 
+function pixelsMovingTowardColor(
+  control: ImageData,
+  candidate: ImageData,
+  rect: PdfRect,
+  color: { readonly r: number; readonly g: number; readonly b: number },
+): number {
+  const expected = [color.r * 255, color.g * 255, color.b * 255];
+  let count = 0;
+  const left = Math.max(0, Math.floor(rect.x));
+  const top = Math.max(0, Math.floor(rect.y));
+  const right = Math.min(control.width, Math.ceil(rect.x + rect.w));
+  const bottom = Math.min(control.height, Math.ceil(rect.y + rect.h));
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * control.width + x) * 4;
+      const before = Math.hypot(
+        (control.data[offset] ?? 0) - (expected[0] ?? 0),
+        (control.data[offset + 1] ?? 0) - (expected[1] ?? 0),
+        (control.data[offset + 2] ?? 0) - (expected[2] ?? 0),
+      );
+      const after = Math.hypot(
+        (candidate.data[offset] ?? 0) - (expected[0] ?? 0),
+        (candidate.data[offset + 1] ?? 0) - (expected[1] ?? 0),
+        (candidate.data[offset + 2] ?? 0) - (expected[2] ?? 0),
+      );
+      if (after + 8 < before) count += 1;
+    }
+  }
+  return count;
+}
+
 function unionRects(rects: readonly PdfRect[]): PdfRect {
   const first = rects[0];
   if (!first) throw new Error('A replacement must contain at least one TextEdit rectangle.');
@@ -302,6 +336,14 @@ describe.skipIf(!enabled)('Task 74 patch-free export', () => {
       expect(found, `${spec.label}: block containing ${JSON.stringify(spec.find)}`).toBeDefined();
       if (!found) return;
       target = found;
+      if (spec.appearance === 'white') {
+        expect(target.style.color.r, `${spec.label}: source red`).toBeGreaterThan(0.95);
+        expect(target.style.color.g, `${spec.label}: source green`).toBeGreaterThan(0.95);
+        expect(target.style.color.b, `${spec.label}: source blue`).toBeGreaterThan(0.95);
+      } else if (spec.appearance === 'blue') {
+        expect(target.style.color.b, `${spec.label}: source is blue`).toBeGreaterThan(target.style.color.r);
+        expect(target.style.color.b, `${spec.label}: source is blue`).toBeGreaterThan(target.style.color.g);
+      }
       const built = buildTextBlockEdits(target, {
         text: spec.replacement,
         style: { ...target.style, fontRef: undefined },
@@ -380,6 +422,17 @@ describe.skipIf(!enabled)('Task 74 patch-free export', () => {
         spec.label,
       )).toThrow();
       assertReplacementInk(withoutReplacement.image, after.image, replacementRect, spec.label);
+      if (spec.appearance) {
+        expect(
+          pixelsMovingTowardColor(
+            withoutReplacement.image,
+            after.image,
+            replacementRect,
+            target.style.color,
+          ),
+          `${spec.label}: replacement pixels move toward the decoded source colour`,
+        ).toBeGreaterThan(10);
+      }
 
       // Two PDF points cover glyph antialiasing without reaching the enclosing cell rules.
       const textMask = toPixelRect(before, target.rect, 6);

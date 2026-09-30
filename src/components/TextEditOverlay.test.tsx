@@ -101,16 +101,189 @@ function placeCaretAtTextEnd(node: Node): void {
   selection?.addRange(range);
 }
 
+function selectText(node: Node, start: number, end: number): void {
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  document.dispatchEvent(new Event('selectionchange'));
+}
+
+function installFormattingCommandMock(): void {
+  vi.mocked(document.queryCommandState).mockImplementation((command) => {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : undefined;
+    const container = range?.startContainer;
+    const element = container?.nodeType === Node.ELEMENT_NODE
+      ? container as HTMLElement
+      : container?.parentElement;
+    if (!element) return false;
+    const computed = window.getComputedStyle(element);
+    if (command === 'bold') {
+      return computed.fontWeight === 'bold' || Number.parseInt(computed.fontWeight, 10) >= 600;
+    }
+    if (command === 'italic') return computed.fontStyle === 'italic' || computed.fontStyle === 'oblique';
+    return false;
+  });
+  vi.mocked(document.execCommand).mockImplementation((command) => {
+    if (command !== 'bold' && command !== 'italic') return false;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : undefined;
+    if (!selection || !range || range.collapsed) return false;
+    const active = document.queryCommandState(command);
+    const wrapper = document.createElement('span');
+    if (command === 'bold') wrapper.style.fontWeight = active ? 'normal' : 'bold';
+    if (command === 'italic') wrapper.style.fontStyle = active ? 'normal' : 'italic';
+    wrapper.append(range.extractContents());
+    range.insertNode(wrapper);
+    const selected = document.createRange();
+    selected.selectNodeContents(wrapper);
+    selection.removeAllRanges();
+    selection.addRange(selected);
+    return true;
+  });
+}
+
 beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     font: '',
     measureText: (text: string) => ({ width: text.length * 10 }),
   } as unknown as CanvasRenderingContext2D);
+  Object.defineProperty(document, 'queryCommandState', {
+    configurable: true,
+    value: vi.fn(() => false),
+  });
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: vi.fn(() => false),
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(document, 'queryCommandState');
+  Reflect.deleteProperty(document, 'execCommand');
+});
+
+describe('TextEditOverlay appearance controls', () => {
+  it('shows the source text colour in the toolbar swatch', () => {
+    renderEditor({
+      ...block('White heading', 24),
+      style: { ...style, color: { r: 1, g: 1, b: 1 } },
+    });
+
+    const swatch = screen.getByRole('button', { name: 'Text colour' }).firstElementChild as HTMLElement;
+    expect(swatch.style.backgroundColor).toBe('rgb(255, 255, 255)');
+  });
+
+  it('applies a chosen colour only to the selected words', () => {
+    const onDone = vi.fn();
+    renderEditor(block('black red', 24), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    selectText(editor.firstChild!, 6, 9);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use #d91a1a text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDone.mock.calls[0]?.[0].spans).toEqual([
+      expect.objectContaining({ text: 'black ' }),
+      expect.objectContaining({ text: 'red', color: { r: 0.85, g: 0.1, b: 0.1 } }),
+    ]);
+  });
+
+  it('applies a chosen colour to the whole box when the caret is collapsed', () => {
+    const onDone = vi.fn();
+    renderEditor(block('whole box', 24), 1, 0, { onDone });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use #1a59d9 text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({
+      style: { color: { r: 0.1, g: 0.35, b: 0.85 }, colorKnown: true },
+    });
+    expect(onDone.mock.calls[0]?.[0].spans).toBeUndefined();
+  });
+
+  it('requires an explicit colour before changing unsupported source paint', () => {
+    const onDone = vi.fn();
+    renderEditor({
+      ...block('Unknown paint', 24),
+      style: { ...style, colorKnown: false },
+    }, 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    editor.textContent = 'Changed paint';
+    fireEvent.input(editor);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(screen.getByText('Choose a text colour before finishing this edit.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use #000000 text colour' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['bold', 'B'],
+    ['italic', 'I'],
+  ] as const)('commits %s toggled at a collapsed caret to the whole box', (property, button) => {
+    const onDone = vi.fn();
+    renderEditor(block('whole box', 24), 1, 0, { onDone });
+
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0].style[property]).toBe(true);
+    expect(onDone.mock.calls[0]?.[0].spans).toBeUndefined();
+  });
+
+  it.each([
+    ['bold', 'B'],
+    ['italic', 'I'],
+  ] as const)('commits %s turned on for a selection as rich spans', (property, button) => {
+    installFormattingCommandMock();
+    const onDone = vi.fn();
+    renderEditor(block('plain styled', 24), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    selectText(editor.firstChild!, 6, 12);
+
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0].spans).toEqual([
+      expect.objectContaining({ text: 'plain ', [property]: false }),
+      expect.objectContaining({ text: 'styled', [property]: true }),
+    ]);
+  });
+
+  it.each([
+    ['bold', 'B'],
+    ['italic', 'I'],
+  ] as const)('commits %s turned off for a selection as rich spans', (property, button) => {
+    installFormattingCommandMock();
+    const onDone = vi.fn();
+    renderEditor({
+      ...block('strong plain', 24),
+      style: { ...style, [property]: true },
+    }, 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    selectText(editor.firstChild!, 7, 12);
+
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    expect(onDone.mock.calls[0]?.[0].spans).toEqual([
+      expect.objectContaining({ text: 'strong ', [property]: true }),
+      expect.objectContaining({ text: 'plain', [property]: false }),
+    ]);
+  });
 });
 
 describe('TextEditOverlay first-line placement', () => {
@@ -635,6 +808,47 @@ describe('TextEditOverlay unchanged guard', () => {
     expect(onDone).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledOnce();
     expect(existing).toMatchObject({ id: 'keep-this-id', z: 7 });
+  });
+});
+
+const resumeFixture = 'tmp/bullets/RAHUL_RAJPUT_RESUME.pdf';
+const resumeEnabled = process.env.TASK74_REAL === '1' && existsSync(resumeFixture);
+
+describe.skipIf(!resumeEnabled)('TextEditOverlay fill-and-stroke bold, unchanged Done', () => {
+  it('treats Done without typing as a no-op on a paragraph with painted bold phrases', async () => {
+    // Change 7 made these phrases bold: true while their face stays regular.
+    // The unchanged-edit guard compares bold, so prove the seed and the
+    // serialized box still agree when nothing was typed.
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const document = await getDocument({
+      data: new Uint8Array(await readFile(resumeFixture)),
+      fontExtraProperties: true,
+      verbosity: 0,
+    }).promise;
+    try {
+      const page = await document.getPage(1);
+      const [runs, ruleLines] = await Promise.all([
+        extractTextRuns(page, 0),
+        detectRuleLines(page, 0),
+      ]);
+      const blocks = groupRunsIntoBlocks(runs, { ruleLines });
+      const value = blocks.find((candidate) => candidate.text.includes('60+ bookings'));
+      expect(value, 'the résumé paragraph with painted bold phrases').toBeDefined();
+      if (!value) return;
+      expect(
+        value.lines.some((line) => line.runs.some((run) => run.style.bold && run.style.sourceBold === false)),
+        'the block really contains a fill-and-stroke bold run',
+      ).toBe(true);
+
+      const onDone = vi.fn();
+      const onCancel = vi.fn();
+      renderEditor(value, 1, 0, { blocks, onDone, onCancel });
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(onDone).not.toHaveBeenCalled();
+      expect(onCancel).toHaveBeenCalledOnce();
+    } finally {
+      await document.destroy();
+    }
   });
 });
 

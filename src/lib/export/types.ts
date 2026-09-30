@@ -27,6 +27,12 @@ export interface TextStyle {
   readonly bold: boolean;
   readonly italic: boolean;
   readonly color: Rgb;
+  /** Whether the source face already contains bold weight, independently of the B control. */
+  readonly sourceBold?: boolean;
+  /** Whether the source also used a representable thin mode-2 outline for extra weight. */
+  readonly sourceStrokeBold?: boolean;
+  /** False only when the source paint could not be represented without guessing. */
+  readonly colorKnown?: boolean;
   /** pdf.js loaded font id used by its browser FontFace and the embedded-font export lookup. */
   readonly fontRef?: string;
 }
@@ -39,6 +45,10 @@ export interface TextSpan {
   readonly fontSizePt?: number;
   readonly fontName?: string;
   readonly fontRef?: string;
+  readonly color?: Rgb;
+  readonly sourceBold?: boolean;
+  readonly sourceStrokeBold?: boolean;
+  readonly colorKnown?: boolean;
 }
 
 export type TextAlignment = 'left' | 'center' | 'right';

@@ -8,7 +8,6 @@ each builds on the ones before it. Status: ✅ done · 🔲 not started.
 > same commit; the verification harness must be green before feature work proceeds.
 
 ---
-
 ## Foundation
 
 ### Task 1 — Project scaffold & tooling  ✅
@@ -11833,18 +11832,16 @@ Measured in Step 0 (Node canvas, a browser proxy): exporting the **whole** docum
 2.9 MB file and **1,866 ms** on the 21-page 61 MB brochure; exporting **that page alone** takes 74 ms and 537 ms;
 re-opening and redrawing takes 53 ms and 299 ms.
 
-**Step 5 lands in four parts, behind two smaller ones.** The colour and weight half fixes the **exported file** and
+**Step 5 lands in four parts, behind one smaller one.** The colour and weight half fixes the **exported file** and
 must not wait behind a canvas state machine, and one commit touching paint, a new page exporter, page states and the
 toolbar cannot be bisected when it goes wrong. Build in this order; the authoritative specs are the sections
 themselves, and where this outline differs from them, **the sections win**:
 
 1. **Step 4a** — give the pixel tests their fonts and a control render, so every step after it can actually fail.
-2. **Task 75** — text decoding and typed-glyph safety. A separate task, not part of Step 5, and it goes **first**:
-   typing the wrong characters is corruption, and cosmetic work should not queue ahead of it.
-3. **Step 5a** — text keeps its own colour and weight, plus a colour control. The export font gate stays shut.
-4. **Step 5b** — the clean page preview, the state machine, eligibility, fallbacks and a measured worker experiment.
-5. **Step 5c** — the live visual frame and the toolbar.
-6. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
+2. **Step 5a** — text keeps its own colour and weight, plus a colour control. The export font gate stays shut.
+3. **Step 5b** — the clean page preview, the state machine, eligibility, fallbacks and a measured worker experiment.
+4. **Step 5c** — the live visual frame and the toolbar.
+5. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
    Without it 5a–5c look much better and occasional movement and spacing differences remain.
 
 The original typeface is not any of these — that is the font work, which reuses a page's own embedded font. It is
@@ -12599,11 +12596,34 @@ cannot fail (Task 74, Step 4a)`. Merge to `main` once the control render proves 
 
 ---
 
-#### Task 74 — Step 5a  🔲 TODO → branch `text-appearance` **from `main`, after Task 75 is merged** — text keeps its own appearance, and you can change its colour   *(Medium · 2–3 days)*
+#### Task 74 — Step 5a  ✅ DONE by Codex, grouping correction by Claude, reviewed (2026-09-30), branch `text-appearance` — text keeps its own appearance, and you can change its colour   *(Medium · 2–3 days)*
 
-*Step 4a is already on `main`, so its working pixel tests are inherited. **Task 75 goes first**, not this step:
-typing the wrong characters is corruption, and colour is cosmetic. Task 75 also settles which font the editor may
-draw through, which this step must not contradict — see the guardrail below.*
+**Result.** Full suite **1,327 passed / 36 skipped**; typecheck, lint and build clean. Unsupported paint **76 → 0**.
+DUTEES page 3 cells now read `bold false` (all `true` before). `TASK74_REAL`: résumé **4** bullet lists, rishi **2**,
+plus a new no-op test on the real résumé paragraph. `TASK70_TABLES`: 45 files, 31 changed, **paragraph splits 1,458**,
+0 unexplained. `TASK74_PATCH`: 45 / 335 / 335 / 0 / 0. `TASK72_REAL` unchanged. Mode-3 invisible text measured at
+**0** across all 46 files, so Change 2 has nothing to act on in this corpus.
+
+**Grouping correction.** Change 7 made the résumé's fill-and-stroke phrases `bold: true`. A line takes the style of
+its longest run, so two lines whose longest run is a bold phrase — `generating 60+ bookings within the first three
+months.` and `requirements for group and customized trips.` — read as bold as a whole. Grouping compared bold in
+two places; `textContent.ts` already used `sourceBold ?? bold`, but `textUnits.ts` `sameParagraphStyle` compared
+plain `bold`, so it split those lines from their neighbours: the résumé went from 4 bullet lists to **5** and the
+corpus from 1,458 paragraph splits to **1,474**. Fixed with one shared `intrinsicBold(style)` used by both, so they
+cannot drift again. The new join test was confirmed to **fail** against the old line and pass against the fix.
+
+**Known limit — the bullet-list editor drops inline formatting.** Opening a bullet list passes the editor plain item
+text, and `sourceSpansForTextBlock` only recovers formatting when the seeded text is identical to the block text (or
+differs only by newlines). The bullet editor reformats the text, so recovery returns nothing and every phrase opens
+plain — bold, italic, colour and size alike. This predates 5a: before Change 7 the bold was never detected, so the
+loss could not be seen. Bold phrases in **plain paragraphs, headings and table cells** are unaffected. Needs its own
+step: carry formatting through the bullet editor's open, wrap, commit and export round trip.
+
+**Also on this branch.** The Task 75 revert — its spec removed from this file, and the two measurement tests
+`typedGlyphPixels.local.test.ts` and `undecodableText.local.test.ts` deleted with it. The typing fault on
+`DUTEES PRICE LIST APR26.pdf` (`2` → `W`) is therefore still present and is not addressed by any part of Step 5.
+
+*Step 4a is already on `main`, so its working pixel tests are inherited.*
 
 *Step 5 was written as one 3–4 day change. It lands as 5a, 5b and 5c instead: the colour and weight half fixes the
 **exported file** and should not wait behind a canvas state machine, and one commit touching paint, a new page
@@ -12660,7 +12680,8 @@ grouping. A white PDF heading must produce a white `TextStyle`; the editor and t
 same white. Where one editable block contains multiple source colours, preserve them as rich-text spans rather than
 flattening the block to one representative colour: add an optional colour override to `TextSpan`; old saved projects
 without it remain valid. Pattern-filled, gradient-filled or stroke-only text that cannot be represented confidently
-is marked **unsupported** — do not guess a colour and silently produce the wrong result.
+is marked **unsupported** — do not guess a colour and silently produce the wrong result. Fill-and-stroke text is the
+exception and is handled by **Change 7**, which supports it under a stated test rather than refusing it outright.
 
 This change reads paint only. It must not change grouping, line detection, alignment, font choice or glyph-removal
 matching.
@@ -12733,10 +12754,72 @@ tests for four cases — bold on with a selection, bold off with a selection, bo
 italic likewise — asserting the committed style and spans. If any case does not produce the expected result, fix it;
 if all pass, the tests remain as a guard.
 
+**Change 7 — read fill-and-stroke as bold, but only when it really is bold.**  **(added, with Codex's guardrail)**
+
+Changes 1 to 6 mark text-rendering mode 2 — fill **and** stroke — as unsupported paint. That is the one place where
+this step refuses to read its own handwriting, and it costs the user real formatting today.
+
+*The evidence.* On `RAHUL_RAJPUT_RESUME.pdf` page 1, five phrases inside the bullet items look bold on the page:
+`Firgun Travels`, `end-to-end sales`, `60+ bookings within the first three months`, `second month onwards` and
+`Sales and Operations`. They are **not** in a bold font — they use `Lucida Sans Unicode`, the same face as the plain
+words beside them, which are drawn in mode 0. Mode 2 is the only thing making them look bold.
+
+| Measured | |
+|---|---|
+| The résumé's fake bold | `Firgun Travels`: fill `102,99,99`, stroke `102,99,99` — **identical**; line width `0.315` at `10.1` pt = **0.031 of the font size** |
+| Our own synthetic bold | `SYNTHETIC_BOLD_STROKE_RATIO = 0.03` in `embeddedFont.ts` |
+| How much of it there is | **76** mode-2 items across the 46 files, every one in a copy of that résumé, every one same-colour and thin |
+| We already write it | `drawSpanWithPageFont` emits `setTextRenderingMode(TextRenderingMode.FillAndOutline)` — which **is** mode 2 — whenever `style.bold` is true and a page font is reused |
+
+The source used the same technique at the same proportion we do. Refusing it costs the user the bold on every edit
+to those bullets — **B** must be re-applied to five phrases by hand — and a file we bolded ourselves is refused when
+reopened. After Step 5b it would cost more: unsupported paint disqualifies a block from the clean preview, so those
+bullets would begin showing a white patch with no visible cause.
+
+*Mode 2 is not universally bold.*  **(Codex review)** The first draft of this change said it was. It is not: mode 2
+means "fill the glyph, then stroke its edge", and only a **same-coloured, thin** stroke is thickening the letter.
+A white fill with a thick navy stroke is outlined lettering — hollow display type — and flattening it to solid navy
+bold would destroy the design while claiming to have fixed it.
+
+*The rule.* Track the stroke alongside the fill, then:
+
+1. **fill colour equals stroke colour, and stroke width ÷ font size is at or below
+   `SYNTHETIC_BOLD_STROKE_RATIO` plus a small stated tolerance** → treat as the fill colour with bold true. This is
+   the résumé case, and our own output.
+2. **fill colour differs from stroke colour** → unsupported, fall back. The contrasting outline *is* the design, and
+   this one test catches outlined lettering, which exists precisely because the outline contrasts with the fill.
+3. **same colour but a stroke materially thicker than our own ratio** → unsupported. A deliberately fat outline is
+   not an attempt at bold.
+4. **stroke colour is a pattern, gradient or otherwise undecodable** → unsupported, exactly as today.
+
+Mode 1 (stroke only) and mode 3 (invisible) are unchanged. Keep three facts distinct: mode 2 sets the desired
+`bold: true`; `sourceBold` continues to describe **only the intrinsic font face**; and a new optional
+`sourceStrokeBold` records that the source also used the representable thin outline. The résumé's regular Lucida
+face therefore records `bold: true, sourceBold: false, sourceStrokeBold: true`; its Arial Black copy records
+`bold: true, sourceBold: true, sourceStrokeBold: true`. The **B** control opens enabled, and export reapplies the
+outline exactly once in both cases. Setting only `sourceBold: true` here would be wrong — a regular source face
+would be reused without its outline and the reopened bold would become regular. Old projects without the new
+optional field retain their current behaviour.
+
+*What `textPaint.ts` needs.* It records fill, `fillSupported` and `renderingMode` only. Add the stroke colour —
+`setStrokeRGBColor`, `setStrokeGray`, `setStrokeCMYKColor`, with `setStrokeColorN` marking it unsupported — and the
+line width from `setLineWidth`, both carried through graphics-state save and restore exactly as the fill already is.
+
 **Checks**
 - *Text paint*: white, black, DeviceRGB, DeviceGray and DeviceCMYK source text retain their colours; save/restore
   returns to the previous colour; a block with two colours becomes two spans; unsupported paint is rejected rather
   than guessed.
+- *Fill-and-stroke* (Change 7): `Firgun Travels` and the other four résumé phrases record `bold: true` with
+  `sourceStrokeBold: true`, retain their independently measured `sourceBold`, keep fill `102,99,99`, and **survive
+  an edit still bold** — asserted, since re-applying **B** by hand is the symptom. An intrinsically-bold face with
+  the same safe mode-2 outline preserves both weight sources and emits the outline exactly once.
+  A synthetic case with a white fill and a thick navy stroke stays **unsupported** and falls back. A same-colour
+  stroke materially thicker than `SYNTHETIC_BOLD_STROKE_RATIO` stays unsupported. A pattern stroke stays
+  unsupported. Mode 1 and mode 3 behaviour is unchanged.
+- *Our own bold round-trips*: make text bold, export, reopen, and the bold is recognised — not refused — then export
+  again and it is still bold. This is the case we currently fail on our own output.
+- *Corpus*: the unsupported-paint count moves from **76** to **0** for those files, and no block anywhere else in
+  the 46 gains or loses `sourceBold` without being named.
 - *Invisible text*: the measurement is reported; a page whose only text is mode 3 yields no editable blocks; a page
   mixing visible and mode-3 text yields only the visible ones.
 - *Weight*: `usWeightClass` 600 alone gives `sourceBold: false`; **800 with `macStyle 0x0` gives
@@ -12760,7 +12843,7 @@ if all pass, the tests remain as a guard.
 
 | File | Why |
 |---|---|
-| `src/lib/pdf/textPaint.ts` + test | Read the source text's actual paint state, including mode 3 |
+| `src/lib/pdf/textPaint.ts` + test | Read the source text's actual paint state: fill, rendering mode 3, and — for Change 7 — the stroke colour and line width through save/restore |
 | a local `TASK74_APPEARANCE` test | The invisible-text and weight-change corpus reports |
 
 **Existing files that change**
@@ -12777,7 +12860,7 @@ if all pass, the tests remain as a guard.
 | `src/components/TextEditOverlay.tsx` + test | The colour swatch and its panel; the bold/italic tests |
 
 **Files that must not change:** `embeddedFont.ts` and export font selection — see the guardrail below;
-`textStyleCss.ts` and the editor's font stack, which belongs to Task 75; `textUnits.ts` grouping; `ruleLines.ts`;
+`textStyleCss.ts` and the editor's font stack; `textUnits.ts` grouping; `ruleLines.ts`;
 `bulletList.ts` and everything bullet-shaped; `buildTextEdits.ts` geometry and wrapping; `textLayout.ts`;
 `textEditSession.ts` and the unchanged-edit guard; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and
 every image patch; the toolbar's position and floating behaviour; all tools; `PagePlan`.
@@ -12787,13 +12870,13 @@ It was proposed that this step also tighten the export's font-reuse check as a p
 unsafe embedded font is what turns a typed `2` into a `W`. It is not: rendering
 `0123456789 ABCDEFGHIJKLM` into `DUTEES PRICE LIST APR26.pdf` through that page's own font, at 4×, draws every
 character correctly, and the same characters extract correctly from the exported file. The fault is in the
-**browser preview's** font stack (`textStyleCss.ts` puts the pdf.js face first), which Task 75 owns.
+**browser preview's** font stack (`textStyleCss.ts` puts the pdf.js face first), which is outside this step.
 
-So: **Step 5a must not change `embeddedFont.ts` or export font selection.** Task 75 may change export reuse only
-when a rendered-pixel test proves the *exported* font draws the wrong glyph. Extraction faults or browser-preview
-faults alone are not sufficient evidence. Any change to the export gate requires a corpus report naming every font
-affected and every substitution it causes. Tightening that gate on the present evidence would switch typefaces
-across files we have never measured, to fix a fault that is not in the export.
+So: **Step 5a must not change `embeddedFont.ts` or export font selection.** Extraction faults or browser-preview
+faults alone are not sufficient evidence for an export change. Any future change to the export gate requires a
+rendered-pixel failure and a corpus report naming every font affected and every substitution it causes. Tightening
+that gate on the present evidence would switch typefaces across files we have never measured, to fix a fault that
+is not in the export.
 
 **Guardrails:** a colour is used only when it was decoded confidently, never guessed; grouping, line detection and
 alignment are identical before and after; initial **B** state may not change outside the measured price-list cases
@@ -13315,141 +13398,3 @@ Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case
 is identical, and the user's six checks pass.
 
 ---
-
-### Task 75 — text decoding and typed-glyph safety  🔲 TODO → branch `typed-glyph-safety` **from `main`, after Step 4a is merged** — what you press is what you get, on every PDF   *(Medium · 1 day)*
-
-**What the user hit.** Editing a cell of `DUTEES PRICE LIST APR26.pdf`: *"if I type any word, it takes a different
-word. For example, if I am typing number 2, it writes W. If I am writing number 4, it writes O."* It happens
-**2 or 3 times out of 10**, on this file and no other, and only when a word is deleted and retyped. The screenshot
-also shows a line break the user never asked for.
-
-**Two different faults, measured separately.**  **(Codex review)**
-
-*Fault A — the browser preview draws through the PDF's own font face.* `textStyleCss.ts` puts it first:
-
-```ts
-function fontFamily(style: TextStyle): string {
-  const fallback = CSS_FAMILIES[classifyFontFamily(style.fontName)];
-  if (!style.fontRef) return fallback;
-  const embedded = style.fontRef.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  return `"${embedded}", ${fallback}`;   // the pdf.js face, first
-}
-```
-
-pdf.js installs that face from the PDF's embedded program with a mapping built for the character codes the document
-actually uses. Characters the page never contained are outside its contract, so the browser can draw an unrelated
-glyph while the stored value is correct. This is why switching the family to Serif and back to Sans cured it: the
-family change drops `fontRef`, so the box stops using that face — and Sans, which was broken before, then worked.
-
-*Fault B — some extracted text is not text at all.* Blocks arrive carrying C0 control characters, because pdf.js
-could not map those font codes to Unicode. They are invisible in the edit box but occupy string positions, so the
-caret and what the user sees disagree: typing lands in the wrong place, deleting appears to do nothing and then
-removes a visible character, and a stray line break can appear.
-
-| Measured | |
-|---|---|
-| The export is **not** at fault | typed `2468 PQRS` into 12 blocks → the exported file contains `2468 PQRS` in all 12 |
-| Nor is the exported glyph | `0123456789 ABCDEFGHIJKLM` drawn through that page's own font at 4× renders correctly |
-| The fonts are capable | `RFDewi` TT0/TT1 carry **582** glyphs each with a Unicode cmap; every one of `0-9` and `A-Z` maps to a real glyph |
-| Fault B's spread | **267 of 1,313** blocks in the user's file (**20.3%**, which is the reported 2-3 in 10); **0** blocks in the other **45** files, out of 5,664 |
-| Where the editor's font comes from | `textStyleCss.test.ts` asserts `'"g_d0_f2", "Times New Roman", Times, serif'` |
-
-**What the user gets:** every character typed is the character that appears, on every file; cells whose text cannot
-be decoded are either recovered as real letters or are not offered for editing, rather than silently corrupting.
-
-**The rule — three layers, tested separately.**  **(Codex review)** A fix must be proved at each layer, because a
-fault at one hides a fault at another and fixing only Fault B would leave the user's typing still wrong:
-
-1. what text was **extracted** from the PDF;
-2. what text is **stored** in the editor's DOM;
-3. what glyph is **visibly drawn**, on screen and in the export.
-
-**Change 1 — prove the preview face before using it.**
-Before putting a pdf.js face in front of the fallback stack, test that it maps the characters in play to the glyphs
-they should be. Use it when proved; fall back to the generic family when not. Never draw through an unproven face.
-
-The same stack feeds `textStyleToCanvasFont`, which is how text **width** is measured, so this also governs box
-sizing and wrapping. Report, across the 45 baseline files plus the user's, how many blocks currently use a pdf.js
-face, how many still qualify after the check, and every measured width that changes.
-
-**Change 2 — recover the text we can, refuse the text we cannot.**
-Where a simple font carries an `/Encoding` `/Differences` array, its glyph **names** give the characters directly —
-code 21 named `l` is an `l` — so build that mapping ourselves where pdf.js's failed. Where nothing can be recovered,
-mark the block undecodable: it is not offered as an editable click target, and the reason is stated rather than
-silent.
-
-Open by measuring how many of the 267 blocks Change 2 recovers, so the number that must be refused is known rather
-than assumed.
-
-**Change 3 — the export gate is not touched.**
-`embeddedFont.ts` and export font selection stay exactly as they are. The evidence above shows the export draws
-correctly; a preview fault is not grounds to change what the export reuses. This task may change the export gate
-**only** if a rendered-pixel test proves the exported font draws the wrong glyph, and only with a corpus report
-naming every font affected and every substitution caused.
-
-**Checks**
-- *Layer 1, extraction*: a block whose codes decode through `/Differences` yields real letters; a block that cannot
-  be decoded is flagged, not silently passed on.
-- *Layer 2, the DOM*: no editable box ever contains a C0 control character or `U+FFFD`, asserted over every block of
-  all 46 files.
-- *Layer 3, the glyph*: typing `0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ` into a DUTEES cell renders those characters
-  on screen and in the exported page — asserted in **pixels**, which Step 4a made possible, and in extracted text.
-- *The reported case*: typing `2` produces `2`; typing `4` produces `4`; typing `P` produces `P`.
-- *Deleting*: deleting a word and retyping it leaves the caret and the text in agreement, with no stray line break —
-  asserted 20 times in a row on an affected DUTEES cell, since the fault is intermittent.
-- *Undecodable blocks*: they are not click targets; the count matches the recovery measurement; the stated reason is
-  shown.
-- *Widths*: every block whose measured width changes is reported and explained; none of the 45 baseline files gains
-  an unexplained change.
-- *No-op survives*: opening an affected cell and pressing Done without typing still produces no edit at all.
-- *Unchanged elsewhere*: `TASK74_REAL=1`; `TASK72_REAL=1`; `TASK66_SWEEP=1` at 121/121 with 0 removed images;
-  `TASK70_TABLES=1` at 45 files, 31 changed, 0 unexplained; `TASK74_PATCH=1` at 335/335; full suite; typecheck;
-  lint; build.
-
-**New files**
-
-| File | Why |
-|---|---|
-| `src/lib/pdf/glyphNameDecoding.ts` + test | Recover characters from a font's `/Differences` glyph names |
-| `src/lib/pdf/previewFontSafety.ts` + test | Decide whether a pdf.js face may be drawn through |
-| a local `TASK75_GLYPHS` test | The three-layer checks and the corpus reports |
-| a shared local-test render helper | See below |
-
-**Housekeeping — one copy of the render helper, not four.** Step 4a's absolute `standardFontDataUrl` resolution
-already exists twice, in `patchFreeExport.local.test.ts` and `typedGlyphPixels.local.test.ts`, and this task's
-layer-3 check plus Step 5d's movement table each need it again. Extract the resolution, the prerequisite reporting
-and the page-render-to-`ImageData` helper into one shared local-test module and have all of them use it, rather
-than adding a third and fourth copy. Behaviour must not change: `TASK74_PATCH=1` stays at 45 files, 335 emitted,
-335 skipped, 0 drawn, 0 refused.
-
-**Existing files that change**
-
-| File | Change |
-|---|---|
-| `src/lib/edit/textStyleCss.ts` + test | Use a pdf.js face only when proved safe, for display and for measurement |
-| `src/lib/pdf/textContent.ts` + test | Decode where possible; mark what cannot be decoded |
-| `src/components/OverlayLayer.tsx` + test | Do not offer an undecodable block as editable |
-
-**Files that must not change:** `embeddedFont.ts` and export font selection; `coveredGlyphs.ts` and its matching, so
-Step 4's guarantees hold; `textUnits.ts` grouping and `ruleLines.ts` — a decoded block may change its own text, but
-the grouping **rules** do not change; `bulletList.ts`; `buildTextEdits.ts` geometry; `coveredImages.ts` and every
-image patch; all tools; `PagePlan`.
-
-**Guardrails:** no editable box may contain a character that is not real text; a pdf.js face is drawn through only
-when proved safe for the characters in play; a block that cannot be decoded is refused with a stated reason rather
-than silently edited; the export path and Step 4's removal guarantees are untouched; the other 45 files must show
-no unexplained change in text, grouping or measured width.
-
-**Verify (user):** open `DUTEES PRICE LIST APR26.pdf`, click the cell that misbehaved, delete a word and retype it
-at normal speed, ten times over — every character is the one pressed, with no stray line break and no need to
-touch the font dropdown. Then edit a cell on the FIRGUN price table, the résumé and the Bhutan brochure and confirm
-nothing about them changed.
-
-**Known limits:** a block whose characters cannot be recovered is not editable, and on the user's file some of the
-267 will fall into that category — the recovery measurement says how many; while an unproven face is refused the
-edit box shows the fallback typeface rather than the page's own, which Task 74's font work addresses; the substituted
-export typeface is unchanged by this task.
-
-**Land:** branch `typed-glyph-safety` from `main`. Commit: `What you press is what you get (Task 75)`. Merge after
-all three layers pass, the recovery and width reports show no unexplained change across the 45 baseline files, and
-the user's own ten-times retype on the price list is clean.

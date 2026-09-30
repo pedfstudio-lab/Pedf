@@ -4,12 +4,14 @@ import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
 import { dropCoveredTextRuns } from './hiddenText';
+import { resolveTextPaint, textPaintForItems } from './textPaint';
 import type { RuleLine } from './ruleLines';
 import type { DrawnMarker } from './textUnits';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
   detectBlockAlignment,
+  intrinsicBold,
   splitTextRow,
 } from './textUnits';
 
@@ -285,7 +287,10 @@ function canJoinBlock(
   }
   if (
     classifyFontFamily(previous.style.fontName) !== classifyFontFamily(line.style.fontName) ||
-    previous.style.bold !== line.style.bold ||
+    // Inline mode-2 weight is rich appearance, not a paragraph boundary. Keep
+    // source grouping based on the face's intrinsic weight as it was before
+    // paint-aware bold was added; the runs still retain their desired B state.
+    intrinsicBold(previous.style) !== intrinsicBold(line.style) ||
     previous.style.italic !== line.style.italic
   ) {
     return false;
@@ -410,10 +415,12 @@ export function classifyFontStyle(fontName: string): {
   };
 }
 
-/** Read weight/slant straight from an embedded sfnt (TrueType/OpenType) font program. */
-export function fontStyleFromProgram(
-  data: Uint8Array | undefined,
-): { readonly bold: boolean; readonly italic: boolean } | null {
+interface SfntStyleMetadata {
+  readonly weight?: number;
+  readonly macStyle?: number;
+}
+
+function sfntStyleMetadata(data: Uint8Array | undefined): SfntStyleMetadata | null {
   if (!data || data.length < 12) return null;
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -436,19 +443,40 @@ export function fontStyleFromProgram(
     if (tag === 'OS/2') os2Offset = tableOffset;
     else if (tag === 'head') headOffset = tableOffset;
   }
-  if (os2Offset === null && headOffset === null) return null;
+  const weight = os2Offset !== null && os2Offset + 6 <= data.length
+    ? view.getUint16(os2Offset + 4)
+    : undefined;
+  const macStyle = headOffset !== null && headOffset + 46 <= data.length
+    ? view.getUint16(headOffset + 44)
+    : undefined;
+  return weight === undefined && macStyle === undefined ? null : { weight, macStyle };
+}
 
-  let bold = false;
-  let italic = false;
-  if (os2Offset !== null && os2Offset + 6 <= data.length) {
-    bold = view.getUint16(os2Offset + 4) >= 600;
+/** Read weight/slant straight from an embedded sfnt (TrueType/OpenType) font program. */
+export function fontStyleFromProgram(
+  data: Uint8Array | undefined,
+): { readonly bold: boolean; readonly italic: boolean } | null {
+  const metadata = sfntStyleMetadata(data);
+  if (!metadata) return null;
+  return {
+    bold: (metadata.weight ?? 0) >= 700 || ((metadata.macStyle ?? 0) & 0x1) !== 0,
+    italic: ((metadata.macStyle ?? 0) & 0x2) !== 0,
+  };
+}
+
+/** Resolve intrinsic bold without letting sanitized 400-weight metadata erase a named bold face. */
+export function sourceBoldFromFont(
+  fontName: string,
+  data: Uint8Array | undefined,
+): boolean {
+  const namedBold = classifyFontStyle(fontName).bold;
+  const metadata = sfntStyleMetadata(data);
+  if (!metadata) return namedBold;
+  if (((metadata.macStyle ?? 0) & 0x1) !== 0) return true;
+  if (metadata.weight !== undefined && metadata.weight >= 600 && metadata.weight < 700) {
+    return false;
   }
-  if (headOffset !== null && headOffset + 46 <= data.length) {
-    const macStyle = view.getUint16(headOffset + 44);
-    bold ||= (macStyle & 0x1) !== 0;
-    italic = (macStyle & 0x2) !== 0;
-  }
-  return { bold, italic };
+  return (metadata.weight ?? 0) >= 700 || namedBold;
 }
 
 function boundingBox(points: readonly PdfPt[]): PdfRect {
@@ -504,11 +532,14 @@ export async function extractTextRuns(
     // The conservative fallback still removes exact same-spot copies.
   }
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
+  const paintByItem = operatorList ? textPaintForItems(content.items, operatorList) : null;
   const runs: TextRun[] = [];
   const itemIndexes: number[] = [];
 
   for (const [itemIndex, item] of content.items.entries()) {
     if (!('str' in item) || item.str.trim() === '' || item.width === 0) continue;
+    const sourcePaint = paintByItem?.[itemIndex];
+    if (sourcePaint && !sourcePaint.visible) continue;
     const isWordSymbolBullet = item.str.trim() === WORD_SYMBOL_BULLET;
 
     const matrix = transform(viewport.transform, item.transform);
@@ -516,6 +547,7 @@ export async function extractTextRuns(
     const horizontalScale = Math.hypot(a, b);
     const verticalScale = Math.hypot(c, d);
     if (horizontalScale === 0 || verticalScale === 0) continue;
+    const paint = sourcePaint ? resolveTextPaint(sourcePaint, verticalScale) : undefined;
 
     // PDF.js reports item width/height in device space. Divide by the matrix
     // scale before applying the matrix so those dimensions are not scaled twice.
@@ -542,7 +574,10 @@ export async function extractTextRuns(
       ? fontObject.name
       : fontName;
     const nameStyle = classifyFontStyle(weightSource);
-    const programStyle = fontStyleFromProgram(fontObject?.data as Uint8Array | undefined);
+    const fontData = fontObject?.data as Uint8Array | undefined;
+    const programStyle = fontStyleFromProgram(fontData);
+    const sourceBold = sourceBoldFromFont(weightSource, fontData);
+    const paintBold = paint?.syntheticBold === true;
     runs.push({
       pageIndex,
       // Word maps Symbol's 0xB7 bullet into this private-use character. It is
@@ -553,10 +588,12 @@ export async function extractTextRuns(
       style: {
         fontName,
         fontSizePt: verticalScale,
-        bold: nameStyle.bold || (programStyle?.bold ?? false),
+        bold: sourceBold || paintBold,
         italic: nameStyle.italic || (programStyle?.italic ?? false),
-        // PDF.js text content does not expose fill color reliably.
-        color: { r: 0, g: 0, b: 0 },
+        color: paint?.color ?? { r: 0, g: 0, b: 0 },
+        sourceBold,
+        ...(paintBold ? { sourceStrokeBold: true } : {}),
+        ...(paint && !paint.supported ? { colorKnown: false } : {}),
         fontRef: isWordSymbolBullet ? undefined : fontRef,
       },
     });

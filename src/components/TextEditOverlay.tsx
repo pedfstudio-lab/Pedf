@@ -3,7 +3,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { PdfRect, TextEdit, TextStyle } from '@/lib/export/types';
+import type { PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
@@ -12,11 +12,18 @@ import {
   calculateBulletRoomPt,
   calculateInitialEditorWidth,
   finishTextEdit,
+  sameTextEditSession,
 } from '@/lib/edit/textEditSession';
+import type { TextEditSessionValue } from '@/lib/edit/textEditSession';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { editorFirstLineOffsetPx } from '@/lib/edit/editorPosition';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
-import { richTextToHtml, serializeRichText } from '@/lib/edit/richText';
+import {
+  effectiveTextSpanStyle,
+  richTextToHtml,
+  serializeRichText,
+  sourceSpansForTextBlock,
+} from '@/lib/edit/richText';
 import {
   SNAP_THRESHOLD_PX,
   snapAxis,
@@ -44,6 +51,71 @@ type FamilyKey = keyof typeof FAMILY_KEYWORD;
 
 const MIN_BOX_WIDTH = 12;
 const MIN_BOX_HEIGHT = 8;
+const COMMON_TEXT_COLORS: readonly Rgb[] = [
+  { r: 0, g: 0, b: 0 },
+  { r: 1, g: 1, b: 1 },
+  { r: 0.35, g: 0.35, b: 0.35 },
+  { r: 0.75, g: 0.75, b: 0.75 },
+  { r: 0.85, g: 0.1, b: 0.1 },
+  { r: 0.95, g: 0.55, b: 0.05 },
+  { r: 0.1, g: 0.55, b: 0.2 },
+  { r: 0.1, g: 0.35, b: 0.85 },
+];
+
+function colorCss(color: Rgb): string {
+  return `rgb(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)})`;
+}
+
+function colorHex(color: Rgb): string {
+  const channel = (value: number) => Math.round(value * 255).toString(16).padStart(2, '0');
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
+}
+
+function hexColor(value: string): Rgb | undefined {
+  const match = value.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
+  if (!match) return undefined;
+  return {
+    r: Number.parseInt(match[1] ?? '00', 16) / 255,
+    g: Number.parseInt(match[2] ?? '00', 16) / 255,
+    b: Number.parseInt(match[3] ?? '00', 16) / 255,
+  };
+}
+
+function computedColor(value: string): Rgb | undefined {
+  const match = value.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  if (!match) return undefined;
+  return {
+    r: Number(match[1]) / 255,
+    g: Number(match[2]) / 255,
+    b: Number(match[3]) / 255,
+  };
+}
+
+function sameRgb(left?: Rgb, right?: Rgb): boolean {
+  return left?.r === right?.r && left?.g === right?.g && left?.b === right?.b;
+}
+
+function sameAppearanceMetadata(
+  initial: TextEditSessionValue,
+  current: TextEditSessionValue,
+): boolean {
+  if (
+    initial.style.sourceBold !== current.style.sourceBold ||
+    initial.style.sourceStrokeBold !== current.style.sourceStrokeBold ||
+    initial.style.colorKnown !== current.style.colorKnown
+  ) return false;
+  if (!initial.spans || !current.spans) return initial.spans === current.spans;
+  return initial.spans.length === current.spans.length && initial.spans.every((span, index) => {
+    const other = current.spans?.[index];
+    return Boolean(
+      other &&
+      span.sourceBold === other.sourceBold &&
+      span.sourceStrokeBold === other.sourceStrokeBold &&
+      span.colorKnown === other.colorKnown &&
+      sameRgb(span.color, other.color)
+    );
+  });
+}
 
 function selectionRangeInside(root: HTMLElement): Range | undefined {
   const selection = window.getSelection();
@@ -132,7 +204,7 @@ function wrapSelectionWithStyle(
   range: Range,
   styles: Record<string, string>,
   data: Record<string, string>,
-  clearedProperties: readonly ('fontSize' | 'fontFamily')[],
+  clearedProperties: readonly ('fontSize' | 'fontFamily' | 'color')[],
 ): Range {
   const fragment = range.extractContents();
   const wrapper = window.document.createElement('span');
@@ -146,6 +218,12 @@ function wrapSelectionWithStyle(
     if (clearedProperties.includes('fontFamily')) {
       delete descendant.dataset.fontName;
       delete descendant.dataset.fontRef;
+      delete descendant.dataset.sourceBold;
+      delete descendant.dataset.sourceStrokeBold;
+    }
+    if (clearedProperties.includes('color')) {
+      delete descendant.dataset.textColor;
+      delete descendant.dataset.colorKnown;
     }
   }
   wrapper.append(fragment);
@@ -268,7 +346,9 @@ export function TextEditOverlay({
     const body = existing?.find((edit) => edit.text !== '•')?.style ?? block.style;
     return body.fontRef ? body : { ...body, fontRef: block.style.fontRef };
   })();
-  const initialSpans = existing?.[0]?.boxSpans ?? (existing?.length === 1 ? existing[0]?.spans : undefined);
+  const initialSpans = existing?.[0]?.boxSpans
+    ?? (existing?.length === 1 ? existing[0]?.spans : undefined)
+    ?? sourceSpansForTextBlock(block, initialText);
   const initialAlign = bulletMode ? 'left' : (existing?.[0]?.align ?? block.align ?? 'left');
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
@@ -301,7 +381,11 @@ export function TextEditOverlay({
     italic: initialStyle.italic,
     fontSizePt: initialStyle.fontSizePt,
     family: classifyFontFamily(initialStyle.fontName) as FamilyKey,
+    color: initialStyle.colorKnown === false ? undefined : initialStyle.color as Rgb | undefined,
+    colorKnown: initialStyle.colorKnown !== false,
   });
+  const [colorPanelOpen, setColorPanelOpen] = useState(false);
+  const [appearanceError, setAppearanceError] = useState<string>();
   const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
   const widthMeasurementText = editorWidthMeasurementText(block, existing);
   const [initialWidth] = useState(() => bulletMode
@@ -438,8 +522,7 @@ export function TextEditOverlay({
       } : {}),
     };
     if (bulletOverflow) return;
-    finishTextEdit(
-      {
+    const initial = {
         text: initialText,
         style: initialStyle,
         ...(initialSpans ? { spans: initialSpans } : {}),
@@ -452,11 +535,22 @@ export function TextEditOverlay({
           alignLeftPt: initialAlignLeftPt,
           alignWidthPt: initialAlignWidthPt,
         } : {}),
-      },
-      next,
-      onDone,
-      onCancel,
-    );
+      };
+    const sessionUnchanged = sameTextEditSession(initial, next);
+    const appearanceUnchanged = sameAppearanceMetadata(initial, next);
+    const unknownColor = serialized.style.colorKnown === false || serialized.spans?.some((span) => (
+      effectiveTextSpanStyle(serialized.style, span).colorKnown === false
+    ));
+    if (unknownColor && (!sessionUnchanged || !appearanceUnchanged)) {
+      setAppearanceError('Choose a text colour before finishing this edit.');
+      return;
+    }
+    setAppearanceError(undefined);
+    if (sessionUnchanged && !appearanceUnchanged) {
+      onDone(next);
+      return;
+    }
+    finishTextEdit(initial, next, onDone, onCancel);
   };
   const editorFrame: ScreenRect = {
     left: boxScreenLeft + moveOffset.x,
@@ -476,7 +570,9 @@ export function TextEditOverlay({
   const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -12, top: -12 };
   const lineHeight = textBlockLineHeight(block, style);
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
-  const visibleError = externalError ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
+  const visibleError = externalError
+    ?? appearanceError
+    ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
     if (!editable) return;
@@ -510,18 +606,27 @@ export function TextEditOverlay({
     selectionRangeRef.current = range.cloneRange();
     const bold = window.document.queryCommandState('bold');
     const italic = window.document.queryCommandState('italic');
-    const computed = window.getComputedStyle(elementAtRangeStart(range, editable));
+    const selectedElement = elementAtRangeStart(range, editable);
+    const computed = window.getComputedStyle(selectedElement);
     const fontSizePt = Number.parseFloat(computed.fontSize) / zoom || style.fontSizePt;
     const family = classifyFontFamily(computed.fontFamily) as FamilyKey;
+    const explicitUnknown = selectedElement.closest('[data-color-known="false"]');
+    const explicitKnown = selectedElement.closest('[data-text-color], [data-color-known="true"]');
+    const colorKnown = explicitUnknown ? false : explicitKnown ? true : style.colorKnown !== false;
+    const color = colorKnown ? (computedColor(computed.color) ?? style.color) : undefined;
     setSelectionStyle((current) => (
       current.bold === bold &&
       current.italic === italic &&
       current.fontSizePt === fontSizePt &&
-      current.family === family
+      current.family === family &&
+      current.colorKnown === colorKnown &&
+      current.color?.r === color?.r &&
+      current.color?.g === color?.g &&
+      current.color?.b === color?.b
         ? current
-        : { bold, italic, fontSizePt, family }
+        : { bold, italic, fontSizePt, family, color, colorKnown }
     ));
-  }, [style.fontSizePt, zoom]);
+  }, [style.color, style.colorKnown, style.fontSizePt, zoom]);
 
   useEffect(() => {
     window.document.addEventListener('selectionchange', refreshSelectionStyle);
@@ -533,12 +638,21 @@ export function TextEditOverlay({
   const applyInlineStyle = (command: 'bold' | 'italic') => {
     const editable = editableRef.current;
     if (!editable) return;
-    if (!selectionRangeInside(editable)) {
+    let range = selectionRangeInside(editable);
+    if (!range) {
       const savedRange = selectionRangeRef.current;
       if (!savedRange || !editable.contains(savedRange.commonAncestorContainer)) return;
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(savedRange.cloneRange());
+      range = savedRange;
+    }
+    if (range.collapsed) {
+      const nextValue = !selectionStyle[command];
+      setStyle((value) => ({ ...value, [command]: nextValue }));
+      setSelectionStyle((value) => ({ ...value, [command]: nextValue }));
+      editable.focus({ preventScroll: true });
+      return;
     }
     window.document.execCommand(command, false);
     refreshSelectionStyle();
@@ -588,7 +702,13 @@ export function TextEditOverlay({
     const range = editableRange();
     const fontName = FAMILY_KEYWORD[family];
     if (!editable || !range || range.collapsed) {
-      setStyle((value) => ({ ...value, fontName, fontRef: undefined }));
+      setStyle((value) => ({
+        ...value,
+        fontName,
+        fontRef: undefined,
+        sourceBold: undefined,
+        sourceStrokeBold: undefined,
+      }));
       setSelectionStyle((value) => ({ ...value, family }));
       return;
     }
@@ -601,6 +721,30 @@ export function TextEditOverlay({
     selectionRangeRef.current = selected.cloneRange();
     refreshSelectionStyle();
     resizeToContent();
+  };
+
+  const applyTextColor = (color: Rgb) => {
+    const editable = editableRef.current;
+    const range = editableRange();
+    setAppearanceError(undefined);
+    if (!editable || !range || range.collapsed) {
+      setStyle((value) => ({ ...value, color, colorKnown: true }));
+      setSelectionStyle((value) => ({ ...value, color, colorKnown: true }));
+      setColorPanelOpen(false);
+      editable?.focus({ preventScroll: true });
+      return;
+    }
+    const selected = wrapSelectionWithStyle(
+      range,
+      { color: colorCss(color) },
+      { textColor: `${color.r},${color.g},${color.b}`, colorKnown: 'true' },
+      ['color'],
+    );
+    selectionRangeRef.current = selected.cloneRange();
+    editable.focus({ preventScroll: true });
+    setSelectionStyle((value) => ({ ...value, color, colorKnown: true }));
+    setColorPanelOpen(false);
+    refreshSelectionStyle();
   };
 
   const pastePlainText = (event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -628,6 +772,14 @@ export function TextEditOverlay({
         style={toolbarOffset}
         role="toolbar"
         aria-label="Text formatting"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && colorPanelOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            setColorPanelOpen(false);
+            editableRef.current?.focus({ preventScroll: true });
+          }
+        }}
       >
         {bulletMode && (
           <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
@@ -647,6 +799,63 @@ export function TextEditOverlay({
           <option value="serif">Serif</option>
           <option value="mono">Mono</option>
         </select>
+        <div className="relative">
+          <button
+            type="button"
+            aria-label="Text colour"
+            aria-expanded={colorPanelOpen}
+            title={selectionStyle.colorKnown ? 'Text colour' : 'Source colour could not be decoded'}
+            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setColorPanelOpen((open) => !open)}
+            className={`flex h-7 w-8 items-center justify-center rounded border ${
+              selectionStyle.colorKnown ? 'border-neutral-300' : 'border-dashed border-amber-500'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className="flex h-4 w-4 items-center justify-center rounded-sm border border-black/20 text-[10px] font-bold"
+              style={{ backgroundColor: selectionStyle.color ? colorCss(selectionStyle.color) : 'white' }}
+            >
+              {selectionStyle.colorKnown ? '' : '?'}
+            </span>
+          </button>
+          {colorPanelOpen && (
+            <div
+              role="dialog"
+              aria-label="Choose text colour"
+              className="absolute left-0 top-9 z-40 w-44 rounded-lg border border-neutral-300 bg-white p-2 shadow-xl"
+            >
+              <div className="grid grid-cols-4 gap-1">
+                {COMMON_TEXT_COLORS.map((color) => (
+                  <button
+                    key={colorHex(color)}
+                    type="button"
+                    aria-label={`Use ${colorHex(color)} text colour`}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applyTextColor(color)}
+                    className="h-7 rounded border border-neutral-300"
+                    style={{ backgroundColor: colorCss(color) }}
+                  />
+                ))}
+              </div>
+              <label className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-700">
+                Custom
+                <input
+                  aria-label="Custom text colour"
+                  type="color"
+                  value={colorHex(selectionStyle.color ?? style.color)}
+                  onChange={(event) => {
+                    const color = hexColor(event.target.value);
+                    if (color) applyTextColor(color);
+                  }}
+                  className="h-7 w-12 cursor-pointer rounded border border-neutral-300 bg-white p-0.5"
+                />
+              </label>
+            </div>
+          )}
+        </div>
         <span className="mx-1 h-5 w-px bg-neutral-200" />
         <button type="button" onClick={onCancel} className="rounded px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100">Cancel</button>
         <button

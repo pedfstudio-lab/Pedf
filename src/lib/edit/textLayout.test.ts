@@ -45,6 +45,33 @@ describe('wrapTextToLines', () => {
 });
 
 describe('wrapTextSpansToLines', () => {
+  it('keeps colour and intrinsic-weight metadata while wrapping', () => {
+    const red = { r: 0.8, g: 0.1, b: 0.2 };
+    const result = wrapTextSpansToLines([
+      {
+        text: 'red words',
+        bold: true,
+        italic: false,
+        color: red,
+        sourceBold: true,
+        sourceStrokeBold: true,
+        colorKnown: true,
+      },
+    ], 4, (text) => text.length);
+
+    expect(result.flatMap((line) => line.spans ?? [])).toEqual([
+      expect.objectContaining({
+        text: 'red ', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
+      }),
+      expect.objectContaining({
+        text: 'word', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
+      }),
+      expect.objectContaining({
+        text: 's', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
+      }),
+    ]);
+  });
+
   it('splits a styled span at the width limit while carrying its flags to both lines', () => {
     const result = wrapTextSpansToLines([
       { text: 'go ', bold: false, italic: false },

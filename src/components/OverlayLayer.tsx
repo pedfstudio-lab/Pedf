@@ -3,13 +3,15 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import {
   pdfRectToScreenRect,
-  pdfToViewport,
   screenRectToPdfRect,
 } from '@/lib/export/coordinates';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import type { CoverEdit, LineEdit, PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
-import { sampleDominantColor } from '@/lib/export/colorSample';
-import { expandRectForInk, measureCanvasInkExtent } from '@/lib/export/inkExtent';
+import {
+  expandRectForInk,
+  measureCanvasInkExtent,
+  sampleCanvasTextBackground,
+} from '@/lib/export/inkExtent';
 import type { InkExtent } from '@/lib/export/inkExtent';
 import {
   buildBulletListEdits,
@@ -477,25 +479,22 @@ export function OverlayLayer({
     }));
   }, [pageTextEdits]);
 
-  const sampleBackground = useCallback((rect: PdfRect): Rgb => {
+  const sampleBackground = useCallback((rect: PdfRect, textColor?: Rgb): Rgb => {
     const registration = getPageCanvas(pageIndex);
     if (!registration) return WHITE_BACKGROUND;
     const { canvas, viewport: canvasViewport } = registration;
-    const first = pdfToViewport(canvasViewport, { x: rect.x, y: rect.y });
-    const second = pdfToViewport(canvasViewport, { x: rect.x + rect.w, y: rect.y + rect.h });
-    const left = Math.max(0, Math.floor(Math.min(first.x, second.x)));
-    const top = Math.max(0, Math.floor(Math.min(first.y, second.y)));
-    const right = Math.min(canvas.width, Math.ceil(Math.max(first.x, second.x)));
-    const bottom = Math.min(canvas.height, Math.ceil(Math.max(first.y, second.y)));
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) return WHITE_BACKGROUND;
-    try {
-      return sampleDominantColor(
-        context.getImageData(left, top, Math.max(1, right - left), Math.max(1, bottom - top)).data,
-      );
-    } catch {
-      return WHITE_BACKGROUND;
-    }
+    return sampleCanvasTextBackground(
+      {
+        width: canvas.width,
+        height: canvas.height,
+        read: (x, y, width, height) => context.getImageData(x, y, width, height).data,
+      },
+      canvasViewport,
+      rect,
+      textColor,
+    );
   }, [getPageCanvas, pageIndex]);
 
   const measureInkExtent = useCallback((
@@ -1258,7 +1257,7 @@ export function OverlayLayer({
                     top: rect.top,
                     width: rect.width,
                     height: rect.height,
-                    backgroundColor: colorCss(sampleBackground(cover)),
+                    backgroundColor: colorCss(sampleBackground(cover, activeBlock.style.color)),
                   }}
                 />
               );
@@ -1273,7 +1272,10 @@ export function OverlayLayer({
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
             pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
-              backgroundColor={colorCss(sampleBackground(activeBulletList?.coverRect ?? activeBlock.rect))}
+              backgroundColor={colorCss(sampleBackground(
+                activeBulletList?.coverRect ?? activeBlock.rect,
+                activeBlock.style.color,
+              ))}
               verticalTargets={verticalTargets}
               horizontalTargets={horizontalTargets}
               onMoveStateChange={setMoveGuideState}

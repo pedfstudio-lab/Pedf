@@ -1,4 +1,5 @@
-import type { PdfRect } from './types';
+import { sampleDominantColor } from './colorSample';
+import type { PdfRect, Rgb } from './types';
 
 export interface InkExtent {
   readonly topTrim: number;
@@ -229,4 +230,71 @@ export function expandRectForInk(rect: PdfRect, extent: InkExtent): PdfRect {
     w: rect.w,
     h: rect.h - topTrim + extent.below,
   };
+}
+
+/** Sample the surface around a text box while excluding the source glyph colour. */
+export function sampleCanvasTextBackground(
+  reader: InkPixelReader,
+  viewport: ViewportPointConverter,
+  rect: PdfRect,
+  textColor?: Rgb,
+): Rgb {
+  const first = viewportPoint(viewport, rect.x, rect.y);
+  const second = viewportPoint(viewport, rect.x + rect.w, rect.y + rect.h);
+  if (!first || !second || reader.width <= 0 || reader.height <= 0) {
+    return { r: 1, g: 1, b: 1 };
+  }
+  const coreLeft = Math.max(0, Math.floor(Math.min(first.x, second.x)));
+  const coreTop = Math.max(0, Math.floor(Math.min(first.y, second.y)));
+  const coreRight = Math.min(reader.width, Math.ceil(Math.max(first.x, second.x)));
+  const coreBottom = Math.min(reader.height, Math.ceil(Math.max(first.y, second.y)));
+  const coreWidth = Math.max(1, coreRight - coreLeft);
+  const coreHeight = Math.max(1, coreBottom - coreTop);
+  const probe = Math.max(2, Math.ceil(Math.min(coreWidth, coreHeight) * 0.18));
+  const left = Math.max(0, coreLeft - probe);
+  const top = Math.max(0, coreTop - probe);
+  const right = Math.min(reader.width, coreRight + probe);
+  const bottom = Math.min(reader.height, coreBottom + probe);
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+  let data: Uint8ClampedArray;
+  try {
+    data = reader.read(left, top, width, height);
+  } catch {
+    return { r: 1, g: 1, b: 1 };
+  }
+
+  const sampled: number[] = [];
+  const textRgb = textColor
+    ? [textColor.r * 255, textColor.g * 255, textColor.b * 255]
+    : undefined;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const globalX = left + x;
+      const globalY = top + y;
+      const outside = globalX < coreLeft || globalX >= coreRight
+        || globalY < coreTop || globalY >= coreBottom;
+      const insideEdge = globalX - coreLeft < probe || coreRight - 1 - globalX < probe
+        || globalY - coreTop < probe || coreBottom - 1 - globalY < probe;
+      if (!outside && !insideEdge) continue;
+      const offset = (y * width + x) * 4;
+      const red = data[offset] ?? 0;
+      const green = data[offset + 1] ?? 0;
+      const blue = data[offset + 2] ?? 0;
+      const alpha = data[offset + 3] ?? 0;
+      if (alpha < 128) continue;
+      if (textRgb) {
+        const distance = Math.hypot(
+          red - (textRgb[0] ?? 0),
+          green - (textRgb[1] ?? 0),
+          blue - (textRgb[2] ?? 0),
+        );
+        if (distance < 48) continue;
+      }
+      sampled.push(red, green, blue, alpha);
+    }
+  }
+  return sampled.length > 0
+    ? sampleDominantColor(new Uint8ClampedArray(sampled))
+    : { r: 1, g: 1, b: 1 };
 }

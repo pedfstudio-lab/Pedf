@@ -55,7 +55,19 @@ function allEditKinds(): Edit[] {
       rect: { x: 30, y: 280, w: 120, h: 12 },
       z: 1,
       text: 'Saved text',
-      style,
+      style: { ...style, sourceBold: false, sourceStrokeBold: true, colorKnown: true },
+      spans: [
+        { text: 'Saved ', bold: false, italic: false },
+        {
+          text: 'text',
+          bold: false,
+          italic: false,
+          color: { r: 0.8, g: 0.1, b: 0.2 },
+          sourceBold: false,
+          sourceStrokeBold: true,
+          colorKnown: true,
+        },
+      ],
     },
     bullet,
     {

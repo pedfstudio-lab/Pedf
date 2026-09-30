@@ -100,6 +100,10 @@ interface StyledCharacter {
   readonly fontSizePt?: number;
   readonly fontName?: string;
   readonly fontRef?: string;
+  readonly color?: TextSpan['color'];
+  readonly sourceBold?: boolean;
+  readonly sourceStrokeBold?: boolean;
+  readonly colorKnown?: boolean;
 }
 
 function sameCharacterStyle(span: TextSpan, character: StyledCharacter): boolean {
@@ -108,7 +112,13 @@ function sameCharacterStyle(span: TextSpan, character: StyledCharacter): boolean
     span.italic === character.italic &&
     span.fontSizePt === character.fontSizePt &&
     span.fontName === character.fontName &&
-    span.fontRef === character.fontRef
+    span.fontRef === character.fontRef &&
+    span.color?.r === character.color?.r &&
+    span.color?.g === character.color?.g &&
+    span.color?.b === character.color?.b &&
+    span.sourceBold === character.sourceBold &&
+    span.sourceStrokeBold === character.sourceStrokeBold &&
+    span.colorKnown === character.colorKnown
   );
 }
 
@@ -126,6 +136,12 @@ function charactersToSpans(characters: readonly StyledCharacter[]): TextSpan[] {
         ...(character.fontSizePt ? { fontSizePt: character.fontSizePt } : {}),
         ...(character.fontName ? { fontName: character.fontName } : {}),
         ...(character.fontRef ? { fontRef: character.fontRef } : {}),
+        ...(character.color ? { color: character.color } : {}),
+        ...(character.sourceBold !== undefined ? { sourceBold: character.sourceBold } : {}),
+        ...(character.sourceStrokeBold !== undefined
+          ? { sourceStrokeBold: character.sourceStrokeBold }
+          : {}),
+        ...(character.colorKnown !== undefined ? { colorKnown: character.colorKnown } : {}),
       });
     }
   }
@@ -231,6 +247,12 @@ export function wrapTextSpansToLines(
         ...(span.fontSizePt ? { fontSizePt: span.fontSizePt } : {}),
         ...(span.fontName ? { fontName: span.fontName } : {}),
         ...(span.fontRef ? { fontRef: span.fontRef } : {}),
+        ...(span.color ? { color: span.color } : {}),
+        ...(span.sourceBold !== undefined ? { sourceBold: span.sourceBold } : {}),
+        ...(span.sourceStrokeBold !== undefined
+          ? { sourceStrokeBold: span.sourceStrokeBold }
+          : {}),
+        ...(span.colorKnown !== undefined ? { colorKnown: span.colorKnown } : {}),
       });
     }
   }

@@ -1,4 +1,4 @@
-import type { PdfRect, TextAlignment } from '@/lib/export/types';
+import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import type { RuleLine } from './ruleLines';
 import type { TextLine, TextRun } from './textContent';
 
@@ -127,10 +127,19 @@ function fontFamily(fontName: string): 'serif' | 'sans' | 'mono' {
   return 'sans';
 }
 
+/**
+ * The weight a line's font carries, ignoring bold that was painted onto a
+ * phrase with fill-and-stroke. Grouping must judge lines by their face: a bold
+ * phrase inside a sentence is emphasis, not the start of a new paragraph.
+ */
+export function intrinsicBold(style: TextStyle): boolean {
+  return style.sourceBold ?? style.bold;
+}
+
 function sameParagraphStyle(upper: TextLine, lower: TextLine, size: number): boolean {
   return Math.abs(upper.style.fontSizePt - lower.style.fontSizePt) <= Math.max(1.5, size * 0.22)
     && fontFamily(upper.style.fontName) === fontFamily(lower.style.fontName)
-    && upper.style.bold === lower.style.bold
+    && intrinsicBold(upper.style) === intrinsicBold(lower.style)
     && upper.style.italic === lower.style.italic;
 }
 

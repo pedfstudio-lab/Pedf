@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TextStyle } from '@/lib/export/types';
+import type { TextBlock } from '@/lib/pdf/textContent';
 import {
   finalizeTextSpans,
   normalizeTextSpans,
   richTextToHtml,
   serializeRichText,
+  sourceSpansForTextBlock,
 } from './richText';
 
 const style: TextStyle = {
@@ -24,11 +26,16 @@ interface FakeNode {
     readonly fontStyle?: string;
     readonly fontSize?: string;
     readonly fontFamily?: string;
+    readonly color?: string;
   };
   readonly dataset?: {
     readonly fontSizePt?: string;
     readonly fontName?: string;
     readonly fontRef?: string;
+    readonly textColor?: string;
+    readonly sourceBold?: string;
+    readonly sourceStrokeBold?: string;
+    readonly colorKnown?: string;
   };
   readonly childNodes?: readonly FakeNode[];
 }
@@ -124,11 +131,88 @@ describe('rich text serialization', () => {
       italic: false,
       fontSizePt: 16,
       fontName: 'Times New Roman',
+      sourceBold: false,
+      sourceStrokeBold: true,
     }], 2);
 
     expect(html).toContain('font-size:32px');
     expect(html).toContain('font-family:Times New Roman');
     expect(html).toContain('data-font-size-pt="16"');
     expect(html).toContain('data-font-name="Times New Roman"');
+    expect(html).toContain('data-source-bold="false"');
+    expect(html).toContain('data-source-stroke-bold="true"');
+  });
+
+  it('round-trips source stroke-bold separately from intrinsic font weight', () => {
+    const root = element('DIV', [
+      element('SPAN', [text('outlined')], {}, {
+        sourceBold: 'false',
+        sourceStrokeBold: 'true',
+      }),
+    ]);
+
+    expect(serializeRichText(root as unknown as HTMLElement, style).style).toMatchObject({
+      bold: false,
+      sourceBold: false,
+      sourceStrokeBold: true,
+    });
+  });
+
+  it('round-trips an inline colour override', () => {
+    const red = { r: 1, g: 0, b: 0 };
+    const root = element('DIV', [
+      text('Black '),
+      element(
+        'SPAN',
+        [text('red')],
+        { color: 'rgb(255, 0, 0)' },
+        { textColor: '1,0,0', colorKnown: 'true' },
+      ),
+    ]);
+
+    const serialized = serializeRichText(root as unknown as HTMLElement, style);
+    expect(serialized.spans).toEqual([
+      { text: 'Black ', bold: false, italic: false },
+      { text: 'red', bold: false, italic: false, color: red, colorKnown: true },
+    ]);
+    expect(richTextToHtml(serialized.text, serialized.style, serialized.spans))
+      .toContain('color:rgb(255, 0, 0)');
+  });
+
+  it('turns differently-coloured source runs into lossless editor spans', () => {
+    const red = { r: 1, g: 0, b: 0 };
+    const first = {
+      pageIndex: 0,
+      text: 'Black',
+      rect: { x: 10, y: 100, w: 30, h: 12 },
+      style,
+    };
+    const second = {
+      ...first,
+      text: 'Red',
+      rect: { x: 45, y: 100, w: 20, h: 12 },
+      style: { ...style, color: red },
+    };
+    const block: TextBlock = {
+      pageIndex: 0,
+      text: 'Black Red',
+      rect: { x: 10, y: 100, w: 55, h: 12 },
+      topBaselineY: 100,
+      lineHeightPt: 14,
+      style,
+      lines: [{
+        pageIndex: 0,
+        text: 'Black Red',
+        rect: { x: 10, y: 100, w: 55, h: 12 },
+        baselineY: 100,
+        style,
+        runs: [first, second],
+      }],
+    };
+
+    expect(sourceSpansForTextBlock(block)).toEqual([
+      { text: 'Black', bold: false, italic: false },
+      { text: ' Red', bold: false, italic: false, color: red },
+    ]);
   });
 });

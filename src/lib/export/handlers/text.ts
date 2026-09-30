@@ -3,7 +3,7 @@ import { isIndicRun } from '../scriptRouting';
 import { drawIndicTextPatch } from '../pathA';
 import { resolveEnglishFont } from '../englishFont';
 import { drawSpanWithPageFont, measureTextWithPageFont } from '../embeddedFont';
-import type { TextEdit } from '../types';
+import type { TextEdit, TextStyle } from '../types';
 import type { EditHandler } from '../registry';
 import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 
@@ -17,6 +17,19 @@ function alignedTextX(edit: TextEdit, textWidth: number): number {
     : left + width - textWidth;
 }
 
+function exportStyle(style: TextStyle): TextStyle {
+  // Turning B off on an intrinsically-bold face cannot reuse that face; doing
+  // so would make the control lie. Old projects without sourceBold keep their
+  // legacy font-reuse behaviour.
+  return style.sourceBold === true && !style.bold
+    ? { ...style, fontRef: undefined }
+    : style;
+}
+
+function syntheticBold(style: TextStyle): boolean {
+  return style.bold && (style.sourceStrokeBold === true || style.sourceBold !== true);
+}
+
 /** Draw English with a cached standard font; Indic remains routed to Path A. */
 export const drawText: EditHandler<TextEdit> = async (edit, context) => {
   // Task 11B rich spans are English-only; Indic keeps the single whole-run Path-A route.
@@ -27,7 +40,7 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
 
   if (edit.spans) {
     const measured = await Promise.all(edit.spans.filter((span) => span.text).map(async (span) => {
-      const style = effectiveTextSpanStyle(edit.style, span);
+      const style = exportStyle(effectiveTextSpanStyle(edit.style, span));
       const pageFontWidth = measureTextWithPageFont(span.text, style, context);
       if (pageFontWidth !== null) return { span, style, width: pageFontWidth };
       const font = await resolveEnglishFont(style, context);
@@ -48,8 +61,8 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
         item.style,
         cursorX,
         edit.rect.y,
-        item.span.bold,
-        item.span.italic,
+        syntheticBold(item.style),
+        item.style.italic,
         context,
       );
       if (advance === null && 'font' in item) {
@@ -66,27 +79,28 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
     return;
   }
 
-  const pageFontWidth = measureTextWithPageFont(edit.text, edit.style, context);
+  const style = exportStyle(edit.style);
+  const pageFontWidth = measureTextWithPageFont(edit.text, style, context);
   if (pageFontWidth !== null) {
     drawSpanWithPageFont(
       edit.text,
-      edit.style,
+      style,
       alignedTextX(edit, pageFontWidth),
       edit.rect.y,
-      edit.style.bold,
-      edit.style.italic,
+      syntheticBold(style),
+      style.italic,
       context,
     );
     return;
   }
 
-  const font = await resolveEnglishFont(edit.style, context);
-  const textWidth = font.widthOfTextAtSize(edit.text, edit.style.fontSizePt);
+  const font = await resolveEnglishFont(style, context);
+  const textWidth = font.widthOfTextAtSize(edit.text, style.fontSizePt);
   context.page.drawText(edit.text, {
     x: alignedTextX(edit, textWidth),
     y: edit.rect.y,
-    size: edit.style.fontSizePt,
+    size: style.fontSizePt,
     font,
-    color: rgb(edit.style.color.r, edit.style.color.g, edit.style.color.b),
+    color: rgb(style.color.r, style.color.g, style.color.b),
   });
 };

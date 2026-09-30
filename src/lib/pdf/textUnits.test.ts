@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { TextStyle } from '@/lib/export/types';
 import type { RuleLine } from './ruleLines';
 import type { TextLine, TextRun } from './textContent';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
   detectBlockAlignment,
+  intrinsicBold,
   splitTextRow,
 } from './textUnits';
 
@@ -90,6 +92,40 @@ describe('text row click units', () => {
   it('keeps the compact table-number split', () => {
     const runs = [run('50.00%', 10, 40), run('100.00%', 55, 45)];
     expect(splitTextRow(runs, [])).toEqual([[runs[0]], [runs[1]]]);
+  });
+});
+
+describe('fill-and-stroke bold phrases inside a paragraph', () => {
+  function styled(source: TextLine, overrides: Partial<TextStyle>): TextLine {
+    return { ...source, style: { ...source.style, ...overrides } };
+  }
+
+  it('judges a line by its face, not by bold painted onto a phrase', () => {
+    expect(intrinsicBold({ ...style, bold: true, sourceBold: false })).toBe(false);
+    expect(intrinsicBold({ ...style, bold: false, sourceBold: true })).toBe(true);
+    // A project saved before sourceBold existed falls back to bold, unchanged.
+    expect(intrinsicBold({ ...style, bold: true })).toBe(true);
+    expect(intrinsicBold({ ...style, bold: false })).toBe(false);
+  });
+
+  it('joins a line whose longest run is a painted bold phrase to its plain neighbour', () => {
+    // RAHUL_RAJPUT_RESUME.pdf: this line's longest run is the fill-and-stroke
+    // phrase, so the line reads bold while its Lucida face is regular.
+    const upper = line('Joined Firgun Travels three months ago and initially took', 20, 500, 210);
+    const lower = styled(
+      line('generating 60+ bookings within the first three months.', 20, 486, 210),
+      { bold: true, sourceBold: false },
+    );
+    expect(canJoinTextBlock([upper], lower, [])).toBe(true);
+  });
+
+  it('still keeps a genuinely bold face apart from a plain one', () => {
+    const upper = styled(
+      line('A full-width line set in a genuinely bold face here', 20, 500, 210),
+      { bold: true, sourceBold: true },
+    );
+    const lower = line('A full-width paragraph line set in the plain face', 20, 486, 210);
+    expect(canJoinTextBlock([upper], lower, [])).toBe(false);
   });
 });
 

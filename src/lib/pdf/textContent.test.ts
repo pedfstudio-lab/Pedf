@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+  PDFDocument,
+  StandardFonts,
+  TextRenderingMode,
+  rgb,
+  setTextRenderingMode,
+} from 'pdf-lib';
 import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { exportPdf } from '@/lib/export/exportPdf';
 import type { PageGeometry } from './types';
@@ -19,6 +25,7 @@ import {
   hitTestRun,
   isTableNumber,
   mergeRunsIntoLines,
+  sourceBoldFromFont,
 } from './textContent';
 
 const openDocuments: PDFDocumentProxy[] = [];
@@ -65,6 +72,8 @@ describe('classifyFontStyle', () => {
 describe('fontStyleFromProgram', () => {
   it('detects bold from OS/2 usWeightClass', () => {
     expect(fontStyleFromProgram(makeSfnt(700))).toEqual({ bold: true, italic: false });
+    expect(fontStyleFromProgram(makeSfnt(600))).toEqual({ bold: false, italic: false });
+    expect(fontStyleFromProgram(makeSfnt(800, 0x0))).toEqual({ bold: true, italic: false });
     expect(fontStyleFromProgram(makeSfnt(400))).toEqual({ bold: false, italic: false });
   });
 
@@ -86,6 +95,16 @@ describe('fontStyleFromProgram', () => {
     })(),
   ])('returns null for missing, short, or malformed data', (data) => {
     expect(fontStyleFromProgram(data)).toBeNull();
+  });
+});
+
+describe('sourceBoldFromFont', () => {
+  it('changes the measured semibold band without flattening named bold or heavy faces', () => {
+    expect(sourceBoldFromFont('RFDewi-Semibold', makeSfnt(600))).toBe(false);
+    expect(sourceBoldFromFont('Sanitized-Bold', makeSfnt(400))).toBe(true);
+    expect(sourceBoldFromFont('RFDewi-Ultrabold', makeSfnt(800, 0))).toBe(true);
+    expect(sourceBoldFromFont('Regular', makeSfnt(400))).toBe(false);
+    expect(sourceBoldFromFont('Regular', makeSfnt(400, 0x1))).toBe(true);
   });
 });
 
@@ -179,6 +198,56 @@ describe('extractTextRuns', () => {
     expect(run?.style.fontRef).toMatch(/^g_d\d+_f\d+$/);
   });
 
+  it('attaches the actual source fill colour to each extracted run', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([300, 300]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    page.drawText('WHITE', { x: 20, y: 220, size: 20, font, color: rgb(1, 1, 1) });
+    page.drawText('BLUE', { x: 20, y: 180, size: 20, font, color: rgb(0.1, 0.3, 0.8) });
+
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+
+    expect(runs.find((run) => run.text === 'WHITE')?.style.color)
+      .toEqual({ r: 1, g: 1, b: 1 });
+    const blue = runs.find((run) => run.text === 'BLUE')?.style.color;
+    expect(blue?.r).toBeCloseTo(0.1, 2);
+    expect(blue?.g).toBeCloseTo(0.3, 2);
+    expect(blue?.b).toBeCloseTo(0.8, 2);
+  });
+
+  it('does not expose invisible mode-3 text as an editable run', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([300, 300]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    page.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible));
+    page.drawText('SEARCH LAYER', { x: 20, y: 220, size: 20, font });
+
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+
+    expect(await extractTextRuns(await document.getPage(1), 0)).toEqual([]);
+  });
+
+  it('keeps visible text while excluding mode-3 text on the same page', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([300, 300]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill));
+    page.drawText('VISIBLE ONE', { x: 20, y: 240, size: 20, font });
+    page.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible));
+    page.drawText('SEARCH LAYER', { x: 20, y: 200, size: 20, font });
+    page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill));
+    page.drawText('VISIBLE TWO', { x: 20, y: 160, size: 20, font });
+
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+
+    expect(runs.map((run) => run.text)).toEqual(['VISIBLE ONE', 'VISIBLE TWO']);
+  });
+
   it('uses the résumé BaseFont names for weight while preserving the public family', async () => {
     const bytes = new Uint8Array(await readFile('public/samples/RAHUL RAJPUT RESUME.pdf'));
     const document = await getDocument({ data: bytes, verbosity: 0 }).promise;
@@ -190,6 +259,13 @@ describe('extractTextRuns', () => {
 
     expect(runs.some((run) => run.text === 'WORK EXPERIENCE' && run.style.bold)).toBe(true);
     expect(runs.some((run) => run.text === 'Sales and Operations' && run.style.bold)).toBe(true);
+    const paintedBold = runs.filter((run) => run.text === 'Firgun Travels');
+    expect(paintedBold.length).toBeGreaterThan(0);
+    expect(paintedBold.every((run) => run.style.bold)).toBe(true);
+    const outlined = paintedBold.filter((run) => run.style.sourceStrokeBold);
+    expect(outlined.length).toBeGreaterThan(0);
+    expect(outlined.some((run) => run.style.sourceBold === false)).toBe(true);
+    expect(outlined.every((run) => run.style.colorKnown !== false)).toBe(true);
     expect(educationRuns.length).toBeGreaterThan(0);
     expect(educationRuns.every((run) => run.style.bold)).toBe(true);
     expect(runs.some((run) => (

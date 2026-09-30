@@ -7,6 +7,7 @@ import { resolvePageFontResource } from '../embeddedFont';
 import type { PageExportContext } from '../context';
 import type { TextEdit } from '../types';
 import { extractTextRuns } from '@/lib/pdf/textContent';
+import { resolveTextPaint, textPaintForItems } from '@/lib/pdf/textPaint';
 import { drawText } from './text';
 
 const openDocuments: PDFDocumentProxy[] = [];
@@ -56,9 +57,9 @@ async function makeResumeContext() {
     sampleBackground: () => undefined,
   };
   const sourceRun = runs.find((run) => (
-    resolvePageFontResource(context, run.style)?.name.decodeText() === 'F2'
+    run.style.sourceBold === false && resolvePageFontResource(context, run.style)
   ));
-  if (!sourceRun) throw new Error('Résumé F2 body font was not resolved');
+  if (!sourceRun) throw new Error('Résumé regular body font was not resolved');
   return { context, style: sourceRun.style };
 }
 
@@ -121,6 +122,172 @@ describe('drawText rich spans', () => {
     await drawText(edit, context);
 
     expect(fallbackDraw).not.toHaveBeenCalled();
+  });
+
+  it('does not add a second synthetic weight to an intrinsically bold source face', async () => {
+    const { context, style } = await makeResumeContext();
+    const fallbackDraw = vi.spyOn(context.page, 'drawText');
+    const pushed = vi.spyOn(context.page, 'pushOperators');
+    const edit: TextEdit = {
+      id: 'source-bold',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 60, y: 245, w: 180, h: style.fontSizePt },
+      z: 1,
+      text: 'already bold',
+      style: { ...style, bold: true, sourceBold: true },
+    };
+
+    await drawText(edit, context);
+
+    const operators = pushed.mock.calls.flat().map((operator) => operator.toString()).join('\n');
+    expect(fallbackDraw).not.toHaveBeenCalled();
+    expect(operators).not.toContain('2 Tr');
+    expect(operators).not.toContain(' w');
+  });
+
+  it('preserves a source mode-2 outline on an intrinsically bold face exactly once', async () => {
+    const { context, style } = await makeResumeContext();
+    const pushed = vi.spyOn(context.page, 'pushOperators');
+    const edit: TextEdit = {
+      id: 'source-stroke-bold',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 60, y: 242, w: 180, h: style.fontSizePt },
+      z: 1,
+      text: 'outlined heavy face',
+      style: {
+        ...style,
+        bold: true,
+        sourceBold: true,
+        sourceStrokeBold: true,
+      },
+    };
+
+    await drawText(edit, context);
+
+    const operators = pushed.mock.calls.flat().map((operator) => operator.toString()).join('\n');
+    expect(operators.match(/2 Tr/g)).toHaveLength(1);
+    expect(operators.match(/ w/g)).toHaveLength(1);
+  });
+
+  it('adds synthetic weight once when bold is requested on a non-bold source face', async () => {
+    const { context, style } = await makeResumeContext();
+    const pushed = vi.spyOn(context.page, 'pushOperators');
+    const edit: TextEdit = {
+      id: 'user-bold',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 60, y: 240, w: 180, h: style.fontSizePt },
+      z: 1,
+      text: 'make bold',
+      style: { ...style, bold: true, sourceBold: false },
+    };
+
+    await drawText(edit, context);
+
+    const operators = pushed.mock.calls.flat().map((operator) => operator.toString()).join('\n');
+    expect(operators).toContain('2 Tr');
+    expect(operators).toContain(' w');
+  });
+
+  it('recognises its own fill-and-outline bold after export and reopen', async () => {
+    const { context, style } = await makeResumeContext();
+    const text = 'make bold';
+    const edit: TextEdit = {
+      id: 'roundtrip-bold',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 60, y: 40, w: 180, h: style.fontSizePt },
+      z: 1,
+      text,
+      style: {
+        ...style,
+        bold: true,
+        sourceBold: false,
+        color: { r: 0.2, g: 0.2, b: 0.2 },
+        colorKnown: true,
+      },
+    };
+
+    await drawText(edit, context);
+    const reopened = await getDocument({
+      data: (await context.pdf.save()).slice(),
+      verbosity: 0,
+    }).promise;
+    openDocuments.push(reopened);
+    const reopenedPage = await reopened.getPage(1);
+    const [content, operators] = await Promise.all([
+      reopenedPage.getTextContent(),
+      reopenedPage.getOperatorList(),
+    ]);
+    const itemIndex = content.items.findIndex((item) => 'str' in item && item.str === text);
+    const item = content.items[itemIndex];
+    const paints = textPaintForItems(content.items, operators);
+    const rawPaint = itemIndex >= 0 ? paints?.[itemIndex] : undefined;
+    const fontSize = item && 'transform' in item
+      ? Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0)
+      : 0;
+    expect(rawPaint && resolveTextPaint(rawPaint, fontSize)).toMatchObject({
+      renderingMode: 2,
+      supported: true,
+      syntheticBold: true,
+    });
+    const runs = await extractTextRuns(reopenedPage, 0);
+    const roundTrip = runs.find((run) => run.text === text);
+
+    expect(roundTrip?.style.bold).toBe(true);
+    expect(roundTrip?.style.sourceStrokeBold).toBe(true);
+    expect(roundTrip?.style.colorKnown).not.toBe(false);
+    expect(roundTrip?.style.color).toMatchObject({ r: 0.2, g: 0.2, b: 0.2 });
+  });
+
+  it('does not reuse an intrinsically bold source face after bold is turned off', async () => {
+    const { context, style } = await makeResumeContext();
+    const fallbackDraw = vi.spyOn(context.page, 'drawText');
+    const edit: TextEdit = {
+      id: 'source-bold-off',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 60, y: 235, w: 180, h: style.fontSizePt },
+      z: 1,
+      text: 'regular now',
+      style: { ...style, bold: false, sourceBold: true },
+    };
+
+    await drawText(edit, context);
+
+    expect(fallbackDraw).toHaveBeenCalledTimes(1);
+    expect(fallbackDraw.mock.calls[0]?.[1]?.font?.name).toBe('Helvetica');
+  });
+
+  it('draws each rich span with its own colour override', async () => {
+    const context = await makeContext();
+    const draw = vi.spyOn(context.page, 'drawText');
+    const edit: TextEdit = {
+      id: 'span-colours',
+      kind: 'text',
+      pageIndex: 0,
+      rect: { x: 20, y: 220, w: 180, h: 12 },
+      z: 1,
+      text: 'black red',
+      spans: [
+        { text: 'black ', bold: false, italic: false },
+        { text: 'red', bold: false, italic: false, color: { r: 0.8, g: 0.1, b: 0.2 } },
+      ],
+      style: {
+        fontName: 'Helvetica',
+        fontSizePt: 12,
+        bold: false,
+        italic: false,
+        color: { r: 0, g: 0, b: 0 },
+      },
+    };
+
+    await drawText(edit, context);
+
+    expect(draw.mock.calls[0]?.[1]?.color).toMatchObject({ red: 0, green: 0, blue: 0 });
+    expect(draw.mock.calls[1]?.[1]?.color).toMatchObject({ red: 0.8, green: 0.1, blue: 0.2 });
   });
 
   it('falls back per span when the page font cannot encode its text', async () => {
