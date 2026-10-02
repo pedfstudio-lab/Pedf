@@ -44,6 +44,8 @@ interface ImageOverlayProps {
   readonly dpr: number;
   readonly imageMode: boolean;
   readonly directMode: boolean;
+  readonly renderedEditIds?: ReadonlySet<string>;
+  readonly onInteractionChange?: (active: boolean) => void;
 }
 
 type PendingTarget =
@@ -200,6 +202,8 @@ export function ImageOverlay({
   dpr,
   imageMode,
   directMode,
+  renderedEditIds,
+  onInteractionChange,
 }: ImageOverlayProps) {
   const { edits, addEdits, removeEdit, replaceEdits, updateEdit } = useEdits();
   const { document: openDocument, getPageCanvas } = useDocumentStore();
@@ -215,6 +219,10 @@ export function ImageOverlay({
   const [cropDragRect, setCropDragRect] = useState<ScreenSelection>();
   const [cropBusy, setCropBusy] = useState(false);
   const [error, setError] = useState<string>();
+  useEffect(() => {
+    onInteractionChange?.(Boolean(draft || transformSelection || cropTarget));
+    return () => onInteractionChange?.(false);
+  }, [draft, transformSelection, cropTarget, onInteractionChange]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingTargetRef = useRef<PendingTarget>();
   const transformFrameRef = useRef<HTMLDivElement>(null);
@@ -826,7 +834,7 @@ export function ImageOverlay({
         const screen = pdfRectToScreenRect(edit.rect, viewport, dpr);
         return (
           <div key={edit.id}>
-            {!(transformSelection?.kind === 'placed' && transformSelection.editId === edit.id) && (
+            {!renderedEditIds?.has(edit.id) && !(transformSelection?.kind === 'placed' && transformSelection.editId === edit.id) && (
               <ImagePreview
                 bytes={edit.bytes}
                 rect={edit.rect}

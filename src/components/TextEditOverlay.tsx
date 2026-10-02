@@ -297,6 +297,8 @@ interface TextEditOverlayProps {
   /** Page box in CSS pixels; floating bars are kept inside it because the page clips overflow. */
   readonly pageSizePx: ElementSize;
   readonly backgroundColor: string;
+  readonly previewMode?: 'legacy' | 'preparing' | 'clean';
+  readonly committing?: boolean;
   readonly verticalTargets: readonly SnapTarget[];
   readonly horizontalTargets: readonly SnapTarget[];
   readonly bulletMode?: {
@@ -321,6 +323,8 @@ export function TextEditOverlay({
   pageWidthPt,
   pageSizePx,
   backgroundColor,
+  previewMode = 'legacy',
+  committing = false,
   verticalTargets,
   horizontalTargets,
   bulletMode,
@@ -415,6 +419,7 @@ export function TextEditOverlay({
   const initialRenderedHeightRef = useRef(initialHeight);
   const capturedInitialHeightRef = useRef(false);
   const initializedRef = useRef(false);
+  const composingRef = useRef(false);
 
   const beginWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -502,6 +507,7 @@ export function TextEditOverlay({
   const bulletOverflow = Boolean(bulletMode && height > bulletRoomPt + 0.5);
 
   const commit = () => {
+    if (committing || composingRef.current) return;
     const editable = editableRef.current;
     if (!editable) return;
     const serialized = serializeRichText(editable, style, zoom);
@@ -758,12 +764,15 @@ export function TextEditOverlay({
   return (
     <div
       className="absolute isolate z-50"
+      onPointerDownCapture={(event) => { if (committing) {event.preventDefault();event.stopPropagation();} }}
+      onClickCapture={(event) => { if (committing) {event.preventDefault();event.stopPropagation();} }}
+      onKeyDownCapture={(event) => { if (committing) {event.preventDefault();event.stopPropagation();} }}
       style={{
         left: boxScreenLeft + moveOffset.x,
         top: screenRect.top + moveOffset.y,
         width: width * zoom,
         height: height * zoom,
-        backgroundColor,
+        backgroundColor: previewMode === 'legacy' ? backgroundColor : 'transparent',
       }}
     >
       <div
@@ -772,6 +781,7 @@ export function TextEditOverlay({
         style={toolbarOffset}
         role="toolbar"
         aria-label="Text formatting"
+        aria-busy={committing || previewMode === 'preparing'}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && colorPanelOpen) {
             event.preventDefault();
@@ -857,12 +867,13 @@ export function TextEditOverlay({
           )}
         </div>
         <span className="mx-1 h-5 w-px bg-neutral-200" />
-        <button type="button" onClick={onCancel} className="rounded px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100">Cancel</button>
+        {previewMode === 'preparing' && <span role="status" className="whitespace-nowrap px-1 text-xs text-neutral-500">Preparing text…</span>}
+        <button type="button" disabled={committing} onClick={onCancel} className="rounded px-2 py-1 text-sm text-neutral-600 hover:bg-neutral-100">Cancel</button>
         <button
           type="button"
           data-text-edit-done
           onClick={commit}
-          disabled={bulletOverflow}
+          disabled={bulletOverflow || committing}
           className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
         >
           Done
@@ -885,12 +896,15 @@ export function TextEditOverlay({
         role="textbox"
         aria-label={bulletMode ? 'Editable bullet list' : 'Editable text'}
         aria-multiline="true"
-        contentEditable
+        contentEditable={!committing}
         suppressContentEditableWarning
         spellCheck={false}
         onInput={resizeToContent}
+        onCompositionStart={()=>{composingRef.current=true;}}
+        onCompositionEnd={()=>{composingRef.current=false;resizeToContent();}}
         onPaste={pastePlainText}
         onKeyDown={(event) => {
+          if (committing || event.nativeEvent.isComposing) return;
           if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
             event.preventDefault();
             commit();
@@ -912,6 +926,7 @@ export function TextEditOverlay({
         className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
         style={{
           ...textStyleToCss(style, zoom),
+          ...(previewMode === 'preparing' ? {WebkitTextFillColor:'transparent',caretColor:colorCss(style.color)} : {}),
           lineHeight: lineHeight / style.fontSizePt,
           top: firstLineOffsetPx,
           textAlign: initialAlign,

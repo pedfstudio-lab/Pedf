@@ -12904,7 +12904,11 @@ is refused rather than approximated, and must be coloured by hand.
 
 ---
 
-#### Task 74 — Step 5b  🔲 TODO → branch `live-page-preview` **from `main`, after Step 5a is merged** — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+#### Task 74 — Step 5b  🔄 IN REVIEW → branch `live-page-preview` **from `main`, after Step 5a is merged** — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+
+Implementation and automated preview checks are available on `live-page-preview`. See
+[`TASK74_STEP5B_REPORT.md`](TASK74_STEP5B_REPORT.md) for timing, corpus evidence, the reproduced pre-existing
+corpus count failure, and remaining browser/user workflow approval. This step is not merged or marked complete.
 
 **What the user hit.** Clicking the white `BHUTAN` heading opens a large opaque rectangle that hides most of the
 photograph. Clicking a table cell paints a rectangle across its fill and dividers while the editor is open. The

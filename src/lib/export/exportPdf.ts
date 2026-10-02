@@ -29,9 +29,12 @@ import type { PDFRef } from 'pdf-lib';
 const REMOVE_COVERED_TEXT = true;
 const REMOVE_COVERED_IMAGES = true;
 
-interface InternalExportOptions {
+export interface PageWritingOptions {
   readonly removeCoveredText?: boolean;
   readonly removeCoveredImages?: boolean;
+  /** Preview can reuse the already-loaded pristine reader; it never owns/destroys it. */
+  readonly reader?: Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>;
+  readonly omitTextIds?: ReadonlySet<string>;
 }
 
 function rewriteCombinedStream(
@@ -112,6 +115,7 @@ async function removeCoveredContent(
   satisfiedTextCovers: Set<CoverEdit>,
   textEnabled: boolean,
   imagesEnabled: boolean,
+  sharedReader?: PageWritingOptions['reader'],
 ): Promise<ExportRedactionResult> {
   const textPages = [...editsByPage.entries()].flatMap(([pageIndex, edits]) => (
     edits.some((edit) => edit.kind === 'cover' && edit.replacesImages === undefined) ? [pageIndex] : []
@@ -157,7 +161,7 @@ async function removeCoveredContent(
   let outsideCoverImages = 0;
   const removedImageRefs: PDFRef[] = [];
   try {
-    reader = await readForRedaction(doc.originalBytes);
+    reader = sharedReader ?? await readForRedaction(doc.originalBytes);
   } catch {
     for (const pageIndex of eligibleTextPages) {
       warnings.push(`Old text on page ${pageIndex + 1} could not be removed; it stays hidden under the cover.`);
@@ -328,7 +332,7 @@ async function removeCoveredContent(
       }
     }
   } finally {
-    await reader?.destroy();
+    if (!sharedReader) await reader?.destroy();
   }
   deleteUnreachableImageObjects(pdf, removedImageRefs);
   return {
@@ -344,7 +348,7 @@ async function removeCoveredContent(
 /** Load pristine bytes, dispatch PDF-point edits in z-order, and serialize once. */
 export async function exportPdf(
   doc: EditDocument,
-  internal: InternalExportOptions = {},
+  internal: PageWritingOptions = {},
 ): Promise<ExportResult> {
   const source = await PDFDocument.load(doc.originalBytes, { updateMetadata: false });
   const identityPlan = isIdentityPagePlan(doc.plan, source.getPageCount());
@@ -368,6 +372,16 @@ export async function exportPdf(
       pdf.addPage(copied);
     }
   }
+  const written = await writePageEdits(pdf, doc, internal);
+  return { bytes: await pdf.save(), warnings: written.warnings, redaction: written.redaction };
+}
+
+/** The full export and ephemeral one-page preview share removal and every drawing handler. */
+export async function writePageEdits(
+  pdf: PDFDocument,
+  doc: EditDocument,
+  internal: PageWritingOptions = {},
+) {
   const editsByPage = groupBy(doc.edits, (edit) => edit.pageIndex);
   const warnings: string[] = [];
   const satisfiedTextCovers = new Set<CoverEdit>();
@@ -379,6 +393,7 @@ export async function exportPdf(
     satisfiedTextCovers,
     internal.removeCoveredText ?? REMOVE_COVERED_TEXT,
     internal.removeCoveredImages ?? REMOVE_COVERED_IMAGES,
+    internal.reader,
   );
 
   for (const [pageIndex, pageEdits] of editsByPage) {
@@ -393,6 +408,7 @@ export async function exportPdf(
     const context = makePageContext({ pdf, page, geometry, doc, warnings });
     const sortedEdits = pageEdits
       .filter((edit) => !(edit.kind === 'cover' && satisfiedTextCovers.has(edit)))
+      .filter((edit) => !(edit.kind === 'text' && internal.omitTextIds?.has(edit.id)))
       .sort((left, right) => left.z - right.z);
 
     for (const edit of sortedEdits) {
@@ -402,8 +418,8 @@ export async function exportPdf(
   }
 
   return {
-    bytes: await pdf.save(),
     warnings,
     redaction,
+    satisfiedCoverIds: new Set([...satisfiedTextCovers].map((cover) => cover.id)),
   };
 }

@@ -13,6 +13,9 @@ import {
   sampleCanvasTextBackground,
 } from '@/lib/export/inkExtent';
 import type { InkExtent } from '@/lib/export/inkExtent';
+import type { PagePreviewSelection } from '@/lib/export/exportPagePreview';
+import { textPreviewSelection } from '@/lib/pdf/textPreviewSelection';
+import type { PagePreviewBridge } from '@/lib/pdf/pagePreviewController';
 import {
   buildBulletListEdits,
   buildFreeTextEdits,
@@ -79,6 +82,7 @@ interface OverlayLayerProps {
   readonly peek: boolean;
   readonly locations: readonly DetectedLocation[];
   readonly locationNames: readonly string[];
+  readonly preview?: PagePreviewBridge;
 }
 
 interface ExistingBlock {
@@ -347,6 +351,7 @@ export function OverlayLayer({
   peek,
   locations,
   locationNames,
+  preview,
 }: OverlayLayerProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
@@ -356,6 +361,8 @@ export function OverlayLayer({
   const [ruleLines, setRuleLines] = useState<RuleLine[]>([]);
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
   const [activeBulletList, setActiveBulletList] = useState<BulletList | null>(null);
+  const [activeExisting, setActiveExisting] = useState<ExistingBlock>();
+  const [commitPending, setCommitPending] = useState(false);
   const [bulletCommitError, setBulletCommitError] = useState<string>();
   const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
   const [freeTextSession, setFreeTextSession] = useState<FreeTextSession | null>(null);
@@ -368,6 +375,19 @@ export function OverlayLayer({
   const [smartSelectionKey, setSmartSelectionKey] = useState(0);
   const { edits, addEdits, replaceEdits } = useEdits();
   const { getPageCanvas } = useDocumentStore();
+  const suspendPreview = preview?.suspend;
+  useEffect(() => {
+    suspendPreview?.(Boolean(freeTextSession || activeRuleLine));
+    return () => suspendPreview?.(false);
+  }, [freeTextSession, activeRuleLine, suspendPreview]);
+
+  const closeTextEditor = useCallback(() => {
+    setActiveBlock(null); setActiveBulletList(null); setActiveExisting(undefined);
+    setBulletCommitError(undefined); setCommitPending(false);
+  }, []);
+  useEffect(() => {
+    if (!editMode && activeBlock && !commitPending) { preview?.cancel(); closeTextEditor(); }
+  }, [editMode, activeBlock, commitPending, preview, closeTextEditor]);
 
   useEffect(() => {
     if (!page) {
@@ -574,6 +594,12 @@ export function OverlayLayer({
     return { covers: [anchor], texts };
   };
 
+  const selectionFor = (block: TextBlock, list?: BulletList): PagePreviewSelection => {
+    const existing = list ? findExistingBulletList(list) : findExisting(block);
+    return textPreviewSelection(block, existing, list, extendCoverToSourceInk);
+  };
+  const warmBlock = (block:TextBlock,list?:BulletList) => preview?.warm(selectionFor(block,list));
+
   const activeCoverGeometry = useMemo(() => {
     if (!activeBlock) return [];
     const covers = activeBulletList
@@ -734,9 +760,7 @@ export function OverlayLayer({
       return pdfRectToScreenRect(freeTextSession.block.rect, viewport, dpr);
     }
     if (!activeBlock) return undefined;
-    const existing = activeBulletList
-      ? findExistingBulletList(activeBulletList)
-      : findExisting(activeBlock);
+    const existing = activeExisting;
     const fallback = activeBulletList?.coverRect ?? activeBlock.rect;
     const sourceRect = activeBulletList
       ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
@@ -856,6 +880,10 @@ export function OverlayLayer({
   const showClickTargets = editMode && !(
     activeBlock || activeBulletList || activeRuleLine || freeTextSession
   );
+  const cleanActive = Boolean(preview && activeBlock && preview.state !== 'fallback');
+  const pendingPaint = commitPending && cleanActive;
+  const activeTextIds = new Set(activeExisting?.texts.map((edit)=>edit.id));
+  const isPainted = (id:string) => pendingPaint || preview?.renderedEditIds.has(id);
 
   return (
     <div
@@ -863,7 +891,7 @@ export function OverlayLayer({
       className="absolute inset-0"
       aria-label={`Text overlays for page ${pageIndex + 1}`}
     >
-      {pageCoverEdits.map((edit) => {
+      {pageCoverEdits.filter((edit)=>!isPainted(edit.id)).map((edit) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
         const background = edit.color ?? sampleBackground(edit.rect);
         return (
@@ -882,7 +910,7 @@ export function OverlayLayer({
         );
       })}
 
-      {markedTextEdits.map(({ edit, segments }) => {
+      {markedTextEdits.filter(({edit})=>!pendingPaint && !(cleanActive && activeTextIds.has(edit.id))).map(({ edit, segments }) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
         const marksHidden = filterCoveredSpans([{ rect: edit.rect }], activeCoverRects).length === 0;
         return (
@@ -895,6 +923,8 @@ export function OverlayLayer({
               width: rect.width,
               height: Math.max(rect.height, edit.style.fontSizePt * zoom),
               ...textStyleToCss(edit.style, zoom),
+              // Keep date/location hit targets when the PDF canvas owns glyph paint.
+              ...(isPainted(edit.id) ? {WebkitTextFillColor:'transparent'} : {}),
               textAlign: edit.align ?? 'left',
             }}
           >
@@ -910,7 +940,7 @@ export function OverlayLayer({
         );
       })}
 
-      {pageLineEdits.map((edit) => {
+      {pageLineEdits.filter((edit)=>!isPainted(edit.id)).map((edit) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
         return (
           <div
@@ -934,6 +964,8 @@ export function OverlayLayer({
         dpr={dpr}
         imageMode={imageMode}
         directMode={!editMode && !textAddMode && !imageMode && !peek}
+        renderedEditIds={pendingPaint ? new Set(edits.map((edit)=>edit.id)) : preview?.renderedEditIds}
+        onInteractionChange={suspendPreview}
       />
 
       <SmartSpanLayer
@@ -1034,6 +1066,9 @@ export function OverlayLayer({
             type="button"
             aria-label={`Text actions: ${labelText}`}
             title={labelText}
+            onPointerEnter={()=>warmBlock(target)}
+            onFocus={()=>warmBlock(target)}
+            onPointerDown={()=>warmBlock(target)}
             onClick={() => {
               setActiveRuleLine(null);
               setActiveBlock(null);
@@ -1070,6 +1105,9 @@ export function OverlayLayer({
             type="button"
             aria-label={`Bullet list actions: ${label}`}
             title={label}
+            onPointerEnter={()=>warmBlock(list.block,list)}
+            onFocus={()=>warmBlock(list.block,list)}
+            onPointerDown={()=>warmBlock(list.block,list)}
             onClick={() => {
               setActiveRuleLine(null);
               setActiveBlock(null);
@@ -1143,6 +1181,9 @@ export function OverlayLayer({
             key={`re-edit-${block.pageIndex}-${index}`}
             type="button"
             aria-label={`Text actions for edited text: ${sourceText(existing.texts).replace(/\s+/g, ' ').trim()}`}
+            onPointerEnter={()=>warmBlock(target)}
+            onFocus={()=>warmBlock(target)}
+            onPointerDown={()=>warmBlock(target)}
             onClick={() => {
               setActiveRuleLine(null);
               setActiveBlock(null);
@@ -1168,6 +1209,9 @@ export function OverlayLayer({
           screenRect={popoverTarget.screenRect}
           pageWidth={viewport.width / dpr}
           onEdit={() => {
+            setActiveExisting(popoverTarget.bulletList ? findExistingBulletList(popoverTarget.bulletList) : findExisting(popoverTarget.block));
+            setCommitPending(false);
+            preview?.begin(selectionFor(popoverTarget.block,popoverTarget.bulletList),closeTextEditor);
             setActiveBulletList(popoverTarget.bulletList ?? null);
             setBulletCommitError(undefined);
             setActiveBlock(
@@ -1211,9 +1255,7 @@ export function OverlayLayer({
       })()}
 
       {activeBlock && (() => {
-        const existing = activeBulletList
-          ? findExistingBulletList(activeBulletList)
-          : findExisting(activeBlock);
+        const existing = activeExisting;
         const fallback = activeBulletList?.coverRect ?? activeBlock.rect;
         const sourceRect = activeBulletList
           ? (existing && existing.texts.length > 0 ? textBoxRect(existing.texts) : fallback)
@@ -1245,7 +1287,7 @@ export function OverlayLayer({
           : undefined;
         return (
           <>
-            {activeCoverGeometry.map(({ sourceRect: cover, displayRect }, index) => {
+            {!cleanActive && activeCoverGeometry.map(({ sourceRect: cover, displayRect }, index) => {
               const rect = pdfRectToScreenRect(displayRect, viewport, dpr);
               return (
                 <div
@@ -1276,6 +1318,8 @@ export function OverlayLayer({
                 activeBulletList?.coverRect ?? activeBlock.rect,
                 activeBlock.style.color,
               ))}
+              previewMode={!cleanActive ? 'legacy' : preview?.state === 'preparing-edit' ? 'preparing' : 'clean'}
+              committing={commitPending}
               verticalTargets={verticalTargets}
               horizontalTargets={horizontalTargets}
               onMoveStateChange={setMoveGuideState}
@@ -1289,9 +1333,7 @@ export function OverlayLayer({
               } : undefined}
               externalError={bulletCommitError}
               onCancel={() => {
-                setActiveBlock(null);
-                setActiveBulletList(null);
-                setBulletCommitError(undefined);
+                preview?.cancel(); closeTextEditor();
               }}
               onDone={(next) => {
                 const nextZ = edits.reduce((max, edit) => Math.max(max, edit.z), 0) + 1;
@@ -1319,15 +1361,14 @@ export function OverlayLayer({
                       activeCoverGeometry[0]?.extent,
                     )
                   ));
+                  if (cleanActive) {setCommitPending(true);preview?.commit(closeTextEditor);}
                   replaceEdits(
                     existing
                       ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
                       : [],
                     [...covers, ...built.texts],
                   );
-                  setActiveBlock(null);
-                  setActiveBulletList(null);
-                  setBulletCommitError(undefined);
+                  if (!cleanActive) closeTextEditor();
                   return;
                 }
                 const wrappedLines = wrapNextText(next);
@@ -1345,13 +1386,14 @@ export function OverlayLayer({
                     activeCoverGeometry[index]?.extent,
                   )
                 ));
+                if (cleanActive) {setCommitPending(true);preview?.commit(closeTextEditor);}
                 replaceEdits(
                   existing
                     ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
                     : [],
                   [...covers, ...built.texts],
                 );
-                setActiveBlock(null);
+                if (!cleanActive) closeTextEditor();
               }}
             />
           </>

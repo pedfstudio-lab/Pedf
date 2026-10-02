@@ -11,6 +11,7 @@ import type { SnapTarget } from '@/lib/edit/moveSnap';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ImageRegion } from '@/lib/pdf/images';
 import type { RuleLine } from '@/lib/pdf/ruleLines';
+import type { PagePreviewBridge } from '@/lib/pdf/pagePreviewController';
 import { buildTextBlockEdits, coverRectForTextBlock } from '@/lib/edit/buildTextEdits';
 import { OverlayLayer } from './OverlayLayer';
 
@@ -135,7 +136,7 @@ vi.mock('./ImageOverlay', () => ({ ImageOverlay: () => null }));
 vi.mock('./SmartSpanLayer', () => ({ SmartSpanLayer: () => null }));
 vi.mock('./LineEditOverlay', () => ({ LineEditOverlay: () => null }));
 
-function renderOverlay() {
+function renderOverlay(preview?: PagePreviewBridge, locationNames: readonly string[] = []) {
   render(
     <OverlayLayer
       page={{ view: [0, 0, 600, 800] } as unknown as PDFPageProxy}
@@ -148,7 +149,8 @@ function renderOverlay() {
       imageMode={false}
       peek={false}
       locations={[]}
-      locationNames={[]}
+      locationNames={locationNames}
+      preview={preview}
     />,
   );
 }
@@ -237,6 +239,13 @@ describe('OverlayLayer editor top correction', () => {
 });
 
 describe('OverlayLayer text click targets', () => {
+  it('retains inline smart-action hit targets without painting committed glyphs twice', async () => {
+    mocks.edits=[{id:'saved',kind:'text',origin:'free',pageIndex:0,z:2,text:'Jaipur',style,
+      rect:{x:40,y:500,w:100,h:20}}];
+    renderOverlay({state:'committed',renderedEditIds:new Set(['saved']),begin:vi.fn(),warm:vi.fn(),cancel:vi.fn(),commit:vi.fn(),suspend:vi.fn()}, ['Jaipur']);
+    const word=await screen.findByRole('button',{name:'Location actions: Jaipur'});
+    expect(word.parentElement?.style.webkitTextFillColor).toBe('transparent');
+  });
   it('keeps a dense page target band below the editor while preserving area order', async () => {
     mocks.blocks = Array.from({ length: 40 }, (_, index) => ({
       ...textBlock,

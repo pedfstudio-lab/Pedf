@@ -168,6 +168,42 @@ afterEach(() => {
   Reflect.deleteProperty(document, 'execCommand');
 });
 
+describe('native input during preview preparation', () => {
+  it.each(['clean', 'legacy'] as const)('preserves the focused DOM and composition when preparation becomes %s', (mode) => {
+    const onDone = vi.fn();
+    const make = (previewMode: 'preparing' | 'clean' | 'legacy', committing = false) => (
+      <TextEditOverlay block={block('Heading', 24)} screenRect={{left:40,top:100,width:240,height:20}}
+        zoom={1} pageWidthPt={600} pageSizePx={{width:600,height:800}} backgroundColor="white"
+        verticalTargets={[]} horizontalTargets={[]} onMoveStateChange={vi.fn()}
+        onDone={onDone} onCancel={vi.fn()} previewMode={previewMode} committing={committing} />
+    );
+    const view = render(make('preparing'));
+    const editor = screen.getByRole('textbox', {name:'Editable text'});
+    expect(document.activeElement).toBe(editor);
+    expect(editor.style.webkitTextFillColor).toBe('transparent');
+    fireEvent.compositionStart(editor);
+    editor.textContent = 'English नमस्ते தமிழ்';
+    fireEvent.input(editor);
+    placeCaretAtTextEnd(editor.firstChild!);
+    const anchor = window.getSelection()?.anchorNode;
+    view.rerender(make(mode));
+    expect(screen.getByRole('textbox', {name:'Editable text'})).toBe(editor);
+    expect(document.activeElement).toBe(editor);
+    expect(window.getSelection()?.anchorNode).toBe(anchor);
+    expect(editor.textContent).toBe('English नमस्ते தமிழ்');
+    fireEvent.click(screen.getByRole('button', {name:'Done'}));
+    expect(onDone).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(editor);
+    fireEvent.click(screen.getByRole('button', {name:'Done'}));
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone.mock.calls[0]?.[0].text).toBe('English नमस्ते தமிழ்');
+    view.rerender(make(mode, true));
+    expect(editor.getAttribute('contenteditable')).toBe('false');
+    expect(screen.getByRole('button', {name:'Done'}).hasAttribute('disabled')).toBe(true);
+    expect(editor.textContent).toBe('English नमस्ते தமிழ்');
+  });
+});
+
 describe('TextEditOverlay appearance controls', () => {
   it('shows the source text colour in the toolbar swatch', () => {
     renderEditor({
