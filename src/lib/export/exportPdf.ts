@@ -107,6 +107,23 @@ async function readForRedaction(
   return pdfjs.getDocument(options).promise;
 }
 
+/**
+ * Whether a cover takes part in text removal.
+ *
+ * A cover with no pictures always does - including an older cover that names no
+ * replacements and removes whatever text lies under it. A cover that carries
+ * pictures takes part only when it also names the text it replaces: that is a
+ * bullet list whose markers are images, and without this its old words stayed in
+ * the exported file, hidden under the patch.
+ *
+ * A picture-only cover - a deleted or moved photo - must never be let in. It
+ * names no replacements, so it would remove every glyph beneath the picture.
+ */
+function removesText(edit: EditDocument['edits'][number]): edit is CoverEdit {
+  return edit.kind === 'cover'
+    && (edit.replacesImages === undefined || (edit.replaces?.length ?? 0) > 0);
+}
+
 async function removeCoveredContent(
   pdf: PDFDocument,
   doc: EditDocument,
@@ -118,7 +135,7 @@ async function removeCoveredContent(
   sharedReader?: PageWritingOptions['reader'],
 ): Promise<ExportRedactionResult> {
   const textPages = [...editsByPage.entries()].flatMap(([pageIndex, edits]) => (
-    edits.some((edit) => edit.kind === 'cover' && edit.replacesImages === undefined) ? [pageIndex] : []
+    edits.some(removesText) ? [pageIndex] : []
   ));
   const imagePages = [...editsByPage.entries()].flatMap(([pageIndex, edits]) => (
     edits.some((edit) => edit.kind === 'cover' && (edit.replacesImages?.length ?? 0) > 0)
@@ -197,9 +214,7 @@ async function removeCoveredContent(
           const operatorList = await sourcePage.getOperatorList({ annotationMode: 0 });
           const viewport = sourcePage.getViewport({ scale: 1, rotation: 0 });
           const pageEdits = editsByPage.get(pageIndex) ?? [];
-          const textCoverEdits = pageEdits.filter((edit): edit is CoverEdit => (
-            edit.kind === 'cover' && edit.replacesImages === undefined
-          ));
+          const textCoverEdits = pageEdits.filter(removesText);
           const textCovers = textCoverEdits.map((edit) => ({
             rect: edit.rect,
             replaces: edit.replaces,
@@ -267,7 +282,11 @@ async function removeCoveredContent(
             removedItems += textPlan?.removedItems ?? 0;
             textPlan?.satisfied.forEach((satisfied, index) => {
               const cover = textCoverEdits[index];
-              if (satisfied && cover) satisfiedTextCovers.add(cover);
+              // A cover that also replaces pictures keeps its patch: its words
+              // are gone, but only a picture-free cover is known to leave no hole.
+              if (satisfied && cover && cover.replacesImages === undefined) {
+                satisfiedTextCovers.add(cover);
+              }
             });
             removedImages += imagePlan?.removedImages ?? 0;
           } else if (!textReason && textPlan) {
@@ -288,7 +307,9 @@ async function removeCoveredContent(
               removedItems += textPlan.removedItems;
               textPlan.satisfied.forEach((satisfied, index) => {
                 const cover = textCoverEdits[index];
-                if (satisfied && cover) satisfiedTextCovers.add(cover);
+                if (satisfied && cover && cover.replacesImages === undefined) {
+                  satisfiedTextCovers.add(cover);
+                }
               });
             }
           } else if (!imageReason && imagePlan) {

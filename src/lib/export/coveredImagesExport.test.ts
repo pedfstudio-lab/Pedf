@@ -461,6 +461,26 @@ describe('covered image export', () => {
     }
   });
 
+  it('deletes a photo without taking the words drawn on top of it', async () => {
+    // A picture-only cover names no text. Let into text removal it would take
+    // every glyph beneath the photo, so it must stay out.
+    const rect = { x: 25, y: 35, w: 180, h: 140 };
+    const source = await PDFDocument.create({ updateMetadata: false });
+    const page = source.addPage([240, 220]);
+    drawRef(source, 0, rawPhoto(source, 360, 280), rect);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    page.drawText('HEADING ON THE PHOTO', { x: 40, y: 100, size: 12, font });
+    const originalBytes = await source.save({ useObjectStreams: false });
+    const exported = await exportPdf({
+      originalBytes,
+      pages: [geometry(0)],
+      edits: [cover(0, rect)],
+    });
+
+    expect(exported.redaction).toMatchObject({ removedImages: 1, removedItems: 0 });
+    expect(await textSnapshot(exported.bytes)).toEqual(await textSnapshot(originalBytes));
+  });
+
   it('removes one page draw of a shared image while preserving the other page', async () => {
     const rect = { x: 30, y: 45, w: 120, h: 90 };
     const source = await PDFDocument.create({ updateMetadata: false });
@@ -619,14 +639,35 @@ describe('covered image export', () => {
         dx: 0,
         dy: 0,
       }, items, 1, 100);
+      const sampled: PdfRect[] = [];
       const removed = await exportPdf({
         originalBytes: bytes,
         pages: [geometry(0, 260, 220)],
         edits: [...built.covers, ...built.texts],
+        sampleBackground: (_pageIndex, rect) => {
+          sampled.push(rect);
+          return { r: 1, g: 1, b: 1 };
+        },
       });
       expect(removed.redaction).toMatchObject({ removedImages: 2, imageSkippedPages: 0 });
       const reopened = await PDFDocument.load(removed.bytes, { updateMetadata: false });
       expect(imageDrawsInContent(reopened, 0)).toEqual([]);
+
+      // The markers were always removed. The words were not: a cover carrying
+      // pictures was kept out of text removal, so the old items stayed in the
+      // file under the patch, findable by search and by anything reading text.
+      expect(removed.redaction.removedItems).toBeGreaterThan(0);
+      expect(removed.warnings).toEqual([]);
+      const exportedText = (await textSnapshot(removed.bytes))
+        .map((item) => String((item as [string, number, number])[0]))
+        .join(' ');
+      expect(exportedText).not.toContain('OLD FIRST ITEM');
+      expect(exportedText).not.toContain('OLD SECOND ITEM');
+      expect(exportedText).toContain('NEW FIRST ITEM');
+      expect(exportedText).toContain('NEW SECOND ITEM');
+      // The cover is still painted: only a picture-free cover is known to leave
+      // no hole.
+      expect(sampled).toHaveLength(1);
     } finally {
       await reader.destroy();
     }
