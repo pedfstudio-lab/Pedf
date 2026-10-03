@@ -12904,11 +12904,11 @@ is refused rather than approximated, and must be coloured by hand.
 
 ---
 
-#### Task 74 — Step 5b  🔄 IN REVIEW → branch `live-page-preview` **from `main`, after Step 5a is merged** — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
+#### Task 74 — Step 5b  ✅ DONE → merged to `main` and live (`610945f`) — edit text on the real page, not on a painted rectangle   *(Large · 3–4 days)*
 
-Implementation and automated preview checks are available on `live-page-preview`. See
-[`TASK74_STEP5B_REPORT.md`](TASK74_STEP5B_REPORT.md) for timing, corpus evidence, the reproduced pre-existing
-corpus count failure, and remaining browser/user workflow approval. This step is not merged or marked complete.
+Merged to `main` on the user's approval and deployed. See [`TASK74_STEP5B_REPORT.md`](TASK74_STEP5B_REPORT.md) for
+timing and corpus evidence. Two follow-up fixes and a test-count correction shipped with it; they are recorded
+under **Follow-up fixes** at the end of this step.
 
 **What the user hit.** Clicking the white `BHUTAN` heading opens a large opaque rectangle that hides most of the
 photograph. Clicking a table cell paints a rectangle across its fill and dividers while the editor is open. The
@@ -12997,6 +12997,11 @@ omits the selected replacement. That reveals the real page behind the selected t
 
 If the selected cover is unsatisfied, also replaces an image, the page rewrite is refused, or the paint cannot be
 represented safely, the preview is not clean — use the existing cover-based fallback.
+
+*Changed after review (Fix 2):* a cover that also replaces images — a bullet list whose dots are pictures — is now
+clean when its words **and every dot picture on the page** are proven removed. If one dot picture cannot be found,
+the cover is unsatisfied and the list falls back to the patch as before. A picture-only cover (a deleted or moved
+photo) is unaffected.
 
 **Change 2 — give each page an explicit rendering state.**
 `PageCanvas` owns these states:
@@ -13186,6 +13191,34 @@ untouched.
 **Land:** branch `live-page-preview`. Commit: `Edit text on the real page, not on a painted rectangle (Task 74,
 Step 5b)`. Merge only after every fallback has a reason, the pixel checks pass, and the user approves the Bhutan,
 paragraph, table-cell and list workflow.
+
+**Follow-up fixes (shipped with 5b).** Found while reviewing 5b; 18 of 144 corpus lists, all in the five Rahul
+résumé copies, have picture dots.
+
+- **Fix 1 — old words left in the file** (`fc3f005`). Editing a list whose dots are pictures removed the dot
+  pictures but left the old words in the exported file, hidden under the patch and findable by search: a cover that
+  carried pictures was kept out of text removal. `exportPdf.ts` now lets such a cover remove text when it also names
+  the text it replaces (`removesText`). A picture-only cover is never let in, so words on top of a deleted photo
+  stay. Résumé: 38 and 75 text items removed, old words gone, no warnings.
+- **Fix 2 — no patch behind those lists** (`610945f`). The cover is skipped when its words are satisfied and the
+  page's image plan found and removed every named picture (no unmatched, none outside the cover). The blanket
+  refusal *"The selected cover also replaces an image"* is removed from `exportPagePreview.ts`; the existing
+  satisfied-cover check still refuses otherwise. Résumé: 0 patches painted on both lists; their pixels match an
+  export with a white patch forced in (0 differing, against 62,242 and 50,011 changed from the original), so the
+  patch hid nothing. `TASK74_PREVIEW`: 40 clean of 49 selections, 9 reasoned fallbacks.
+- **Test-count correction** (`6f17041`). `neighbourBoxWidth.test.ts` expected 475 non-left blocks; Step 2 Revision 2
+  rejoined 65 lone fragments into their paragraphs (54 left, 10 centred, 1 right) and formed 6 joined centred
+  blocks, so 416. All 65 were found word for word inside larger blocks. Narrowing unchanged: 85 on first edit and
+  on re-edit.
+
+Tests: `coveredImagesExport.test.ts` (photo-trap, list with no patch, tinted background shows through, missing dot
+keeps the patch), `exportPagePreview.test.ts` (picture-dot list is clean; a missing dot picture is refused) and
+`bulletLeftover.local.test.ts` (the résumé, under `TASK74_REAL=1`). Each new test was shown to fail on the earlier
+code or on a careless version of the fix.
+
+**Still open from this review:** the bullet editor drops a word's original bold, italic or colour inside an item
+when the list is opened for editing (Problem 2, see Step 5a's known limit); the new dots are still drawn as a typed
+"•".
 
 ---
 
