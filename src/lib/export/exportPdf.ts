@@ -280,11 +280,15 @@ async function removeCoveredContent(
           if (!textReason && !imageReason) {
             removedImageRefs.push(...tree.apply(rewritten, imagePlan?.removedResources));
             removedItems += textPlan?.removedItems ?? 0;
+            // A cover that also replaces pictures - a list whose markers are images -
+            // leaves no hole only when every picture named on this page was found and
+            // taken out. If one was not, its patch stays.
+            const picturesGone = imagePlan !== undefined
+              && imagePlan.unmatchedImages === 0
+              && imagePlan.outsideCoverImages === 0;
             textPlan?.satisfied.forEach((satisfied, index) => {
               const cover = textCoverEdits[index];
-              // A cover that also replaces pictures keeps its patch: its words
-              // are gone, but only a picture-free cover is known to leave no hole.
-              if (satisfied && cover && cover.replacesImages === undefined) {
+              if (satisfied && cover && (cover.replacesImages === undefined || picturesGone)) {
                 satisfiedTextCovers.add(cover);
               }
             });
@@ -307,6 +311,7 @@ async function removeCoveredContent(
               removedItems += textPlan.removedItems;
               textPlan.satisfied.forEach((satisfied, index) => {
                 const cover = textCoverEdits[index];
+                // The pictures were not removed here, so a cover naming any keeps its patch.
                 if (satisfied && cover && cover.replacesImages === undefined) {
                   satisfiedTextCovers.add(cover);
                 }

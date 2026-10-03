@@ -104,9 +104,6 @@ export async function exportPagePreview(
       if (selection.unsafeReason) reason = selection.unsafeReason;
       else if (!selection.paintSupported) reason = 'The source text paint cannot be represented safely.';
       else if (selection.coverIds.length === 0) reason = 'The selection has no removable source text.';
-      else if ([...pageEdits, ...transient].some((edit) => (
-        edit.kind === 'cover' && selection.coverIds.includes(edit.id) && edit.replacesImages !== undefined
-      ))) reason = 'The selected cover also replaces an image.';
       else if (selection.coverIds.some((id) => !written.satisfiedCoverIds.has(id))) {
         reason = written.warnings[0] ?? 'Not every selected source glyph could be removed safely.';
       }

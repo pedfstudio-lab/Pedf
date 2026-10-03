@@ -10,6 +10,9 @@ import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import type { CoverEdit, EditDocument, TextEdit } from './types';
 import { detectBulletListFromRegions } from '@/lib/pdf/bulletList';
 import { textPreviewSelection } from '@/lib/pdf/textPreviewSelection';
+import { imageRegionsFromOperatorList } from '@/lib/pdf/images';
+import { imageDrawsInContent } from '@/lib/images/extractImage';
+const BLACK_PIXEL_PNG_BASE64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const canvasModule = await import('@napi-rs/canvas').catch(()=>undefined);
 const standardFontDataUrl = resolve('node_modules/pdfjs-dist/standard_fonts') + '/';
 
@@ -105,14 +108,40 @@ describe('one-page preview',()=>{
       expect(blank.text).toBe('');expect(blank.page.view).toEqual([0,0,250,300]);
     } finally {f.source.dispose();await f.reader.destroy();}
   });
-  it('rejects unsatisfied removal, unsupported paint and image-cover selections with a reason',async()=>{
+  it('removes picture list markers and items, leaving no patch',async()=>{
+    const pdf=await PDFDocument.create(),font=await pdf.embedFont(StandardFonts.Helvetica);
+    const page=pdf.addPage([360,440]);
+    const dot=await pdf.embedPng(Buffer.from(BLACK_PIXEL_PNG_BASE64,'base64'));
+    page.drawImage(dot,{x:28,y:332,width:5,height:5});
+    page.drawText('First list item',{x:40,y:330,size:12,font});
+    page.drawImage(dot,{x:28,y:318,width:5,height:5});
+    page.drawText('Second list item',{x:40,y:316,size:12,font});
+    page.drawText('Neighbour section',{x:30,y:250,size:12,font});
+    const originalBytes=await pdf.save(),reader=await getDocument({data:originalBytes.slice(),fontExtraProperties:true,verbosity:0}).promise;
+    const source=new PagePreviewSource(originalBytes,reader);
+    try {
+      const sourcePage=await reader.getPage(1);
+      const regions=imageRegionsFromOperatorList(await sourcePage.getOperatorList(),sourcePage.getViewport({scale:1}),0);
+      const blocks=groupRunsIntoBlocks(await extractTextRuns(sourcePage,0),{ruleLines:[],markers:regions});
+      const list=blocks.map((block)=>detectBulletListFromRegions(block,regions)).find((list)=>list!==null);
+      expect(list?.items.length).toBe(2);expect(list?.items.every((item)=>item.markerImage)).toBe(true);
+      const selection=textPreviewSelection(list!.block,undefined,list!);
+      const result=await exportPagePreview({document:{originalBytes,pages:[{pageIndex:0,widthPt:360,heightPt:440,rotation:0,boxOffset:{x:0,y:0}}],edits:[]},pageIndex:0,selection},source);
+      expect(result.reason).toBeUndefined();expect(result.clean).toBe(true);
+      const extracted=await text(result.bytes);
+      expect(extracted.text).not.toContain('list item');expect(extracted.text).toContain('Neighbour section');
+      expect(imageDrawsInContent(await PDFDocument.load(result.bytes),0)).toEqual([]);
+    } finally {source.dispose();await reader.destroy();}
+  });
+  it('rejects unsatisfied removal, unsupported paint and a marker picture that cannot be found with a reason',async()=>{
     const f=await fixture();
     try {
       const unmatched:CoverEdit={...f.built.covers[0]!,id:'unmatched',replaces:[{text:'NOT IN THE FILE',rect:f.built.covers[0]!.rect}]};
+      const missingPicture:CoverEdit={...f.built.covers[0]!,id:'image',replacesImages:[{kind:'image',rect:{x:20,y:20,w:5,h:5}}]};
       for (const selection of [
         {...f.selection,paintSupported:false},
         {...f.selection,coverIds:['unmatched'],transientEdits:[unmatched]},
-        {...f.selection,coverIds:['image'],transientEdits:[{...unmatched,id:'image',replacesImages:[]}]},
+        {...f.selection,coverIds:['image'],transientEdits:[missingPicture]},
       ]) {
         const result=await exportPagePreview({document:f.doc,pageIndex:1,selection},f.source);
         expect(result.clean).toBe(false);expect(result.reason).toBeTruthy();

@@ -15,6 +15,7 @@ import {
   pushGraphicsState,
   rectangle,
   degrees,
+  rgb,
   StandardFonts,
 } from 'pdf-lib';
 import { buildBulletListEdits } from '@/lib/edit/buildTextEdits';
@@ -597,79 +598,146 @@ describe('covered image export', () => {
   });
 
   it('removes image bullet markers when an image-backed list is edited', async () => {
-    const source = await PDFDocument.create({ updateMetadata: false });
-    const page = source.addPage([260, 220]);
-    const marker = rawPhoto(source, 4, 4);
-    drawRef(source, 0, marker, { x: 28, y: 152, w: 5, h: 5 }, 'Bullet');
-    drawRef(source, 0, marker, { x: 28, y: 138, w: 5, h: 5 }, 'Bullet');
-    const font = await source.embedFont(StandardFonts.Helvetica);
-    page.drawText('OLD FIRST ITEM', { x: 40, y: 150, size: 12, font });
-    page.drawText('OLD SECOND ITEM', { x: 40, y: 136, size: 12, font });
-    const bytes = await source.save({ useObjectStreams: false });
-    const reader = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
-    try {
-      const sourcePage = await reader.getPage(1);
-      const operatorList = await sourcePage.getOperatorList();
-      const regions = imageRegionsFromOperatorList(operatorList, sourcePage.getViewport({ scale: 1 }), 0);
-      const blocks = groupRunsIntoBlocks(await extractTextRuns(sourcePage, 0));
-      const lines = blocks.flatMap((block) => block.lines);
-      const left = Math.min(...lines.map((line) => line.rect.x));
-      const bottom = Math.min(...lines.map((line) => line.rect.y));
-      const right = Math.max(...lines.map((line) => line.rect.x + line.rect.w));
-      const top = Math.max(...lines.map((line) => line.rect.y + line.rect.h));
-      const firstBlock = blocks[0];
-      if (!firstBlock) throw new Error('Image bullet fixture has no text block.');
-      const block = {
-        ...firstBlock,
-        text: lines.map((line) => line.text).join('\n'),
-        rect: { x: left, y: bottom, w: right - left, h: top - bottom },
-        lines,
-      };
-      const list = detectBulletListFromRegions(block, regions);
-      expect(list).not.toBeNull();
-      if (!list) throw new Error('Image bullet fixture was not detected.');
-      const items = [{ text: 'NEW FIRST ITEM', lines: ['NEW FIRST ITEM'] }, {
-        text: 'NEW SECOND ITEM', lines: ['NEW SECOND ITEM'],
-      }];
-      const built = buildBulletListEdits(list, {
-        text: formatBulletEditorText(items.map((item) => item.text)),
-        style: list.block.style,
-        width: list.coverRect.w,
-        height: list.coverRect.h,
-        dx: 0,
-        dy: 0,
-      }, items, 1, 100);
-      const sampled: PdfRect[] = [];
-      const removed = await exportPdf({
-        originalBytes: bytes,
-        pages: [geometry(0, 260, 220)],
-        edits: [...built.covers, ...built.texts],
-        sampleBackground: (_pageIndex, rect) => {
-          sampled.push(rect);
-          return { r: 1, g: 1, b: 1 };
-        },
-      });
-      expect(removed.redaction).toMatchObject({ removedImages: 2, imageSkippedPages: 0 });
-      const reopened = await PDFDocument.load(removed.bytes, { updateMetadata: false });
-      expect(imageDrawsInContent(reopened, 0)).toEqual([]);
+    const { bytes, built } = await imageBulletList(['NEW FIRST ITEM', 'NEW SECOND ITEM']);
+    const sampled: PdfRect[] = [];
+    const removed = await exportPdf({
+      originalBytes: bytes,
+      pages: [geometry(0, 260, 220)],
+      edits: [...built.covers, ...built.texts],
+      sampleBackground: (_pageIndex, rect) => {
+        sampled.push(rect);
+        return { r: 1, g: 1, b: 1 };
+      },
+    });
+    expect(removed.redaction).toMatchObject({ removedImages: 2, imageSkippedPages: 0 });
+    const reopened = await PDFDocument.load(removed.bytes, { updateMetadata: false });
+    expect(imageDrawsInContent(reopened, 0)).toEqual([]);
 
-      // The markers were always removed. The words were not: a cover carrying
-      // pictures was kept out of text removal, so the old items stayed in the
-      // file under the patch, findable by search and by anything reading text.
-      expect(removed.redaction.removedItems).toBeGreaterThan(0);
-      expect(removed.warnings).toEqual([]);
-      const exportedText = (await textSnapshot(removed.bytes))
-        .map((item) => String((item as [string, number, number])[0]))
-        .join(' ');
-      expect(exportedText).not.toContain('OLD FIRST ITEM');
-      expect(exportedText).not.toContain('OLD SECOND ITEM');
-      expect(exportedText).toContain('NEW FIRST ITEM');
-      expect(exportedText).toContain('NEW SECOND ITEM');
-      // The cover is still painted: only a picture-free cover is known to leave
-      // no hole.
-      expect(sampled).toHaveLength(1);
-    } finally {
-      await reader.destroy();
+    // The markers were always removed. The words were not: a cover carrying
+    // pictures was kept out of text removal, so the old items stayed in the
+    // file under the patch, findable by search and by anything reading text.
+    expect(removed.redaction.removedItems).toBeGreaterThan(0);
+    expect(removed.warnings).toEqual([]);
+    const exportedText = (await textSnapshot(removed.bytes))
+      .map((item) => String((item as [string, number, number])[0]))
+      .join(' ');
+    expect(exportedText).not.toContain('OLD FIRST ITEM');
+    expect(exportedText).not.toContain('OLD SECOND ITEM');
+    expect(exportedText).toContain('NEW FIRST ITEM');
+    expect(exportedText).toContain('NEW SECOND ITEM');
+    // Words and markers are both gone, so nothing is left to hide: no patch.
+    expect(sampled).toEqual([]);
+  });
+
+  it.skipIf(!optionalCanvas)('shows the real page behind an edited image-backed list, not a patch', async () => {
+    const tint = { r: 0.85, g: 0.92, b: 1 };
+    const { bytes, built, list } = await imageBulletList(['NEW A', 'NEW B'], tint);
+    const removed = await exportPdf({
+      originalBytes: bytes,
+      pages: [geometry(0, 260, 220)],
+      edits: [...built.covers, ...built.texts],
+      // A patch would be white: a white patch on the tinted page is what this rules out.
+      sampleBackground: () => ({ r: 1, g: 1, b: 1 }),
+    });
+    expect(removed.warnings).toEqual([]);
+    // The part of the old list's area that the shorter new items leave empty must be
+    // the page's own tint, with no old ink and no white rectangle.
+    const cover = built.covers[0]!.rect;
+    const emptyLeft = list.textX + 40;
+    const empty = { x: emptyLeft, y: cover.y + 1, w: cover.x + cover.w - 1 - emptyLeft, h: cover.h - 2 };
+    expect(empty.w).toBeGreaterThan(20);
+    const pixels = cropImageData(await renderPage(removed.bytes, 1), empty, 220);
+    const expected = [tint.r, tint.g, tint.b].map((channel) => Math.round(channel * 255));
+    let off = 0;
+    for (let index = 0; index < pixels.data.length; index += 4) {
+      if (expected.some((channel, offset) => Math.abs((pixels.data[index + offset] ?? 0) - channel) > 2)) off += 1;
     }
+    expect(off).toBe(0);
+  });
+
+  it('keeps the patch when one of the list markers cannot be found', async () => {
+    const { bytes, built } = await imageBulletList(['NEW FIRST ITEM', 'NEW SECOND ITEM']);
+    const [listCover, ...rest] = built.covers;
+    if (!listCover?.replacesImages) throw new Error('The list cover names no marker pictures.');
+    const [firstMarker, ...otherMarkers] = listCover.replacesImages;
+    const misplaced: CoverEdit = {
+      ...listCover,
+      replacesImages: [
+        { ...firstMarker!, rect: { ...firstMarker!.rect, x: firstMarker!.rect.x + 60 } },
+        ...otherMarkers,
+      ],
+    };
+    const sampled: PdfRect[] = [];
+    const removed = await exportPdf({
+      originalBytes: bytes,
+      pages: [geometry(0, 260, 220)],
+      edits: [misplaced, ...rest, ...built.texts],
+      sampleBackground: (_pageIndex, rect) => {
+        sampled.push(rect);
+        return { r: 1, g: 1, b: 1 };
+      },
+    });
+    expect(removed.redaction).toMatchObject({ removedImages: 1, unmatchedImages: 1 });
+    expect(removed.warnings.some((warning) => warning.includes('could not be found'))).toBe(true);
+    // The old words still go; the patch stays over the marker that was not removed.
+    const exportedText = (await textSnapshot(removed.bytes))
+      .map((item) => String((item as [string, number, number])[0]))
+      .join(' ');
+    expect(exportedText).not.toContain('OLD FIRST ITEM');
+    expect(sampled).toHaveLength(1);
   });
 });
+
+/** Two items whose markers are 5 pt pictures, as the résumé lists draw them. */
+async function imageBulletList(
+  newItems: readonly string[],
+  background?: { readonly r: number; readonly g: number; readonly b: number },
+) {
+  const source = await PDFDocument.create({ updateMetadata: false });
+  const page = source.addPage([260, 220]);
+  if (background) {
+    page.drawRectangle({ x: 0, y: 0, width: 260, height: 220, color: rgb(background.r, background.g, background.b) });
+  }
+  const marker = rawPhoto(source, 4, 4);
+  drawRef(source, 0, marker, { x: 28, y: 152, w: 5, h: 5 }, 'Bullet');
+  drawRef(source, 0, marker, { x: 28, y: 138, w: 5, h: 5 }, 'Bullet');
+  const font = await source.embedFont(StandardFonts.Helvetica);
+  page.drawText('OLD FIRST ITEM', { x: 40, y: 150, size: 12, font });
+  page.drawText('OLD SECOND ITEM', { x: 40, y: 136, size: 12, font });
+  const bytes = await source.save({ useObjectStreams: false });
+  const reader = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  try {
+    const sourcePage = await reader.getPage(1);
+    const operatorList = await sourcePage.getOperatorList();
+    const regions = imageRegionsFromOperatorList(operatorList, sourcePage.getViewport({ scale: 1 }), 0);
+    const blocks = groupRunsIntoBlocks(await extractTextRuns(sourcePage, 0));
+    const lines = blocks.flatMap((block) => block.lines);
+    const left = Math.min(...lines.map((line) => line.rect.x));
+    const bottom = Math.min(...lines.map((line) => line.rect.y));
+    const right = Math.max(...lines.map((line) => line.rect.x + line.rect.w));
+    const top = Math.max(...lines.map((line) => line.rect.y + line.rect.h));
+    const firstBlock = blocks[0];
+    if (!firstBlock) throw new Error('Image bullet fixture has no text block.');
+    const block = {
+      ...firstBlock,
+      text: lines.map((line) => line.text).join('\n'),
+      rect: { x: left, y: bottom, w: right - left, h: top - bottom },
+      lines,
+    };
+    const list = detectBulletListFromRegions(block, regions);
+    expect(list).not.toBeNull();
+    if (!list) throw new Error('Image bullet fixture was not detected.');
+    const items = newItems.map((text) => ({ text, lines: [text] }));
+    const built = buildBulletListEdits(list, {
+      text: formatBulletEditorText(newItems),
+      style: list.block.style,
+      width: list.coverRect.w,
+      height: list.coverRect.h,
+      dx: 0,
+      dy: 0,
+    }, items, 1, 100);
+    return { bytes, built, list };
+  } finally {
+    await reader.destroy();
+  }
+}
