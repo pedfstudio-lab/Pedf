@@ -124,7 +124,12 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
       }
     }
 
-    expect(nonLeft).toBe(475);
+    // 475 before Task 74 Step 2 Revision 2. Removing the full-stop paragraph
+    // split rejoined 65 lone fragments into the paragraphs they belong to (54
+    // left, 10 centred, 1 right) and formed 6 joined centred blocks, so 416.
+    // Every one of the 65 was confirmed present, word for word, inside a larger
+    // block; none was lost. A drop here means fragments joined, not text vanished.
+    expect(nonLeft).toBe(416);
     expect(firstNarrowed).toBe(85);
     expect(reEditNarrowed).toBe(firstNarrowed);
     process.stdout.write(
