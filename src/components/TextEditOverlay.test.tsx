@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { TextEdit } from '@/lib/export/types';
+import type { ScreenRect } from '@/lib/export/coordinates';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { widestLineWidth } from '@/lib/edit/paragraphSeed';
@@ -56,6 +57,7 @@ function paragraph(...texts: string[]): TextBlock {
 }
 
 interface RenderEditorOptions {
+  readonly toolbarObstacles?: readonly ScreenRect[];
   readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
   readonly bulletMode?: { readonly items: readonly string[]; readonly maxHeightPt: number };
@@ -74,6 +76,7 @@ function renderEditor(
     <TextEditOverlay
       block={value}
       blocks={options.blocks}
+      toolbarObstacles={options.toolbarObstacles}
       existing={options.existing}
       screenRect={{ left: (options.existing?.[0]?.alignLeftPt ?? value.alignLeftPt ?? value.rect.x) * zoom, top: 100, width: 240, height: value.rect.h }}
       topCorrectionPx={topCorrectionPx}
@@ -379,8 +382,8 @@ describe('TextEditOverlay paragraph seed', () => {
 
     renderEditor(block('Heading', 24));
     const outsideHandle = screen.getByRole('button', { name: 'Drag to move' });
-    expect(outsideHandle.style.left).toBe('-12px');
-    expect(outsideHandle.style.top).toBe('-12px');
+    expect(outsideHandle.style.left).toBe('-8px');
+    expect(outsideHandle.style.top).toBe('-8px');
   });
 
   it('still reflows a left-aligned paragraph', () => {
@@ -478,6 +481,157 @@ describe('TextEditOverlay paragraph seed', () => {
     expect(screen.getByRole('textbox', { name: 'Editable text' }).textContent)
       .toBe('Saved flowing paragraph value');
   });
+});
+
+describe('Task 74 Step 5c live visual frame', () => {
+  let rectangles: DOMRect[];
+
+  beforeEach(() => {
+    rectangles = [new DOMRect(150, 110, 100, 20)];
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: vi.fn(function (this: Range) {
+        return this.toString().length ? rectangles : [];
+      }),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === 'text-editor-layout'
+        ? new DOMRect(40, 100, 240, 24)
+        : new DOMRect(40, 110, 240, 24);
+    });
+  });
+
+  afterEach(() => { Reflect.deleteProperty(Range.prototype, 'getClientRects'); });
+
+  it('moves a top-page toolbar below the subtitle without chasing every later paragraph down the page', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'toolbar' ? 44 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'toolbar' ? 390 : 0;
+    });
+    rectangles = [new DOMRect(150, 18, 100, 30)];
+    renderEditor(block('Heading', 24), 1, 0, { toolbarObstacles: [
+      { left: 100, top: 52, width: 300, height: 14 },
+      { left: 100, top: 80, width: 300, height: 14 },
+      { left: 550, top: 100, width: 40, height: 14 }, // not under this toolbar
+    ] });
+    const toolbar = screen.getByRole('toolbar');
+    expect(Number.parseFloat(toolbar.style.top) + 100).toBe(74);
+    expect(Number.parseFloat(toolbar.style.left) + 40).toBe(149);
+    expect(screen.getByTestId('text-editor-layout').style.width).toBe('240px');
+    expect(screen.getByTestId('text-editor-frame').style.height).toBe('32px');
+  });
+
+  it('keeps the above-heading toolbar unchanged when there is room', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(44);
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(390);
+    renderEditor(block('Heading', 24), 1, 0, { toolbarObstacles: [
+      { left: 100, top: 135, width: 300, height: 14 },
+    ] });
+    expect(Number.parseFloat(screen.getByRole('toolbar').style.top) + 100).toBe(57);
+  });
+
+  it('retains the page-contained fallback if no lower slot fits', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(44);
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(390);
+    rectangles = [new DOMRect(150, 18, 100, 30)];
+    renderEditor(block('Heading', 24), 1, 0, { toolbarObstacles: [
+      { left: 100, top: 52, width: 300, height: 740 },
+    ] });
+    expect(Number.parseFloat(screen.getByRole('toolbar').style.top) + 100).toBe(57);
+  });
+
+  it.each(['left', 'center', 'right'] as const)('hugs the text independently of the %s layout box', (align) => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor({ ...block('Heading', 24), align, alignLeftPt: 40, alignWidthPt: 240 }, 1, 0, { onDone, onCancel });
+    const frame = screen.getByTestId('text-editor-frame');
+    expect(frame.style).toMatchObject({ left: '109px', top: '9px', width: '102px', height: '22px' });
+    expect(screen.getByTestId('text-editor-layout').style.width).toBe('240px');
+    expect(screen.getByRole('textbox').className).toContain('w-full');
+    expect(screen.getByRole('toolbar').style.left).toBe('109px');
+    expect(screen.getByRole('toolbar').style.maxWidth).toBe('600px');
+    expect(screen.getByRole('toolbar').style.width).toBe('max-content');
+    expect(screen.getByRole('toolbar').className).toContain('flex-wrap');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('follows shrinking text, wrapped lines and composition without resizing the saved box', () => {
+    const onDone = vi.fn();
+    renderEditor(block('Heading', 24), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox');
+    editor.textContent = 'Short';
+    rectangles = [new DOMRect(150, 110, 50, 20)];
+    fireEvent.input(editor);
+    expect(screen.getByTestId('text-editor-frame').style.width).toBe('52px');
+    editor.textContent = 'Short\nSecond line';
+    rectangles = [new DOMRect(40, 110, 50, 20), new DOMRect(40, 134, 130, 20)];
+    fireEvent.compositionUpdate(editor, { data: 'Second line' });
+    expect(screen.getByTestId('text-editor-frame').style).toMatchObject({ left: '-1px', width: '132px', height: '46px' });
+    fireEvent.compositionEnd(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({ width: 240, boxWidthPt: 240, dx: 0, dy: -0 });
+  });
+
+  it('keeps the full fallback patch while tightening only the outline', () => {
+    renderEditor(block('Heading', 24));
+    expect(screen.getByTestId('text-editor-layout').style).toMatchObject({ backgroundColor: 'white', width: '240px' });
+    expect(screen.getByTestId('text-editor-frame').style.width).toBe('102px');
+    expect(screen.getByTestId('text-editor-frame').style.backgroundColor).toBe('');
+  });
+
+  it('retains one line and the scaled minimum width after deleting all text', () => {
+    const onDone = vi.fn();
+    renderEditor(block('Heading', 24), 2, 0, { onDone });
+    const editor = screen.getByRole('textbox');
+    editor.textContent = '';
+    fireEvent.input(editor);
+    expect(screen.getByTestId('text-editor-frame').style).toMatchObject({ width: '48px', height: '48px' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({ text: '', width: 240 });
+  });
+
+  it('places the width handle on the ink and preserves its existing drag distance', () => {
+    const onDone = vi.fn();
+    renderEditor(block('Heading', 24), 1, 0, { onDone });
+    const handle = screen.getByRole('button', { name: 'Drag to change text width' });
+    expect(handle.style.left).toBe('206px');
+    handle.setPointerCapture = vi.fn();
+    // jsdom has no native PointerEvent constructor.
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, clientX: 250 });
+    fireEvent(handle, pointerDown);
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 280 }));
+    fireEvent(window, new MouseEvent('pointerup'));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0]).toMatchObject({ width: 270, boxWidthPt: 270, dx: 0, dy: -0 });
+  });
+
+  it.each(['center', 'right', 'paragraph', 'cell', 'list'] as const)(
+    'keeps every committed field identical for a %s when only the measured frame changes', (kind) => {
+      const value = kind === 'paragraph' ? paragraph('First sentence continues', 'on the next visual line.')
+        : kind === 'list' ? paragraph('First item', 'Second item') : block('Heading', 24);
+      const aligned = kind === 'center' || kind === 'right'
+        ? { ...value, align: kind, alignLeftPt: 10, alignWidthPt: 500 }
+        : value;
+      const bulletMode = kind === 'list' ? { items: ['First item', 'Second item'], maxHeightPt: 200 } : undefined;
+      const commits: unknown[] = [];
+      for (const measured of [new DOMRect(150, 110, 100, 20), new DOMRect(55, 120, 190, 60)]) {
+        rectangles = [measured];
+        const onDone = vi.fn();
+        const view = renderEditor(aligned, 1, 0, { onDone, bulletMode });
+        const editor = screen.getByRole('textbox');
+        editor.append(document.createTextNode('!'));
+        fireEvent.input(editor);
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(onDone).toHaveBeenCalledOnce();
+        commits.push(onDone.mock.calls[0]?.[0]);
+        view.unmount();
+      }
+      expect(commits[1]).toEqual(commits[0]);
+    },
+  );
 });
 
 describe('TextEditOverlay width measurement', () => {

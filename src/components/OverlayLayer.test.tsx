@@ -19,6 +19,7 @@ const task74Fixture = 'tmp/compress-tests/rishi-ilovepdf.pdf';
 const task74RealEnabled = process.env.TASK74_REAL === '1' && existsSync(task74Fixture);
 
 interface CapturedEditorProps {
+  readonly toolbarObstacles?: readonly ScreenRect[];
   readonly block: TextBlock;
   readonly screenRect: ScreenRect;
   readonly topCorrectionPx?: number;
@@ -198,6 +199,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('OverlayLayer editor top correction', () => {
+  it('passes only neighbouring text in viewport coordinates for toolbar subtitle clearance', async () => {
+    const subtitle = { ...textBlock, text: 'Subtitle', rect: { x: 25, y: 675, w: 200, h: 10 } };
+    mocks.blocks = [textBlock, subtitle];
+    renderOverlay();
+    const props = await openEditor(/^Text actions: Heading$/);
+    expect(props?.toolbarObstacles).toEqual([{ left: 25, top: 115, width: 200, height: 10 }]);
+    expect(props?.screenRect.top).toBe(92);
+  });
+
   it('keeps the 12px source-ink correction when a block is opened for the first time', async () => {
     renderOverlay();
     const props = await openEditor(/^Text actions: Heading$/);

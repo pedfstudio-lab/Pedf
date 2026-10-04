@@ -51,6 +51,58 @@ type FamilyKey = keyof typeof FAMILY_KEYWORD;
 
 const MIN_BOX_WIDTH = 12;
 const MIN_BOX_HEIGHT = 8;
+const EMPTY_FRAME_WIDTH_PX = 24;
+
+/** Text-node ranges avoid the full-width rectangles of block-level DOM wrappers. */
+function liveTextFrame(
+  editable: HTMLElement,
+  origin: DOMRect,
+  zoom: number,
+  lineHeightPx: number,
+): ScreenRect | undefined {
+  const range = editable.ownerDocument.createRange();
+  // jsdom has no layout; the browser always provides these APIs.
+  if (typeof range.getClientRects !== 'function') return undefined;
+  const walker = editable.ownerDocument.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+  const rectangles: DOMRect[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.textContent?.length) continue;
+    range.selectNodeContents(node);
+    rectangles.push(...Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0));
+  }
+  if (rectangles.length > 0) {
+    const left = Math.min(...rectangles.map((rect) => rect.left));
+    const top = Math.min(...rectangles.map((rect) => rect.top));
+    const right = Math.max(...rectangles.map((rect) => rect.right));
+    const bottom = Math.max(...rectangles.map((rect) => rect.bottom));
+    const padding = zoom;
+    return {
+      left: left - origin.left - padding,
+      top: top - origin.top - padding,
+      width: right - left + padding * 2,
+      height: bottom - top + padding * 2,
+    };
+  }
+  // An empty editor retains a usable frame at its caret. No temporary glyph is
+  // inserted: that would disturb native selection or an in-progress composition.
+  const caret = selectionRangeInside(editable);
+  if (caret?.collapsed) range.setStart(caret.startContainer, caret.startOffset);
+  else { range.selectNodeContents(editable); range.collapse(true); }
+  range.collapse(true);
+  const caretRect = Array.from(range.getClientRects()).find((rect) => rect.height > 0);
+  const anchor = editable.getBoundingClientRect();
+  const align = window.getComputedStyle(editable).textAlign;
+  const caretLeft = caretRect?.left ?? (align === 'center'
+    ? anchor.left + anchor.width / 2
+    : align === 'right' ? anchor.right : anchor.left);
+  const minimumWidth = EMPTY_FRAME_WIDTH_PX * zoom;
+  return {
+    left: caretLeft - origin.left - (align === 'center' ? minimumWidth / 2 : align === 'right' ? minimumWidth : 0),
+    top: (caretRect?.top ?? anchor.top) - origin.top,
+    width: minimumWidth,
+    height: lineHeightPx,
+  };
+}
 const COMMON_TEXT_COLORS: readonly Rgb[] = [
   { r: 0, g: 0, b: 0 },
   { r: 1, g: 1, b: 1 },
@@ -296,6 +348,8 @@ interface TextEditOverlayProps {
   readonly pageWidthPt: number;
   /** Page box in CSS pixels; floating bars are kept inside it because the page clips overflow. */
   readonly pageSizePx: ElementSize;
+  /** Rotation-aware page text rectangles, used only to keep the below-toolbar clear. */
+  readonly toolbarObstacles?: readonly ScreenRect[];
   readonly backgroundColor: string;
   readonly previewMode?: 'legacy' | 'preparing' | 'clean';
   readonly committing?: boolean;
@@ -322,6 +376,7 @@ export function TextEditOverlay({
   zoom,
   pageWidthPt,
   pageSizePx,
+  toolbarObstacles = [],
   backgroundColor,
   previewMode = 'legacy',
   committing = false,
@@ -415,6 +470,8 @@ export function TextEditOverlay({
   const [toolbarRef, toolbarSize] = useElementSize<HTMLDivElement>();
   const [errorRef, errorSize] = useElementSize<HTMLDivElement>();
   const editableRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const [inkFrame, setInkFrame] = useState<ScreenRect>();
   const selectionRangeRef = useRef<Range | null>(null);
   const initialRenderedHeightRef = useRef(initialHeight);
   const capturedInitialHeightRef = useRef(false);
@@ -558,27 +615,76 @@ export function TextEditOverlay({
     }
     finishTextEdit(initial, next, onDone, onCancel);
   };
-  const editorFrame: ScreenRect = {
+  const layoutFrame: ScreenRect = {
     left: boxScreenLeft + moveOffset.x,
     top: screenRect.top + moveOffset.y,
     width: width * zoom,
     height: height * zoom,
   };
+  const visualFrame = inkFrame ?? { left: 0, top: 0, width: EMPTY_FRAME_WIDTH_PX * zoom, height: style.fontSizePt * zoom };
+  const editorFrame: ScreenRect = {
+    left: layoutFrame.left + visualFrame.left,
+    top: layoutFrame.top + visualFrame.top,
+    width: visualFrame.width,
+    height: visualFrame.height,
+  };
   // The formatting bar and the error note are kept inside the page box (Task 56 Rev 2).
-  const toolbarOffset = toolbarOffsetInFrame(editorFrame, toolbarSize, pageSizePx, 8);
+  let toolbarFrame = editorFrame;
+  let placedToolbar = toolbarOffsetInFrame(toolbarFrame, toolbarSize, pageSizePx, 8);
+  // Near the page top, putting the bar immediately below a heading can hide its
+  // subtitle. Extend only the placement input past intersecting neighbour text;
+  // the existing helper still owns above/below choice and page-edge clamping.
+  if (editorFrame.top < toolbarSize.height + 8 && toolbarSize.height > 0) {
+    const left = toolbarFrame.left + placedToolbar.left;
+    const top = toolbarFrame.top + placedToolbar.top;
+    const collisions = toolbarObstacles.filter((rect) => (
+      rect.top + rect.height > editorFrame.top + editorFrame.height &&
+      rect.left < left + toolbarSize.width && rect.left + rect.width > left &&
+      rect.top < top + toolbarSize.height && rect.top + rect.height > top
+    ));
+    if (collisions.length) {
+      // Clear the immediately neighbouring row (e.g. the subtitle), not every
+      // subsequent paragraph: a dense page otherwise sends the bar to its foot.
+      const nearestTop = Math.min(...collisions.map((rect) => rect.top));
+      const bottom = Math.max(...collisions.filter((rect) => rect.top <= nearestTop + 2 * zoom)
+        .map((rect) => rect.top + rect.height));
+      // A dense page may have no free slot. Keep the page-contained fallback,
+      // rather than displacing document text or letting the bar disappear.
+      if (bottom + 8 + toolbarSize.height <= pageSizePx.height) {
+        toolbarFrame = { ...editorFrame, height: bottom - editorFrame.top };
+        placedToolbar = toolbarOffsetInFrame(toolbarFrame, toolbarSize, pageSizePx, 8);
+      }
+    }
+  }
+  const toolbarOffset = {
+    left: toolbarFrame.left + placedToolbar.left - layoutFrame.left,
+    top: toolbarFrame.top + placedToolbar.top - layoutFrame.top,
+  };
+  const placedError = toolbarOffsetInFrame(toolbarFrame, errorSize, pageSizePx, toolbarSize.height + 16);
   const errorOffset = {
-    left: toolbarOffsetInFrame(editorFrame, errorSize, pageSizePx, 8).left,
-    top: editorFrame.height + 8,
+    left: visualFrame.left + placedError.left,
+    top: visualFrame.top + placedError.top,
   };
   // A right or centre box now starts where its neighbour ends, so a handle hanging
   // outside that corner would sit back on the neighbour's words. Keep it inside, where
   // such a box always has empty room before its own text.
-  const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -12, top: -12 };
+  const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -8, top: -8 };
   const lineHeight = textBlockLineHeight(block, style);
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
   const visibleError = externalError
     ?? appearanceError
     ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
+  const measureFrame = useCallback(() => {
+    const editable = editableRef.current;
+    const layout = layoutRef.current;
+    if (!editable || !layout) return;
+    const next = liveTextFrame(editable, layout.getBoundingClientRect(), zoom, lineHeight * zoom);
+    if (!next) return;
+    setInkFrame((current) => current && (
+      Math.abs(current.left - next.left) < 0.01 && Math.abs(current.top - next.top) < 0.01 &&
+      Math.abs(current.width - next.width) < 0.01 && Math.abs(current.height - next.height) < 0.01
+    ) ? current : next);
+  }, [lineHeight, zoom]);
   const resizeToContent = useCallback(() => {
     const editable = editableRef.current;
     if (!editable) return;
@@ -591,7 +697,8 @@ export function TextEditOverlay({
       capturedInitialHeightRef.current = true;
     }
     setHeight(nextHeight);
-  }, [lineHeight, zoom]);
+    measureFrame();
+  }, [lineHeight, measureFrame, zoom]);
 
   useLayoutEffect(() => {
     const editable = editableRef.current;
@@ -603,7 +710,42 @@ export function TextEditOverlay({
       placeCaretAtEnd(editable);
     }
     resizeToContent();
-  }, [resizeToContent, width]);
+  }, [resizeToContent, width, style, previewMode]);
+
+  useEffect(() => {
+    const editable = editableRef.current;
+    if (!editable) return;
+    let animation: number | undefined;
+    let disposed = false;
+    const schedule = () => {
+      if (disposed || animation !== undefined) return;
+      if (typeof window.requestAnimationFrame !== 'function') return;
+      animation = window.requestAnimationFrame(() => {
+        animation = undefined;
+        resizeToContent();
+      });
+    };
+    const mutations = new MutationObserver((records) => {
+      // resizeToContent writes the root's height; observing our own write would
+      // schedule a new measurement every animation frame.
+      if (records.some((record) => record.type !== 'attributes' || record.target !== editable)) schedule();
+    });
+    mutations.observe(editable, { childList: true, subtree: true, characterData: true, attributes: true });
+    const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
+    resize?.observe(editable);
+    const fonts = document.fonts;
+    void fonts?.ready.then(schedule);
+    fonts?.addEventListener('loadingdone', schedule);
+    window.addEventListener('resize', schedule);
+    return () => {
+      disposed = true;
+      if (animation !== undefined) window.cancelAnimationFrame(animation);
+      mutations.disconnect();
+      resize?.disconnect();
+      fonts?.removeEventListener('loadingdone', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [resizeToContent]);
 
   const refreshSelectionStyle = useCallback(() => {
     const editable = editableRef.current;
@@ -763,6 +905,8 @@ export function TextEditOverlay({
 
   return (
     <div
+      ref={layoutRef}
+      data-testid="text-editor-layout"
       className="absolute isolate z-50"
       onPointerDownCapture={(event) => { if (committing) {event.preventDefault();event.stopPropagation();} }}
       onClickCapture={(event) => { if (committing) {event.preventDefault();event.stopPropagation();} }}
@@ -777,8 +921,8 @@ export function TextEditOverlay({
     >
       <div
         ref={toolbarRef}
-        className="absolute z-20 flex items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
-        style={toolbarOffset}
+        className="absolute z-20 flex flex-wrap items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
+        style={{ ...toolbarOffset, width: 'max-content', maxWidth: pageSizePx.width }}
         role="toolbar"
         aria-label="Text formatting"
         aria-busy={committing || previewMode === 'preparing'}
@@ -901,6 +1045,7 @@ export function TextEditOverlay({
         spellCheck={false}
         onInput={resizeToContent}
         onCompositionStart={()=>{composingRef.current=true;}}
+        onCompositionUpdate={resizeToContent}
         onCompositionEnd={()=>{composingRef.current=false;resizeToContent();}}
         onPaste={pastePlainText}
         onKeyDown={(event) => {
@@ -923,7 +1068,7 @@ export function TextEditOverlay({
             resizeToContent();
           }
         }}
-        className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-transparent p-0 outline outline-2 outline-blue-500"
+        className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words border-0 bg-transparent p-0 outline-none"
         style={{
           ...textStyleToCss(style, zoom),
           ...(previewMode === 'preparing' ? {WebkitTextFillColor:'transparent',caretColor:colorCss(style.color)} : {}),
@@ -932,11 +1077,18 @@ export function TextEditOverlay({
           textAlign: initialAlign,
         }}
       />
+      <div
+        data-testid="text-editor-frame"
+        aria-hidden="true"
+        className="pointer-events-none absolute z-10 rounded-sm outline outline-1 outline-blue-500"
+        style={visualFrame}
+      />
       <button
         type="button"
         aria-label="Drag to change text width"
         onPointerDown={beginWidthDrag}
-        className="absolute -right-2 top-0 z-10 h-full w-4 cursor-ew-resize rounded bg-blue-500/80 hover:bg-blue-600"
+        style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height / 2 - 5 }}
+        className="absolute z-10 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
       />
       <button
         type="button"
@@ -955,8 +1107,8 @@ export function TextEditOverlay({
           event.preventDefault();
           setMoveOffset((value) => ({ x: value.x + delta.x, y: value.y + delta.y }));
         }}
-        style={moveHandleOffset}
-        className="absolute z-20 h-6 w-6 cursor-move rounded-full border-2 border-white bg-blue-600 text-xs font-bold leading-none text-white shadow hover:bg-blue-700"
+        style={{ left: visualFrame.left + moveHandleOffset.left, top: visualFrame.top + moveHandleOffset.top }}
+        className="absolute z-20 h-4 w-4 cursor-move rounded-full border border-white bg-blue-600 text-[10px] font-bold leading-none text-white shadow hover:bg-blue-700"
       >
         ✥
       </button>

@@ -11841,7 +11841,9 @@ themselves, and where this outline differs from them, **the sections win**:
 2. **Step 5a** — text keeps its own colour and weight, plus a colour control. The export font gate stays shut.
 3. **Step 5b** — the clean page preview, the state machine, eligibility, fallbacks and a measured worker experiment.
 4. **Step 5c** — the live visual frame and the toolbar.
-5. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
+5. **Step 5c.1** — the editing view sits on the page's own baseline (small; added 2026-10-04 after the Ziro heading
+   was measured opening 15 px above its line).
+6. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
    Without it 5a–5c look much better and occasional movement and spacing differences remain.
 
 The original typeface is not any of these — that is the font work, which reuses a page's own embedded font. It is
@@ -13222,7 +13224,25 @@ when the list is opened for editing (Problem 2, see Step 5a's known limit); the 
 
 ---
 
-#### Task 74 — Step 5c  🔲 TODO → branch `editor-frame` **from `main`, after Step 5b is merged** — the frame follows the words, and the toolbar stays out of the way   *(Medium · 1–2 days)*
+#### Task 74 — Step 5c  🟡 ACCEPTED by the user (2026-10-05), committed on `codex/editor-frame`, merge pending **from `main`** (Step 5b is merged: `610945f`) — the frame follows the words, and the toolbar stays out of the way   *(Medium · 1–2 days)*
+
+> **Revised after Step 5b shipped.** Checked against the code as it now stands: the toolbar placement already
+> exists and is reused, not rewritten; the width handle's job on a tight frame is defined; the fallback patch keeps
+> its size; the two tolerances are fixed numbers; `OverlayLayer.tsx` changes only if a frame is found there. Each
+> correction is marked **(Rev)** below.
+
+**User placement decision (2026-10-04): option 1.** At a page-top heading where the toolbar cannot fit above,
+keep it inside the page and clear the immediately neighbouring subtitle before placing it below. Feed that
+clearance into the existing placement helper; do not move any document text. `OverlayLayer.tsx` additionally
+passes neighbouring text rectangles through the existing rotation-aware viewport conversion for this purpose.
+At small PDF zoom the toolbar wraps within the page width, independently of the editor's layout width.
+This clears the adjacent subtitle, not every subsequent line on a dense page; farther-down content can still be
+temporarily covered. If no lower slot fits, preserve the existing page-contained fallback.
+
+**Implementation / verification record:** `output/task74-5c/verification.md` (local, ignored artifact); screenshots
+in the same directory. Claude's review: full suite 1,368 passed; every local real-PDF check on, 1,394 passed, 0
+failed; no committed-geometry code changed. The move handle was checked by the user and needs no change. The
+text-drops-on-Done report (Ziro heading, measured 15 px) predates 5c and is Step 5c.1.
 
 **What the user hit.** Editing `UTKARSH TANEJA` on the résumé, the editor box reaches well below the heading and
 swallows the top of `Travel Operations | Tour Coordination | Destination Management`. The frame is drawn around the
@@ -13245,6 +13265,14 @@ soft wrapping, font load, zoom and resize — alongside `resizeToContent`, but w
 own bounding rectangle. A multi-line paragraph unions its live line rectangles; an empty editor uses a stated
 minimum/caret frame so its controls remain reachable.
 
+**(Rev) The numbers.** The frame sits within **2 CSS px** of the union of the text `Range` rectangles on every
+side, at 100% zoom (scaled with zoom). An empty editor keeps a frame **one line tall and at least 24 CSS px wide**,
+at the caret, so Done and Cancel stay where they were.
+
+**(Rev) How it shrinks.** The frame follows the text's own alignment: a centred heading's frame shrinks from both
+sides towards the middle as letters are deleted; a left-aligned paragraph's frame shrinks from the right only. This
+falls out of measuring the `Range`; nothing is computed separately.
+
 **This is visual only.** Per the central rule in Step 5b, tightening the frame must not change centring, alignment
 width, baseline, reflow width, exported position or re-edit position. `BHUTAN` keeps its wide alignment region for
 centring while its frame follows the word.
@@ -13255,6 +13283,27 @@ below otherwise; the toolbar clamped inside the page; toolbar dimensions never e
 rectangle; Done, Cancel, family, size, bold, italic and Step 5a's colour swatch all kept; handles that do not cover
 neighbouring text.
 
+**(Rev) The toolbar placement already exists — reuse it.** `placeSelectionToolbar` / `toolbarOffsetInFrame` in
+`src/lib/edit/floatingToolbar.ts` already put the bar above the frame when there is room, below otherwise, and
+inside the page (Task 56 Rev 2). Today they are given the layout box (`editorFrame`, `TextEditOverlay.tsx:561–568`),
+so a centred heading's bar lines up with the far left of its alignment column and, near a page top, drops below the
+whole column. Give them the live ink frame instead. Do not write a second placement routine. The error note
+(`errorOffset`, `:569–572`) uses the same placement input, including the approved subtitle clearance.
+
+**(Rev) The width handle keeps its job.** Today the full-height strip (`:935–940`, `beginWidthDrag` at `:424`)
+sets the text width — where lines wrap — and that width is saved with the edit (`boxWidthPt`). On the tight frame it
+becomes a small handle on the frame's right edge that does exactly the same thing: dragging changes the text width
+by the distance dragged, the text re-wraps, and the frame re-hugs the new lines. Left alone, the width never changes.
+On a centred heading the handle sits at the edge of the letters, not the edge of the column; the drag still changes
+the column width by the distance dragged, as today.
+
+**(Rev) The move handle** keeps its behaviour, arrow keys included, and moves to the ink frame's corner, still
+inside the frame for a right or centre box (`moveHandleOffset`, `:576`) so it never sits on a neighbour's words.
+
+**(Rev) The fallback patch keeps its size.** On a block that falls back to the patch (`previewMode === 'legacy'`),
+the outer box's background (`:775`) is the patch hiding the old words. It stays the full layout size; only the blue
+outline tightens. Shrinking the patch would let the old words show around the new ones.
+
 Deleting all content and pressing Done is a real deletion. Pressing Done with the original content untouched is
 not.
 
@@ -13264,11 +13313,19 @@ not.
   with the frame tightened.
 - *The frame is live*: type into a heading until it is shorter, let a paragraph gain a line, apply inline
   formatting and complete an IME composition — the union of the text `Range` client rectangles matches the frame
-  after each change, within a stated tolerance.
+  after each change, within 2 CSS px at 100% zoom.
 - *The layout element is not the frame*: the editor remains `w-full` where layout requires it, while a one-word
-  heading's frame is narrower; an empty editor retains the minimum/caret frame.
-- *The frame encloses the ink and no more*, within that tolerance, on a centred heading, a right-aligned heading, a
+  heading's frame is narrower; an empty editor retains the minimum/caret frame (one line tall, ≥ 24 CSS px wide).
+- *The frame encloses the ink and no more*, within 2 CSS px, on a centred heading, a right-aligned heading, a
   wrapped paragraph and a one-word cell.
+- **(Rev)** *Shrinking follows alignment*: delete letters one at a time from `UTKARSH TANEJA` — the frame narrows
+  after every deletion and stays centred on the word; on a left-aligned paragraph its left edge does not move.
+- **(Rev)** *The width handle*: drag it on a paragraph — `boxWidthPt` changes by the distance dragged and the lines
+  re-wrap, exactly as with today's strip; open and press Done without dragging — `boxWidthPt` is unchanged.
+- **(Rev)** *The toolbar is reused*: `placeSelectionToolbar` is called with the ink frame; no second placement
+  routine exists. On `BHUTAN` the bar sits above the word, not at the left of the column.
+- **(Rev)** *The fallback patch*: on a block that falls back (for example a list with vector markers), the old
+  words stay fully hidden while the outline hugs the new ones.
 - *The résumé case*: with `UTKARSH TANEJA` open, the pixels of the line below it are unchanged from the idle page.
 - *The toolbar*: above where there is room, below where there is not, never outside the page, at the top and bottom
   edges of a page and at every supported zoom.
@@ -13279,7 +13336,9 @@ not.
 | File | Change |
 |---|---|
 | `src/components/TextEditOverlay.tsx` + test | The live visual frame, handles and toolbar placement |
-| `src/components/OverlayLayer.tsx` + test | Stop drawing the layout rectangle as the frame |
+| `src/components/OverlayLayer.tsx` + test | No editing outline change. Per the user's option 1 decision, pass neighbouring text rectangles in viewport coordinates for below-subtitle toolbar clearance. |
+
+`src/lib/edit/floatingToolbar.ts` is **reused unchanged** — it already does the placement; only its input changes.
 
 **Files that must not change:** everything in Step 5b's list, plus `buildTextEdits.ts` and every committed-geometry
 path — this step may not alter a single exported coordinate.
@@ -13288,9 +13347,12 @@ path — this step may not alter a single exported coordinate.
 
 **Verify (user):** open `UTKARSH TANEJA` — the frame hugs the name and the line below it is fully visible; type to
 shorten it and the frame follows; open `BHUTAN` — the frame hugs the word, and after Done it is still centred
-exactly as before; at the top and bottom of a page the toolbar stays on screen.
+exactly as before; at the top and bottom of a page the toolbar stays on screen. **(Rev)** Drag the width handle on
+a paragraph — the lines re-wrap as today. Open a list with drawn-shape dots — the old words stay hidden.
 
-**Known limits:** the font and the word gaps remain untouched.
+**Known limits:** the font and the word gaps remain untouched. **(Rev)** The invisible typing area still spans the
+layout region, so while a heading is open, a click on the line below it inside that region lands in the editor
+rather than on that line; the line is visible, not clickable, until the editor closes.
 
 **Land:** branch `editor-frame` from `main`. Commit: `The frame follows the live words and the toolbar
 stays out of the way (Task 74, Step 5c)`. Merge only after no committed coordinate changes, the full Step 5b checks
@@ -13298,7 +13360,104 @@ still pass and the user's résumé/Bhutan/top-and-bottom toolbar checks pass.
 
 ---
 
-#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
+#### Task 74 — Step 5c.1  🔲 TODO → branch `editor-baseline` **from `main`, after Step 5c is merged** — the editing view sits on the page's own baseline   *(Easy–Medium · half a day)*
+
+**What the user hit.** On some texts, pressing Done makes the text drop or rise by about 0.1 inch. Not every text —
+mostly big headings.
+
+**Measured (2026-10-04, live, `Ziro Festival Firgun.pdf` page 1 and `RAHUL_RAJPUT_RESUME.pdf` page 1, 100% zoom).**
+The editor's first baseline was read by putting a zero-size `inline-block` marker (`vertical-align: baseline`) in
+front of the first letter; the page's baseline from the block's own rectangle (its bottom edge is the baseline, which
+pixel-measured ink confirms to 0.3 px).
+
+| Text | Font size | Page baseline | Editor baseline | Off | After Done |
+|---|---|---|---|---|---|
+| `ZIRO FESTIVAL` (Ziro p1) | 114 px | 241.9 | 226.9 | **−15.0 px (0.16 in)** | 241.6 — saved correctly |
+| `RAHUL RAJPUT` (résumé) | 32 px | 51.0 | ≈ 48 | −1 to −3 px | 51.25 — saved correctly |
+| the other 14 résumé texts | 12–16 px | — | — | −1 to −3 px each | — |
+
+**Why.** Done already saves the right place — the exported baseline equals the original. Only the **editing view**
+is off. It is positioned by a rule, not by a measurement: `editorFirstLineOffsetPx` (`src/lib/edit/editorPosition.ts`)
+removes CSS half-leading and assumes the browser then puts the first baseline one font size below the box top. Where
+the baseline really lands inside a CSS line depends on the font's own ascent and descent, which differ per typeface.
+The error is a share of the font size (≈ 13% for Ziro's condensed heading face), so a 114 px heading is visibly off
+and body text is not. Task 64 Part B set the 0.5 px rule for this but computed it from canvas `measureText`, a
+prediction that this face does not follow. Step 5c does not cause it: 5c changes no text positioning.
+
+**What the user gets.** The text in the editor sits exactly on the line it occupies on the page — when it opens,
+while typing, after a font or size change, at every zoom — so pressing Done moves nothing on screen.
+
+**The rule.** Measure, don't predict. After the editor lays out, find where the browser actually drew the first
+baseline and move the editing text by the difference from the baseline Done will save.
+
+**Change 1 — pass the editor the baseline Done will use.**
+`OverlayLayer.tsx` already knows it, because the Done path builds from it: a saved edit's first baseline
+(`base.topBaselineY`, `OverlayLayer.tsx:1273`; a saved list's body, `:1284`), a fresh block's first line `baselineY`,
+a fresh list's first item baseline, and an Add-text box's `topBaselineY` (`:243`, `:259`). Convert it to page CSS px
+with the same rotation-aware viewport conversion the editor rectangle uses, and pass it to `TextEditOverlay` as
+`expectedBaselinePx`. Use the value the commit uses — never a second estimate of it.
+
+**Change 2 — measure in a hidden probe, never inside the editable.**
+In `TextEditOverlay.tsx`, render an invisible probe (`visibility: hidden`, `position: absolute`, `pointer-events:
+none`, `aria-hidden`) with the editable's exact font CSS (`textStyleToCss(style, zoom)`), line height and first-line
+offset, containing a zero-size `inline-block` marker with `vertical-align: baseline` followed by a sample character.
+The marker's top, relative to the probe's top, is where the browser puts the first baseline. **Nothing is ever
+inserted into the `contenteditable`** — that would disturb the caret, selection, undo and IME composition.
+
+**Change 3 — correct by the difference.**
+`correction = expectedBaselinePx − (editor top + measured baseline offset)`, applied to the editable's `top`
+alongside the existing `firstLineOffsetPx`. Put the arithmetic in a pure helper in `editorPosition.ts`
+(`baselineCorrectionPx`); clamp it to ± one font size so a bad measurement cannot throw the text off the page, and
+use 0 when no measurement is available (jsdom, an unmounted probe). Lines after the first keep today's spacing. The
+move offset still adds on top, so a dragged box keeps its baseline under the drag.
+
+**Change 4 — re-measure when the answer can change.** On open; after the font finishes loading
+(`document.fonts` `loadingdone`/`ready`, as 5c's frame does); when family, size or bold changes; on zoom or resize.
+Not on every keystroke: the first line's baseline is set by the font, not by what is typed, including Devanagari
+fallback glyphs. 5c's frame and toolbar follow automatically, because they measure the live text.
+
+**Checks**
+- *The rule, as numbers*: a pure test for `baselineCorrectionPx` — the difference, the clamp, the zero fallback.
+- *Component*: with the probe's marker mocked at a known offset, the editable's `top` moves by exactly the difference;
+  nothing is ever inserted into the `contenteditable`; the correction recomputes on a size change and on font load.
+- *Done reads nothing from it*: the edits Done produces for a typed change are **identical** with and without the
+  correction — same `rect`, baseline, `dx`/`dy`, `boxHeight`, `boxWidthPt`.
+- *Live, Claude repeats these*: at 50%, 100%, 150% and 200%, the editor's first baseline is within **0.5 px** of the
+  page baseline at open and after a font-size change, on: `ZIRO FESTIVAL` (today −15 px), all 15 résumé texts on page
+  1 (today −1 to −3 px), `BHUTAN`, one wrapped paragraph, one bullet list, one table cell, a saved edit re-opened,
+  and an Add-text box after its first Done.
+- *Unchanged elsewhere*: the 5c checks; `TASK74_REAL=1`, `TASK74_PATCH=1`, `TASK74_PREVIEW=1`, `TASK66_SWEEP=1`; full
+  suite; typecheck; lint; build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/edit/editorPosition.ts` + test | Add `baselineCorrectionPx`; `editorFirstLineOffsetPx` and `editorTopCorrection` stay as they are |
+| `src/components/TextEditOverlay.tsx` + test | The hidden probe, the measurement, the correction on the editable's `top`, the re-measure triggers |
+| `src/components/OverlayLayer.tsx` + test | Pass `expectedBaselinePx` for blocks, lists, saved edits and Add-text boxes |
+
+**Files that must not change:** `buildTextEdits.ts` and every committed-geometry path; `src/lib/export/**`;
+`textStyleCss.ts` and the font choice (Task 75 and the font work own that); Task 44's `inkTopDelta` and Task 64's
+`editorTopCorrection`; snapping; 5c's frame and toolbar code beyond following the moved text.
+
+**Guardrails:** the correction is presentation only — Done never reads it, and any committed coordinate that changes
+fails the step; nothing is written into the `contenteditable` to measure; with no measurement the editor behaves
+exactly as today.
+
+**Verify (user):** Ziro page 1 → click `ZIRO FESTIVAL` → the letters stay exactly where they were on the page →
+change a letter → Done → nothing drops. Résumé → open the name, a paragraph and a bullet list → nothing jumps on open
+or on Done. Repeat once at 150% zoom.
+
+**Known limits:** the substitute typeface still differs from the PDF's (Ziro's heading turns wide and thin after Done)
+— the font work's business; gaps in spaced-out headings are Step 5d's.
+
+**Land:** branch `editor-baseline` from `main`, after 5c. Commit: `The editing view sits on the page's own baseline
+(Task 74, Step 5c.1)`. Merge after the live 0.5 px table passes and the user's checks pass.
+
+---
+
+#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c.1 is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
 
 *Steps 5a to 5c make editing look right. This step makes it land right. Without it they will look much better and
 occasional movement and spacing differences will remain, because the DOM — not our model — still decides where the
@@ -13361,8 +13520,8 @@ changed — fall back to today's re-typesetting for that line and record the rea
 
 **Change 3 — one layout decision, used by both.**
 The committed geometry comes from our layout of the text, and the export draws from that same result. The preview
-may differ by less than a stated tolerance while typing, but **Done may never consult the DOM for a position**. This
-is the change that removes "the text jumped when I pressed Done".
+may differ by no more than **0.5 px** while typing (the tolerance Step 5c.1 establishes), but **Done may never
+consult the DOM for a position**. This is the change that removes "the text jumped when I pressed Done".
 
 Do **not** take over line breaking inside the editable element. Keeping `contenteditable` responsible for what the
 user sees while typing is deliberate: native caret, selection, spellcheck, accessibility and — most importantly —
@@ -13372,6 +13531,8 @@ a cost this step should take on. The model owns the committed result; the browse
 **Checks**
 - *Nothing moves*: Change 0's table, re-run, is **0 pt** for every unchanged case at every zoom; a changed case
   moves only in the direction and amount the edit implies.
+- *The editing view stays on the line* (Step 5c.1): the editor's first baseline is still within **0.5 px** of the
+  page baseline at open, after Done and on re-open, at every zoom. 5d must not break 5c.1's correction.
 - *Identical, not close*: for unchanged text the exported baseline and horizontal origin are byte-identical to the
   source's, asserted as numbers rather than by eye.
 - *The heading*: editing `T R I P` → `T R I P S` on Bhutan page 1 leaves `"N E W"` at x 82.3 and `"Y E A R ’ S"` at

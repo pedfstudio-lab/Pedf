@@ -1308,6 +1308,9 @@ export function OverlayLayer({
               key={`${activeBlock.pageIndex}:${activeBlock.rect.x}:${activeBlock.rect.y}:${activeBlock.text}`}
               block={activeBlock}
               blocks={blocks}
+              toolbarObstacles={blocks.filter((candidate) => (
+                candidate !== activeBlock && !containsRect(fallback, candidate.rect)
+              )).map((candidate) => pdfRectToScreenRect(candidate.rect, viewport, dpr))}
               existing={existing?.texts}
               screenRect={screenRect}
               topCorrectionPx={topCorrectionPx}
@@ -1408,6 +1411,7 @@ export function OverlayLayer({
             key={`free-editor-${boxId ?? `${block.rect.x}:${block.rect.y}`}`}
             block={block}
             existing={existing}
+            toolbarObstacles={blocks.map((candidate) => pdfRectToScreenRect(candidate.rect, viewport, dpr))}
             screenRect={screenRect}
             zoom={zoom}
             pageWidthPt={viewport.width / (zoom * dpr)}
