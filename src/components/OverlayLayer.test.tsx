@@ -19,6 +19,8 @@ const task74Fixture = 'tmp/compress-tests/rishi-ilovepdf.pdf';
 const task74RealEnabled = process.env.TASK74_REAL === '1' && existsSync(task74Fixture);
 
 interface CapturedEditorProps {
+  readonly expectedBaselinePx?: number;
+  readonly baselineFontSizeSlopePx?: number;
   readonly toolbarObstacles?: readonly ScreenRect[];
   readonly block: TextBlock;
   readonly screenRect: ScreenRect;
@@ -137,12 +139,12 @@ vi.mock('./ImageOverlay', () => ({ ImageOverlay: () => null }));
 vi.mock('./SmartSpanLayer', () => ({ SmartSpanLayer: () => null }));
 vi.mock('./LineEditOverlay', () => ({ LineEditOverlay: () => null }));
 
-function renderOverlay(preview?: PagePreviewBridge, locationNames: readonly string[] = []) {
+function renderOverlay(preview?: PagePreviewBridge, locationNames: readonly string[] = [], pageViewport = viewport) {
   render(
     <OverlayLayer
       page={{ view: [0, 0, 600, 800] } as unknown as PDFPageProxy}
       pageIndex={0}
-      viewport={viewport}
+      viewport={pageViewport}
       dpr={1}
       zoom={1}
       editMode
@@ -214,6 +216,7 @@ describe('OverlayLayer editor top correction', () => {
 
     expect(props?.screenRect.top).toBe(92);
     expect(props?.topCorrectionPx).toBe(12);
+    expect(props?.expectedBaselinePx).toBe(100);
     expect(props?.horizontalTargets.find((target) => target.label === 'original position')?.pos).toBe(92);
   });
 
@@ -244,7 +247,26 @@ describe('OverlayLayer editor top correction', () => {
 
     expect(props?.screenRect.top).toBe(130);
     expect(props?.topCorrectionPx).toBe(0);
+    expect(props?.expectedBaselinePx).toBe(150);
     expect(props?.horizontalTargets.find((target) => target.label === 'original position')?.pos).toBe(130);
+  });
+
+  it('converts the commit baseline through the rotation-aware viewport, not page-height subtraction', async () => {
+    const rotated = { ...viewport, convertToViewportPoint: (x: number, y: number) => [800 - y, x] } as PageViewport;
+    renderOverlay(undefined, [], rotated);
+    const props = await openEditor(/^Text actions: Heading$/);
+    expect(props?.expectedBaselinePx).toBe(20);
+  });
+
+  it('reopens Add Text at its saved baseline and carries the existing size-dependent commit rule', async () => {
+    mocks.edits = [{ id: 'added', kind: 'text', origin: 'free', pageIndex: 0, z: 2,
+      text: 'Added heading', boxText: 'Added heading', boxHeight: 40, style,
+      rect: { x: 40, y: 500, w: 180, h: 20 } }];
+    renderOverlay();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit added text: Added heading' }));
+    await screen.findByTestId('captured-text-editor');
+    expect(mocks.editorProps?.expectedBaselinePx).toBe(300);
+    expect(mocks.editorProps?.baselineFontSizeSlopePx).toBe(1);
   });
 });
 
@@ -546,4 +568,6 @@ it('shows bullet-list actions for a text block marked by filled shape dots', asy
   expect(await screen.findByRole('button', {
     name: /^Bullet list actions: • Shape item 1 • Shape item 2 • Shape item 3$/,
   })).toBeDefined();
+  const props = await openEditor(/^Bullet list actions: • Shape item 1/);
+  expect(props?.expectedBaselinePx).toBe(100);
 });

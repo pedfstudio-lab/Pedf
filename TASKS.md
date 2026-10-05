@@ -13224,7 +13224,7 @@ when the list is opened for editing (Problem 2, see Step 5a's known limit); the 
 
 ---
 
-#### Task 74 — Step 5c  🟡 ACCEPTED by the user (2026-10-05), committed on `codex/editor-frame`, merge pending **from `main`** (Step 5b is merged: `610945f`) — the frame follows the words, and the toolbar stays out of the way   *(Medium · 1–2 days)*
+#### Task 74 — Step 5c  ✅ DONE → merged to `main` and live (`796a788`) **from `main`** (Step 5b is merged: `610945f`) — the frame follows the words, and the toolbar stays out of the way   *(Medium · 1–2 days)*
 
 > **Revised after Step 5b shipped.** Checked against the code as it now stands: the toolbar placement already
 > exists and is reused, not rewritten; the width handle's job on a tight frame is defined; the fallback patch keeps
@@ -13360,7 +13360,7 @@ still pass and the user's résumé/Bhutan/top-and-bottom toolbar checks pass.
 
 ---
 
-#### Task 74 — Step 5c.1  🔲 TODO → branch `editor-baseline` **from `main`, after Step 5c is merged** — the editing view sits on the page's own baseline   *(Easy–Medium · half a day)*
+#### Task 74 — Step 5c.1  🟡 ACCEPTED by the user (2026-10-05), committed on `codex/editor-baseline`, merge pending **from `main`, after Step 5c** — the editing view sits on the page's own baseline   *(Easy–Medium · half a day)*
 
 **What the user hit.** On some texts, pressing Done makes the text drop or rise by about 0.1 inch. Not every text —
 mostly big headings.
@@ -13454,6 +13454,63 @@ or on Done. Repeat once at 150% zoom.
 
 **Land:** branch `editor-baseline` from `main`, after 5c. Commit: `The editing view sits on the page's own baseline
 (Task 74, Step 5c.1)`. Merge after the live 0.5 px table passes and the user's checks pass.
+
+**Implementation and verification (2026-10-05, Codex).** No commit or merge: the user's no-commit instruction remains
+in force. Changes are confined to the three listed production files and their tests; committed geometry, font
+selection, grouping, export, snapping and existing source-ink corrections are untouched.
+
+- The hidden probe mirrors the editable's existing rich-text nodes rather than using only a bare sample letter,
+  so inline size/family overrides participate in the first-line measurement. Only the hidden probe is modified;
+  the editable, caret, selection and composition are not modified for measurement. No measurement on ordinary input.
+- Add Text additionally carries the viewport-converted font-size slope of its **existing** commit rule
+  (`rect.y + rect.h - next.style.fontSizePt`). Its expected baseline follows a size change without changing Done.
+- Unit/component checks cover missing/invalid measurements, clamping, source and saved anchors, rotation conversion,
+  saved Add Text, font-load/size/inline-format remeasurement, IME/input stability, and identical Done payloads with
+  and without correction (including paragraph, list, cell and centre/right alignment).
+
+Live browser checks at **50%, 100%, 150%, 200%**, both on open and after increasing the font size:
+
+| Selection | Maximum absolute first-baseline error across all four zooms |
+|---|---|
+| Ziro page 1, `ZIRO FESTIVAL` | < 0.001 px |
+| Résumé page 1, all 18 currently exposed boxes (16 text blocks and 2 bullet lists), including wrapped prose and mixed bold phrases | 0.008 px |
+| Bhutan page 1, `BHUTAN` | 0.010 px |
+| Fraction Chart, `1/2` table cell | 0.010 px |
+| Saved résumé heading reopened | 0.015 px |
+| Add Text after its first Done, reopened and resized | 0.009 px |
+
+Measurements are page-relative to exclude scroll movement. Heavy-page zoom checks wait for the PDF viewport to
+finish resizing, not just for the zoom indicator to change. For the small cell, the 8 px minimum click-target
+height is excluded from the text-baseline measurement. Add Text follows its saved first-font-size-line anchor,
+not the bottom of its taller click box. Raw measurements and isolated QA fixtures: `tmp/5c1/baseline-results.json`.
+The independent Claude repeat and the user's acceptance checks remain pending; this is not approval to merge.
+
+Validation passed: **1,404 tests**, 170 passing suites (24 tests / 15 suites intentionally skipped), with
+`TASK74_REAL=1`, `TASK74_PATCH=1`, `TASK74_PREVIEW=1`, `TASK66_SWEEP=1`; typecheck; lint; production build.
+Patch-free export: **335/335 covers skipped, 0 drawn**, 45 files. Preview corpus: **40/49 clean**, 9 reasoned
+fallbacks. Re-edit sweep: **121 round trips passed, 0 failed**, 47 files / 242 pages. Logs: `tmp/5c1-tests.log`,
+`tmp/5c1-build.log`. Existing build chunk-size warning remains.
+
+**QA side effect, reported to the user:** saving the isolated résumé test project triggered the app's existing
+saved-project eviction and removed the older browser-saved project `rishi-edited-edited.pdf` to make room.
+No PDF file on disk was deleted; recovery of that browser-saved project is not confirmed. Further checks avoided
+creating saved projects, and the two test edits were undone. Saved-project eviction is outside this baseline step
+and was not changed. Typeface substitution/wrapping (including Bhutan's wide fallback face) remains the stated
+font-work limitation, not a baseline fix.
+
+**Claude's independent repeat (2026-10-05).** Full suite 1,383 passed; every local real-PDF check on, 1,409 passed,
+0 failed, corpus numbers unchanged (335/335, 40/49, 121/121, 1,458 splits, 4 + 2 lists, 85/416). Live, a zero-size
+marker in the open editor against the block's own baseline: `ZIRO FESTIVAL` **0.00 px** at 100% and 150% (15.0 px
+before), the other Ziro page 1 texts 0.00 px, all 16 résumé page 1 texts 0.00–0.01 px (multi-line blocks on their
+first line, checked against their first-to-last baseline distance). Done payloads are asserted identical with and
+without the correction for centre, right, paragraph, cell and list.
+
+**Known limits.** *Turned pages:* none of the 45 baseline files has a rotated page with text. On a page turned 90°
+(`tmp/rotated/resume-rotated-90.pdf`) the click target follows the vertical text but the editor opens as an ordinary
+left-to-right box beside it — the editor has never supported turned text. 5c.1 moves the text inside that box by at
+most one font size, so it can neither be judged there nor make it materially worse; editing on turned pages is its
+own future task. *Saved projects:* the eviction above means the app silently removes older browser-saved projects
+when storage fills — a separate issue worth its own task.
 
 ---
 

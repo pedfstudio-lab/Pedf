@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -57,6 +57,8 @@ function paragraph(...texts: string[]): TextBlock {
 }
 
 interface RenderEditorOptions {
+  readonly expectedBaselinePx?: number;
+  readonly baselineFontSizeSlopePx?: number;
   readonly toolbarObstacles?: readonly ScreenRect[];
   readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
@@ -80,6 +82,8 @@ function renderEditor(
       existing={options.existing}
       screenRect={{ left: (options.existing?.[0]?.alignLeftPt ?? value.alignLeftPt ?? value.rect.x) * zoom, top: 100, width: 240, height: value.rect.h }}
       topCorrectionPx={topCorrectionPx}
+      expectedBaselinePx={options.expectedBaselinePx}
+      baselineFontSizeSlopePx={options.baselineFontSizeSlopePx}
       zoom={zoom}
       pageWidthPt={600}
       pageSizePx={{ width: 600, height: 800 }}
@@ -630,6 +634,125 @@ describe('Task 74 Step 5c live visual frame', () => {
         view.unmount();
       }
       expect(commits[1]).toEqual(commits[0]);
+    },
+  );
+});
+
+describe('Task 74 Step 5c.1 measured baseline', () => {
+  let markerOffset: number;
+  let markerReads: number;
+  let fonts: EventTarget & { ready: Promise<void> };
+  let fontsReady: () => void;
+
+  beforeEach(() => {
+    markerOffset = 15;
+    markerReads = 0;
+    fonts = Object.assign(new EventTarget(), { ready: new Promise<void>((resolve) => { fontsReady = resolve; }) });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const probeTop = 100 + Number.parseFloat(document.querySelector<HTMLElement>('[data-testid="text-baseline-probe"]')?.style.top ?? '0');
+      if (this.dataset.testid === 'text-baseline-probe') return new DOMRect(40, probeTop, 20, 24);
+      if (this.dataset.testid === 'text-baseline-marker') {
+        markerReads += 1;
+        return new DOMRect(40, probeTop + markerOffset, 0, 0);
+      }
+      return new DOMRect();
+    });
+  });
+  afterEach(() => { Reflect.deleteProperty(document, 'fonts'); });
+
+  it('corrects the editable only, with its hidden marker completely outside the typing DOM', () => {
+    renderEditor(block('Heading', 24), 1, 12, { expectedBaselinePx: 120 });
+    const editor = screen.getByRole('textbox');
+    expect(editor.style.top).toBe('5px'); // 100 + 5 + measured 15 = 120
+    expect(editor.textContent).toBe('Heading');
+    const marker = screen.getByTestId('text-baseline-marker');
+    expect(editor.contains(marker)).toBe(false);
+    expect(screen.getByTestId('text-baseline-probe').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByTestId('text-baseline-probe').className).toContain('invisible');
+  });
+
+  it('re-measures on a whole-box size change and font loading without replacing the editable', async () => {
+    renderEditor(block('Heading', 24), 1, 0, { expectedBaselinePx: 120 });
+    const editor = screen.getByRole('textbox');
+    markerOffset = 30;
+    fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '40' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+    expect(editor.style.top).toBe('-10px');
+    markerOffset = 28;
+    act(() => { fonts.dispatchEvent(new Event('loadingdone')); });
+    expect(editor.style.top).toBe('-8px');
+    markerOffset = 29;
+    await act(async () => { fontsReady(); await fonts.ready; });
+    expect(editor.style.top).toBe('-9px');
+    expect(screen.getByRole('textbox')).toBe(editor);
+    expect(editor.textContent).toBe('Heading');
+  });
+
+  it('does not probe every keystroke or interfere with composition and selection', () => {
+    renderEditor(block('Heading', 24), 1, 0, { expectedBaselinePx: 120 });
+    const editor = screen.getByRole('textbox');
+    const initialReads = markerReads;
+    fireEvent.compositionStart(editor);
+    editor.append(document.createTextNode(' नमस्ते'));
+    placeCaretAtTextEnd(editor.lastChild!);
+    const anchor = window.getSelection()?.anchorNode;
+    fireEvent.input(editor);
+    fireEvent.compositionUpdate(editor);
+    fireEvent.compositionEnd(editor);
+    expect(markerReads).toBe(initialReads);
+    expect(window.getSelection()?.anchorNode).toBe(anchor);
+    expect(editor.textContent).toBe('Heading नमस्ते');
+  });
+
+  it('re-measures selected inline font changes in the hidden mirror without inserting a marker into the selection', () => {
+    renderEditor(block('Heading', 24), 1, 0, { expectedBaselinePx: 120 });
+    const editor = screen.getByRole('textbox');
+    selectText(editor.firstChild!, 0, 7);
+    markerOffset = 25;
+    fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '40' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+    expect(editor.style.top).toBe('-5px');
+    expect(editor.querySelector('[data-testid="text-baseline-marker"]')).toBeNull();
+    expect(screen.getByTestId('text-baseline-probe').querySelector('[data-font-size-pt="40"]')).not.toBeNull();
+    expect(window.getSelection()?.toString()).toBe('Heading');
+  });
+
+  it('retains the old offset when the probe has no layout', () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue(new DOMRect());
+    renderEditor(block('Heading', 24), 1, 12, { expectedBaselinePx: 120 });
+    expect(screen.getByRole('textbox').style.top).toBe('-14px');
+  });
+
+  it('follows Add Text’s existing size-dependent commit baseline', () => {
+    renderEditor(block('Heading', 24), 1, 0, { expectedBaselinePx: 120, baselineFontSizeSlopePx: 1 });
+    markerOffset = 30;
+    fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '40' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+    expect(screen.getByRole('textbox').style.top).toBe('10px'); // baseline now 140, as Add Text already saves
+  });
+
+  it.each(['center', 'right', 'paragraph', 'cell', 'list'] as const)(
+    'does not change any Done field for a %s, including its moved baseline', (kind) => {
+      const value = kind === 'paragraph' || kind === 'list' ? paragraph('First line', 'Second line')
+        : block('Heading', 24);
+      const aligned = kind === 'center' || kind === 'right'
+        ? { ...value, align: kind, alignWidthPt: 500 } : value;
+      const bulletMode = kind === 'list' ? { items: ['First line', 'Second line'], maxHeightPt: 200 } : undefined;
+      const outputs: unknown[] = [];
+      for (const expectedBaselinePx of [undefined, 120]) {
+        const onDone = vi.fn();
+        const view = renderEditor(aligned, 1, 0, { expectedBaselinePx, onDone, bulletMode });
+        const editor = screen.getByRole('textbox');
+        editor.append(document.createTextNode('!'));
+        fireEvent.input(editor);
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to move' }), { key: 'ArrowDown' });
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(onDone).toHaveBeenCalledOnce();
+        outputs.push(onDone.mock.calls[0]?.[0]);
+        view.unmount();
+      }
+      expect(outputs[1]).toEqual(outputs[0]);
     },
   );
 });

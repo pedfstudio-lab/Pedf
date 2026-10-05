@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { PDFPageProxy, PageViewport } from 'pdfjs-dist';
 import {
   pdfRectToScreenRect,
+  pdfToScreen,
   screenRectToPdfRect,
 } from '@/lib/export/coordinates';
 import type { ScreenRect } from '@/lib/export/coordinates';
@@ -1314,6 +1315,10 @@ export function OverlayLayer({
               existing={existing?.texts}
               screenRect={screenRect}
               topCorrectionPx={topCorrectionPx}
+              expectedBaselinePx={pdfToScreen(viewport, {
+                x: bulletBase?.textX ?? base?.x ?? activeBlock.rect.x,
+                y: bulletBase?.topBaselineY ?? base?.topBaselineY ?? activeBlock.topBaselineY,
+              }, dpr).y}
               zoom={zoom}
               pageWidthPt={viewport.width / (zoom * dpr)}
             pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
@@ -1413,6 +1418,9 @@ export function OverlayLayer({
             existing={existing}
             toolbarObstacles={blocks.map((candidate) => pdfRectToScreenRect(candidate.rect, viewport, dpr))}
             screenRect={screenRect}
+            expectedBaselinePx={pdfToScreen(viewport, { x: block.rect.x, y: block.topBaselineY }, dpr).y}
+            baselineFontSizeSlopePx={pdfToScreen(viewport, { x: block.rect.x, y: block.topBaselineY - 1 }, dpr).y
+              - pdfToScreen(viewport, { x: block.rect.x, y: block.topBaselineY }, dpr).y}
             zoom={zoom}
             pageWidthPt={viewport.width / (zoom * dpr)}
             pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}

@@ -16,7 +16,7 @@ import {
 } from '@/lib/edit/textEditSession';
 import type { TextEditSessionValue } from '@/lib/edit/textEditSession';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
-import { editorFirstLineOffsetPx } from '@/lib/edit/editorPosition';
+import { baselineCorrectionPx, editorFirstLineOffsetPx } from '@/lib/edit/editorPosition';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import {
   effectiveTextSpanStyle,
@@ -344,6 +344,10 @@ interface TextEditOverlayProps {
   readonly screenRect: ScreenRect;
   /** Box-only source-ink adjustment; content cancels it to retain the PDF baseline. */
   readonly topCorrectionPx?: number;
+  /** Page CSS y-coordinate of the first baseline used by Done, before a drag. */
+  readonly expectedBaselinePx?: number;
+  /** Add Text's existing font-size-dependent baseline, converted through the viewport. */
+  readonly baselineFontSizeSlopePx?: number;
   readonly zoom: number;
   readonly pageWidthPt: number;
   /** Page box in CSS pixels; floating bars are kept inside it because the page clips overflow. */
@@ -373,6 +377,8 @@ export function TextEditOverlay({
   existing,
   screenRect,
   topCorrectionPx = 0,
+  expectedBaselinePx,
+  baselineFontSizeSlopePx = 0,
   zoom,
   pageWidthPt,
   pageSizePx,
@@ -471,6 +477,10 @@ export function TextEditOverlay({
   const [errorRef, errorSize] = useElementSize<HTMLDivElement>();
   const editableRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const baselineProbeRef = useRef<HTMLDivElement>(null);
+  const baselineMarkerRef = useRef<HTMLSpanElement>(null);
+  const baselineSampleRef = useRef<HTMLSpanElement>(null);
+  const [measuredBaselineOffset, setMeasuredBaselineOffset] = useState<number>();
   const [inkFrame, setInkFrame] = useState<ScreenRect>();
   const selectionRangeRef = useRef<Range | null>(null);
   const initialRenderedHeightRef = useRef(initialHeight);
@@ -671,6 +681,32 @@ export function TextEditOverlay({
   const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -8, top: -8 };
   const lineHeight = textBlockLineHeight(block, style);
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
+  const baselineCorrection = baselineCorrectionPx(
+    expectedBaselinePx === undefined ? undefined
+      : expectedBaselinePx + (style.fontSizePt - initialStyle.fontSizePt) * baselineFontSizeSlopePx,
+    screenRect.top + firstLineOffsetPx,
+    measuredBaselineOffset,
+    style.fontSizePt * zoom,
+  );
+  const measureBaseline = useCallback(() => {
+    const probe = baselineProbeRef.current;
+    const marker = baselineMarkerRef.current;
+    const sample = baselineSampleRef.current;
+    const editable = editableRef.current;
+    // The root's font alone is not enough when the first line contains an inline
+    // size/family override. Mirror it only in the hidden probe, never the editor.
+    // This runs on font/layout changes, not on input or composition events.
+    if (sample && editable) {
+      sample.replaceChildren(...Array.from(editable.childNodes, (node) => node.cloneNode(true)));
+      if (!sample.hasChildNodes()) sample.textContent = 'M';
+    }
+    const probeRect = probe?.getBoundingClientRect();
+    const markerRect = marker?.getBoundingClientRect();
+    // A real zero-size marker has a meaningful top; jsdom's entire probe has no layout.
+    const offset = probeRect && markerRect && probeRect.height > 0
+      ? markerRect.top - probeRect.top : undefined;
+    setMeasuredBaselineOffset((current) => current === offset ? current : offset);
+  }, []);
   const visibleError = externalError
     ?? appearanceError
     ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
@@ -710,7 +746,29 @@ export function TextEditOverlay({
       placeCaretAtEnd(editable);
     }
     resizeToContent();
-  }, [resizeToContent, width, style, previewMode]);
+  }, [resizeToContent, width, style, previewMode, baselineCorrection]);
+
+  useLayoutEffect(() => {
+    measureBaseline();
+  }, [measureBaseline, style, lineHeight, firstLineOffsetPx, zoom]);
+
+  useEffect(() => {
+    let disposed = false;
+    const measure = () => { if (!disposed) measureBaseline(); };
+    const fonts = document.fonts;
+    void fonts?.ready.then(measure);
+    fonts?.addEventListener('loadingdone', measure);
+    window.addEventListener('resize', measure);
+    const probe = baselineProbeRef.current;
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    if (probe) observer?.observe(probe);
+    return () => {
+      disposed = true;
+      fonts?.removeEventListener('loadingdone', measure);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [measureBaseline]);
 
   useEffect(() => {
     const editable = editableRef.current;
@@ -803,6 +861,7 @@ export function TextEditOverlay({
       return;
     }
     window.document.execCommand(command, false);
+    measureBaseline();
     refreshSelectionStyle();
     resizeToContent();
   };
@@ -842,6 +901,7 @@ export function TextEditOverlay({
     selectionRangeRef.current = selected.cloneRange();
     editable.focus({ preventScroll: true });
     refreshSelectionStyle();
+    measureBaseline();
     resizeToContent();
   };
 
@@ -868,6 +928,7 @@ export function TextEditOverlay({
     );
     selectionRangeRef.current = selected.cloneRange();
     refreshSelectionStyle();
+    measureBaseline();
     resizeToContent();
   };
 
@@ -1073,10 +1134,21 @@ export function TextEditOverlay({
           ...textStyleToCss(style, zoom),
           ...(previewMode === 'preparing' ? {WebkitTextFillColor:'transparent',caretColor:colorCss(style.color)} : {}),
           lineHeight: lineHeight / style.fontSizePt,
-          top: firstLineOffsetPx,
+          top: firstLineOffsetPx + baselineCorrection,
           textAlign: initialAlign,
         }}
       />
+      <div
+        ref={baselineProbeRef}
+        data-testid="text-baseline-probe"
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute w-full whitespace-pre-wrap break-words border-0 p-0"
+        style={{ ...textStyleToCss(style, zoom), lineHeight: lineHeight / style.fontSizePt, top: firstLineOffsetPx }}
+      >
+        <span ref={baselineMarkerRef} data-testid="text-baseline-marker"
+          style={{ display: 'inline-block', width: 0, height: 0, padding: 0, border: 0, verticalAlign: 'baseline' }} /><span
+          ref={baselineSampleRef} style={{ display: 'contents' }} />
+      </div>
       <div
         data-testid="text-editor-frame"
         aria-hidden="true"

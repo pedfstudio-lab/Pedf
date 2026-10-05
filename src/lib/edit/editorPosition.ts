@@ -19,6 +19,20 @@ export function editorFirstLineOffsetPx(
   return halfLeadingPx === 0 ? 0 : -halfLeadingPx;
 }
 
+/** Presentation only: align the measured CSS baseline with the commit baseline. */
+export function baselineCorrectionPx(
+  expectedBaselinePx: number | undefined,
+  editorTopPx: number,
+  measuredBaselineOffsetPx: number | undefined,
+  fontSizePx: number,
+): number {
+  if (expectedBaselinePx === undefined || measuredBaselineOffsetPx === undefined
+    || ![expectedBaselinePx, editorTopPx, measuredBaselineOffsetPx, fontSizePx].every(Number.isFinite)
+    || fontSizePx <= 0) return 0;
+  const difference = expectedBaselinePx - editorTopPx - measuredBaselineOffsetPx;
+  return Math.max(-fontSizePx, Math.min(fontSizePx, difference));
+}
+
 /** Reconstruct an Add Text box without losing its first line's painted top. */
 export function freeTextBoxRect(texts: readonly TextEdit[]): PdfRect {
   const first = texts[0];
