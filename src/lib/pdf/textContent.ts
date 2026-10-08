@@ -1,3 +1,4 @@
+import { OPS } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import { viewportToPdf } from '@/lib/export/coordinates';
@@ -7,11 +8,16 @@ import { dropCoveredTextRuns } from './hiddenText';
 import { resolveTextPaint, textPaintForItems } from './textPaint';
 import type { RuleLine } from './ruleLines';
 import type { DrawnMarker } from './textUnits';
+import { biggerParagraphGap, inRuledColumn, pageLinePitches } from './paragraphPitch';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
+  canJoinFillerTextBlock,
+  canJoinUniformTextBlock,
   detectBlockAlignment,
   intrinsicBold,
+  lineHasDrawnMarker,
+  startsWithBulletMarker,
   splitTextRow,
 } from './textUnits';
 
@@ -22,6 +28,9 @@ export interface TextRun {
   readonly text: string;
   readonly rect: PdfRect;
   readonly style: TextStyle;
+  /** Glyph-weighted advances normalized to this run's measured width; grouping only. */
+  readonly characterWidthsPt?: readonly number[];
+  readonly spaceWidthPt?: number;
 }
 
 export interface TextLine {
@@ -42,6 +51,8 @@ export interface TextBlock {
   readonly rect: PdfRect;
   readonly topBaselineY: number;
   readonly lineHeightPt: number;
+  /** Measured page pitch for paragraph-aware editing; legacy sessions ignore it. */
+  readonly paragraphLineHeightPt?: number;
   readonly style: TextStyle;
   readonly lines: readonly TextLine[];
   readonly align?: TextAlignment;
@@ -124,7 +135,16 @@ function isStandaloneNumber(text: string): boolean {
 }
 
 export interface TextGroupingOptions {
+  /** Historical partition for saved edits and Change-10 corpus comparisons. */
+  readonly preserveParagraphGaps?: boolean;
   readonly ruleLines: readonly RuleLine[];
+  /** Compatibility partition for saved-project anchors and corpus comparisons. */
+  readonly preserveParagraphSplits?: boolean;
+  /** Measure Change 5 separately against the already-reviewed wrap exception. */
+  readonly preserveUniformSplits?: boolean;
+  /** Measurements and saved anchors use the pre-Change-7/9 partition. */
+  readonly preserveFillerSplits?: boolean;
+  readonly preserveBulletTails?: boolean;
   /**
    * Dots drawn beside lines rather than typed into them. Without these a drawn-marker
    * bullet list never groups, so `bulletList.ts` cannot recognise it and the list loses
@@ -272,7 +292,7 @@ function canJoinBlock(
   options?: TextGroupingOptions,
 ): boolean {
   if (options) {
-    return canJoinTextBlock(lines, line, options.ruleLines, options.markers ?? [])
+    return canJoinTextBlock(lines, line, options.ruleLines, options.markers ?? [], [], options.preserveBulletTails)
       || canJoinTextBulletList(lines, line, options.ruleLines, options.markers ?? []);
   }
   const previous = lines.at(-1);
@@ -332,7 +352,8 @@ export function groupRunsIntoBlocks(
   options?: TextGroupingOptions,
 ): TextBlock[] {
   const lineGroups: TextLine[][] = [];
-  for (const line of mergeRunsIntoLines(runs, options)) {
+  const pageLines = mergeRunsIntoLines(runs, options);
+  for (const line of pageLines) {
     const candidates = lineGroups
       .filter((group) => canJoinBlock(group, line, options))
       .sort((left, right) => {
@@ -348,7 +369,82 @@ export function groupRunsIntoBlocks(
     else lineGroups.push([line]);
   }
 
-  return lineGroups.map((lines) => {
+  // Freeze today's partition first. A new bridge must never change the target
+  // chosen for a later line, or it can SPLIT an existing box (prototype's bug).
+  if (options && !options.preserveParagraphSplits) {
+    // Changes 1–6 remain the frozen starting partition, not just their older
+    // legacy arm. Change 7 may add bridges but cannot undo a proven old wrap.
+    for (const filler of options.preserveFillerSplits ? [false] : [false, true]) {
+    const parents = lineGroups.map((_, index) => index);
+    const root = (index: number): number => {
+      while (parents[index] !== index) index = parents[index]!;
+      return index;
+    };
+    const usedUpper = new Set<number>();
+    const joinedLines = new Map(lineGroups.map((group, index) => [index, [...group]]));
+    for (let lowerIndex = 1; lowerIndex < lineGroups.length; lowerIndex += 1) {
+      const lower = lineGroups[lowerIndex]!;
+      const first = lower[0]!;
+      if (lower.some((line) => startsWithBulletMarker(line.text) || lineHasDrawnMarker(line, options.markers ?? []))) continue;
+      const candidates = lineGroups.slice(0, lowerIndex).flatMap((upper, index) => {
+        if (usedUpper.has(index)) return [];
+        const connected = joinedLines.get(root(index))!;
+        if (filler) {
+          // Freeze the ENTIRE old list/marker box, including its heading and
+          // unmarked continuations. Only checking its last line loses list ownership.
+          if (connected.some((line) => startsWithBulletMarker(line.text) || lineHasDrawnMarker(line, options.markers ?? []))) return [];
+          return canJoinFillerTextBlock(connected, first, options.ruleLines, options.markers, pageLines) ? [index] : [];
+        }
+        if (canJoinTextBlock(upper, first, options.ruleLines, options.markers, [], options.preserveBulletTails)) return [];
+        return canJoinTextBlock(upper, first, options.ruleLines, options.markers, pageLines, options.preserveBulletTails)
+          || (!options.preserveUniformSplits && canJoinUniformTextBlock(connected, first, options.ruleLines, options.markers, pageLines)) ? [index] : [];
+      }).sort((a, b) => lineGroups[a]!.at(-1)!.baselineY - lineGroups[b]!.at(-1)!.baselineY);
+      const upperIndex = candidates[0];
+      if (upperIndex === undefined) continue;
+      const upperRoot = root(upperIndex), lowerRoot = root(lowerIndex);
+      joinedLines.set(upperRoot, [...joinedLines.get(upperRoot)!, ...joinedLines.get(lowerRoot)!]
+        .sort((a, b) => b.baselineY - a.baselineY || a.rect.x - b.rect.x));
+      joinedLines.delete(lowerRoot);
+      parents[lowerRoot] = upperRoot;
+      usedUpper.add(upperIndex);
+    }
+    const combined = new Map<number, TextLine[]>();
+    lineGroups.forEach((group, index) => {
+      const key = root(index);
+      const bucket = combined.get(key) ?? [];
+      bucket.push(...group);
+      combined.set(key, bucket);
+    });
+    lineGroups.splice(0, lineGroups.length, ...[...combined.values()].map((lines) => (
+      lines.sort((a, b) => b.baselineY - a.baselineY || a.rect.x - b.rect.x)
+    )));
+    }
+  }
+  const blocks = lineGroups.map((lines) => textBlockFromLines(lines, Boolean(options)));
+  if (!options || options.preserveParagraphGaps || options.preserveParagraphSplits || options.preserveFillerSplits) return blocks;
+  const pitches = pageLinePitches(pageLines);
+  return blocks.flatMap(block => {
+    if (block.align !== 'left' || block.lines.some(line => startsWithBulletMarker(line.text) || lineHasDrawnMarker(line, options.markers ?? []))) return [block];
+    const groups: TextLine[][] = [[]];
+    const cell = inRuledColumn(block, options.ruleLines);
+    block.lines.forEach((line, index) => {
+      if (index && !cell && biggerParagraphGap(block.lines[index - 1]!, line, pitches)) groups.push([]);
+      groups.at(-1)!.push(line);
+    });
+    return groups.map(lines => {
+      const next = groups.length === 1 ? block : textBlockFromLines(lines);
+      const counts = new Map<number, number>();
+      for (const line of lines) {
+        const pitch = pitches.get(line); if (pitch !== undefined) counts.set(pitch, (counts.get(pitch) ?? 0) + 1);
+      }
+      const normal = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+      return normal === undefined ? next : { ...next, paragraphLineHeightPt: normal };
+    });
+  });
+}
+
+/** Rebuild a partition from the same source lines, without changing any style. */
+export function textBlockFromLines(lines: readonly TextLine[], localAlignment = true): TextBlock {
     const style = lines[0]?.style ?? {
       fontName: 'Helvetica',
       fontSizePt: 12,
@@ -359,7 +455,7 @@ export function groupRunsIntoBlocks(
     const gaps = lines.slice(1).map((line, index) => (
       (lines[index]?.baselineY ?? line.baselineY) - line.baselineY
     ));
-    const align = options ? detectBlockAlignment(lines) : (
+    const align = localAlignment ? detectBlockAlignment(lines) : (
       lines.every((line) => line.align === lines[0]?.align)
         ? (lines[0]?.align ?? 'left')
         : 'left'
@@ -383,7 +479,73 @@ export function groupRunsIntoBlocks(
         alignWidthPt: blockRect.w,
       }),
     };
+}
+
+/** Keep an already-edited old box intact, including its trailing boundary. */
+export function preserveEditedBlockPartitions(
+  blocks: readonly TextBlock[], legacy: readonly TextBlock[],
+  isEdited: (block: TextBlock) => boolean,
+): TextBlock[] {
+  const key = (line: TextLine) => JSON.stringify([line.pageIndex, line.baselineY, line.rect.x, line.text]);
+  const editedLines = new Map<string, number>();
+  legacy.forEach((block, index) => {
+    if (isEdited(block)) block.lines.forEach((line) => editedLines.set(key(line), index));
   });
+  if (!editedLines.size) return [...blocks];
+  const emittedEdited = new Set<number>();
+  return blocks.flatMap((block) => {
+    if (!block.lines.length) return [block];
+    const pieces: TextLine[][] = [];
+    let previous: number | undefined;
+    block.lines.forEach((line, index) => {
+      const owner = editedLines.get(key(line));
+      if (!index || owner !== previous) pieces.push([]);
+      pieces.at(-1)!.push(line);
+      previous = owner;
+    });
+    return pieces.flatMap((lines) => {
+      const owner = editedLines.get(key(lines[0]!));
+      if (owner === undefined) return [pieces.length === 1 ? block : textBlockFromLines(lines)];
+      if (emittedEdited.has(owner)) return [];
+      emittedEdited.add(owner);
+      // Change 9 may detach an old list's tail. A saved edit still owns that
+      // original complete box, not several freshly detected fragments.
+      const saved = legacy[owner]!;
+      // The same box regrouped: keep the current block, whose page pitch the
+      // first edit used. A copy without it reopens at a different line pitch.
+      if (pieces.length === 1 && saved.lines.length === block.lines.length
+        && saved.lines.every((line, lineIndex) => key(line) === key(block.lines[lineIndex]!))) return [block];
+      return [saved.paragraphLineHeightPt === undefined && block.paragraphLineHeightPt !== undefined
+        ? { ...saved, paragraphLineHeightPt: block.paragraphLineHeightPt } : saved];
+    });
+  });
+}
+
+/** Own-font glyph widths, not average letters or a substitute browser font. */
+function glyphWidthsByFont(operators: { fnArray: number[]; argsArray: unknown[][] }): Map<string, Map<string, number>> {
+  const fonts = new Map<string, Map<string, number>>();
+  let font = '';
+  const stack: string[] = [];
+  const collect = (value: unknown, widths: Map<string, number>) => {
+    if (Array.isArray(value)) { value.forEach((entry) => collect(entry, widths)); return; }
+    if (!value || typeof value !== 'object') return;
+    const glyph = value as { unicode?: unknown; width?: unknown };
+    if (typeof glyph.unicode !== 'string' || [...glyph.unicode].length !== 1
+      || typeof glyph.width !== 'number' || !Number.isFinite(glyph.width) || glyph.width < 0) return;
+    const previous = widths.get(glyph.unicode);
+    widths.set(glyph.unicode, previous === undefined || previous === glyph.width ? glyph.width : NaN);
+  };
+  operators.fnArray.forEach((op, index) => {
+    const args = operators.argsArray[index];
+    if (op === OPS.save || op === OPS.paintFormXObjectBegin) stack.push(font);
+    if (op === OPS.restore || op === OPS.paintFormXObjectEnd) font = stack.pop() ?? '';
+    if (op === OPS.setFont && typeof args?.[0] === 'string') font = args[0];
+    if (![OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText].includes(op)) return;
+    const widths = fonts.get(font) ?? new Map<string, number>();
+    collect(args, widths);
+    fonts.set(font, widths);
+  });
+  return fonts;
 }
 
 /** PDF.js Util.transform's affine-matrix multiplication, kept DOM-free for Node tests. */
@@ -533,6 +695,7 @@ export async function extractTextRuns(
   }
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const paintByItem = operatorList ? textPaintForItems(content.items, operatorList) : null;
+  const glyphWidths = operatorList ? glyphWidthsByFont(operatorList) : new Map<string, Map<string, number>>();
   const runs: TextRun[] = [];
   const itemIndexes: number[] = [];
 
@@ -578,13 +741,23 @@ export async function extractTextRuns(
     const programStyle = fontStyleFromProgram(fontData);
     const sourceBold = sourceBoldFromFont(weightSource, fontData);
     const paintBold = paint?.syntheticBold === true;
+    const rect = boundingBox(corners);
+    const advances = [...item.str].map((character) => glyphWidths.get(fontRef)?.get(character));
+    const sum = advances.reduce<number>((total, width) => total + (width ?? NaN), 0);
+    const characterWidthsPt = sum > 0 && Number.isFinite(sum)
+      ? advances.map((width) => width! * rect.w / sum) : undefined;
+    const spaceWidth = glyphWidths.get(fontRef)?.get(' ');
+    const spaceWidthPt = characterWidthsPt && spaceWidth !== undefined && Number.isFinite(spaceWidth)
+      ? spaceWidth * rect.w / sum : undefined;
     runs.push({
       pageIndex,
       // Word maps Symbol's 0xB7 bullet into this private-use character. It is
       // valid only with that embedded Symbol font, so normalize it before any
       // editor path can redraw it as an unknown-glyph box.
       text: isWordSymbolBullet ? STANDARD_BULLET : item.str,
-      rect: boundingBox(corners),
+      rect,
+      ...(characterWidthsPt ? { characterWidthsPt } : {}),
+      ...(spaceWidthPt !== undefined ? { spaceWidthPt } : {}),
       style: {
         fontName,
         fontSizePt: verticalScale,

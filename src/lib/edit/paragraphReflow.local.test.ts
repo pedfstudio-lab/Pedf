@@ -104,6 +104,7 @@ async function editorPage(file: string, pageNumber: number) {
     ruleLines,
     regions,
     blocks,
+    priorBlocks: groupRunsIntoBlocks(runs, { ruleLines, markers, preserveFillerSplits: true, preserveBulletTails: true }),
     bulletLists: blocks
       .map((block) => detectBulletListFromRegions(
         block,
@@ -228,7 +229,13 @@ describe.skipIf(!task74Enabled)('Task 74 Step 1 Revision 1 real borders', () => 
       editorPage(task74Fixtures.sriLanka, 2),
       editorPage(task74Fixtures.fractions, 1),
     ]);
-    expect(sriLankaPage1.blocks).toHaveLength(31);
+    for (const old of sriLankaPage1.priorBlocks.filter(old => !sriLankaPage1.blocks.some(block => block.text === old.text))) {
+      const owner = sriLankaPage1.blocks.find(block => block.lines.some(line => line.runs.some(run => old.lines.some(oldLine => oldLine.runs.includes(run)))))!;
+      expect(old.lines.flatMap(line => line.runs).every(run => owner.lines.some(line => line.runs.includes(run)))).toBe(true);
+      process.stdout.write(`CHANGE7 SRI LANKA p1: ${JSON.stringify(old.text)} -> ${JSON.stringify(owner.text)}\n`);
+    }
+    expect(sriLankaPage1.priorBlocks).toHaveLength(31);
+    expect(sriLankaPage1.blocks).toHaveLength(29);
     expect(sriLankaPage2.blocks.map((block) => block.text)).toEqual(expect.arrayContaining([
       'Nuwara Eliya – Ella\n– Yala',
       expect.stringMatching(/^After breakfast, proceed to Ambewela Railway Station/),

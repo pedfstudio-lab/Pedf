@@ -101,6 +101,18 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
             detectRuleLines(page, expectedPage.pageIndex),
           ]);
           const blocks = groupRunsIntoBlocks(runs, { ruleLines });
+          const priorBlocks = groupRunsIntoBlocks(runs, { ruleLines, preserveParagraphGaps: true });
+          const priorNonLeft = priorBlocks.filter((block) => block.align !== 'left');
+          const currentNonLeft = blocks.filter((block) => block.align !== 'left');
+          if (priorNonLeft.length !== currentNonLeft.length) {
+            process.stdout.write(`STEP5C.2 NEIGHBOUR DELTA ${file} p${expectedPage.pageIndex + 1}: ${priorNonLeft.length} -> ${currentNonLeft.length}\n`);
+            for (const old of priorNonLeft.filter((old) => !blocks.some((block) => block.text === old.text))) {
+              const runs = old.lines.flatMap((line) => line.runs);
+              const owners = blocks.filter((block) => block.lines.some((line) => line.runs.some((run) => runs.includes(run))));
+              expect(runs.every((run) => owners.some((block) => block.lines.some((line) => line.runs.includes(run))))).toBe(true);
+              process.stdout.write(`  ${old.align}: ${old.text} -> ${owners.map((block) => block.text).join(' / ')}\n`);
+            }
+          }
           for (const candidate of blocks) {
             const align = candidate.align ?? 'left';
             if (align === 'left') continue;
@@ -129,7 +141,12 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
     // left, 10 centred, 1 right) and formed 6 joined centred blocks, so 416.
     // Every one of the 65 was confirmed present, word for word, inside a larger
     // block; none was lost. A drop here means fragments joined, not text vanished.
-    expect(nonLeft).toBe(416);
+    process.stdout.write(`STEP5C.2 NEIGHBOUR MEASURE ${firstNarrowed}/${nonLeft}; re-edit ${reEditNarrowed}\n`);
+    // Change 10 splits left boxes at clear gaps, recovering 25 separate
+    // non-left fragments (377 -> 402). Existing non-left boxes are protected.
+    // Every moved
+    // page and the owning block of every old line are checked and printed.
+    expect(nonLeft).toBe(402);
     expect(firstNarrowed).toBe(85);
     expect(reEditNarrowed).toBe(firstNarrowed);
     process.stdout.write(

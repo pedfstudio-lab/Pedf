@@ -5,8 +5,11 @@ import type { TextLine, TextRun } from './textContent';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
+  canJoinUniformTextBlock,
   detectBlockAlignment,
   intrinsicBold,
+  paragraphWeight,
+  firstWordWidthPt,
   splitTextRow,
 } from './textUnits';
 
@@ -183,6 +186,96 @@ describe('stacked text units', () => {
       [],
     )).toBe(false);
   });
+});
+
+describe('evidenced paragraph wraps', () => {
+  function bold(source: TextLine): TextLine {
+    const next = { ...source.style, fontName: 'Helvetica-Bold', bold: true, sourceBold: true };
+    return { ...source, style: next, runs: source.runs.map((run) => ({ ...run, style: next })) };
+  }
+  const upper = line('A paragraph continues with', 20, 500, 210);
+  const lower = bold(line('Highlights:', 20, 486, 70));
+  const peer = line('Another full-width paragraph', 20, 440, 250);
+  const joins = (next = lower, previous = upper, peers = [upper, lower, peer]) => (
+    canJoinTextBlock([previous], next, [], [], peers)
+  );
+  it('joins a wrapped bold phrase without changing its style', () => {
+    expect(joins()).toBe(true);
+    expect(lower.style.bold).toBe(true);
+    expect(paragraphWeight(lower)).toBe('bold');
+  });
+  it('counts letters across fragmented runs; punctuation is not weight', () => {
+    const mixed = { ...lower, runs: [run('regular text', 20, 40), ...lower.runs] };
+    expect(paragraphWeight(mixed)).toBe('mixed');
+    expect(paragraphWeight({ ...lower, runs: [run('...123', 20, 30), ...lower.runs] })).toBe('bold');
+  });
+  it('uses the first word’s own advances, not average character width', () => {
+    const source = line('WWW i', 20, 486, 40);
+    const own = { ...source, runs: [{ ...source.runs[0]!, characterWidthsPt: [10, 10, 10, 5, 5] }] };
+    expect(firstWordWidthPt(own)).toBe(30);
+    expect(firstWordWidthPt(line('WWW i', 20, 486, 40))).toBeUndefined();
+  });
+  it('requires a proven column and a word that cannot fit', () => {
+    expect(joins(lower, upper, [upper])).toBe(false);
+    expect(joins(bold(line('tiny', 20, 486, 20)))).toBe(false);
+    expect(joins(lower, upper, [upper, line('Narrow peer', 20, 440, 190)])).toBe(false);
+  });
+  it.each(['• Breakfast', '-Wrote', '– x', '3:15 PM', '1. First', '2) Second', '100% refund after Friday', '© Copyright notice', 'Day 2'])('never newly joins an item: %s', (text) => {
+    expect(joins(bold(line(text, 20, 486, 100)))).toBe(false);
+  });
+  it('does not override page, border, size, family or italic guards', () => {
+    expect(joins({ ...lower, pageIndex: 1 })).toBe(false);
+    expect(canJoinTextBlock([upper], lower, [rule('horizontal', 20, 493, 270, 493)], [], [upper, lower, peer])).toBe(false);
+    expect(joins(bold(line('Highlights:', 20, 486, 70, 11)))).toBe(false);
+    expect(joins({ ...lower, style: { ...lower.style, fontName: 'Times-Bold' } })).toBe(false);
+    expect(joins({ ...lower, style: { ...lower.style, italic: true } })).toBe(false);
+  });
+  it('keeps same-weight new sentences apart but permits bold Highlights', () => {
+    const ending = line('The sentence ends here.', 20, 500, 210);
+    expect(joins(line('Competition continues across this wider line', 20, 486, 260), ending)).toBe(false);
+    expect(joins(lower, ending)).toBe(true);
+  });
+});
+
+describe('uniform text blocks', () => {
+  const upper = line('Total questions: 108', 20, 500, 80);
+  const lower = line('Total duration: 120 minutes (2 hours)', 20, 486, 220);
+  it('ignores length and capitals for same-face fact lines and accepted plain subheadings', () => {
+    expect(canJoinUniformTextBlock([upper], lower, [])).toBe(true);
+    expect(canJoinUniformTextBlock([line('Accountability', 20, 500, 55)], lower, [])).toBe(true);
+  });
+  it.each(['• Breakfast', '-Wrote', '– x', '1. First', '2) Second', '5.1 Section', '1.10.2 Section', '(a) Board', '(iii) Board', '(2) Board', 'a. Board', 'iii. Board', '3:15 PM', '10.30 AM', 'Day 2', '100% refund', '© Notice', '203/-'])('does not newly absorb item %s on either side', (text) => {
+    const item = line(text, 20, 500, 90);
+    expect(canJoinUniformTextBlock([item], lower, [])).toBe(false);
+    expect(canJoinUniformTextBlock([upper], { ...item, baselineY: 486 }, [])).toBe(false);
+  });
+  it('rejects size, weight, mixed emphasis, italic, family, page, indent and borders', () => {
+    const variants = [
+      { ...lower, style: { ...lower.style, fontSizePt: 11 } },
+      { ...lower, style: { ...lower.style, italic: true } },
+      { ...lower, style: { ...lower.style, fontName: 'Times' } },
+      { ...lower, pageIndex: 1 },
+      { ...lower, rect: { ...lower.rect, x: 23 } },
+      { ...lower, runs: lower.runs.map((run) => ({ ...run, style: { ...run.style, bold: true } })) },
+      { ...lower, runs: [...lower.runs, { ...run('bold label', 20, 40), style: { ...style, bold: true } }] },
+    ];
+    for (const variant of variants) expect(canJoinUniformTextBlock([upper], variant, [])).toBe(false);
+    expect(canJoinUniformTextBlock([upper], lower, [rule('horizontal', 20, 493, 250, 493)])).toBe(false);
+    expect(canJoinUniformTextBlock([upper], lower, [], [{ pageIndex: 0, rect: { x: 10, y: 487, w: 4, h: 4 } }])).toBe(false);
+  });
+  it('rejects extra spacing against the joined box’s established line gap', () => {
+    const middle = line('Total marks: 360', 20, 486, 90);
+    expect(canJoinUniformTextBlock([upper, middle], line('Sections: 3', 20, 472, 70), [])).toBe(true);
+    expect(canJoinUniformTextBlock([upper, middle], line('Sections: 3', 20, 470, 70), [])).toBe(false);
+  });
+});
+
+it('does not absorb rows of a borderless table with aligned parallel cells', () => {
+  const upper = line('A short name', 20, 500, 80), lower = line('A considerably longer name', 20, 486, 220);
+  const peers = [upper, lower, line('Role 1', 300, 500, 100), line('Role 2', 300, 486, 120)];
+  expect(canJoinUniformTextBlock([upper], lower, [], [], peers)).toBe(false);
+  expect(canJoinUniformTextBlock([upper], lower, [], [], peers.slice(0, 3))).toBe(false);
+  expect(canJoinUniformTextBlock([upper], lower, [], [], [upper, lower])).toBe(true);
 });
 
 describe('block-local alignment', () => {

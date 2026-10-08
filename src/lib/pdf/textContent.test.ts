@@ -26,7 +26,48 @@ import {
   isTableNumber,
   mergeRunsIntoLines,
   sourceBoldFromFont,
+  preserveEditedBlockPartitions,
+  textBlockFromLines,
 } from './textContent';
+
+describe('saved paragraph partitions', () => {
+  it('keeps a previously edited list and its old tail as one saved box after Change 9', () => {
+    const style = { fontName: 'Helvetica', fontSizePt: 10, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
+    const runs = ['List item one', 'List item two', 'Old swallowed note'].map((text, index) => ({
+      pageIndex: 0, text, style, rect: { x: 40, y: 500 - index * 14, w: 180, h: 10 },
+    }));
+    const lines = mergeRunsIntoLines(runs, { ruleLines: [] });
+    const legacy = [textBlockFromLines(lines)];
+    const fresh = [textBlockFromLines(lines.slice(0, 2)), textBlockFromLines(lines.slice(2))];
+    expect(preserveEditedBlockPartitions(fresh, legacy, () => true)).toEqual(legacy);
+    expect(preserveEditedBlockPartitions(fresh, legacy, () => false)).toEqual(fresh);
+  });
+  it('joins a same-size same-family bold heading with its facts, but not a larger-gap note (Change 7)', () => {
+    const style = { fontName: 'Times-Roman', fontSizePt: 10, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
+    const texts = ['Quick Snapshot', 'Total questions: 108', 'Total marks: 360', 'Total duration: 120 minutes (2 hours)', 'Sections: 3 (Language Skills, Quantitative Skills, Logical Reasoning)', 'Order of sections is fixed'];
+    const runs = texts.map((text, index) => ({ pageIndex: 0, text,
+      style: index === 0 ? { ...style, bold: true } : style,
+      rect: { x: 20, y: index < 5 ? 500 - index * 14 : 410, w: [90, 90, 90, 190, 320, 180][index]!, h: 10 },
+    }));
+    const blocks = groupRunsIntoBlocks(runs, { ruleLines: [] });
+    expect(blocks.map((block) => block.lines.map((line) => line.text))).toEqual([texts.slice(0, 5), [texts[5]]]);
+    expect(groupRunsIntoBlocks(runs, { ruleLines: [], preserveParagraphSplits: true })).toHaveLength(5);
+  });
+  it('retains both edges of an edited old middle box, but leaves fresh paragraphs joined', () => {
+    const style = { fontName: 'Helvetica', fontSizePt: 10, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
+    const runs = ['First line', 'Edited second box', 'More in second box', 'Third box'].map((text, index) => ({
+      pageIndex: 0, text, style, rect: { x: 20, y: 500 - index * 14, w: 250, h: 10 },
+    }));
+    const lines = mergeRunsIntoLines(runs, { ruleLines: [] });
+    const old = [textBlockFromLines(lines.slice(0, 1)), textBlockFromLines(lines.slice(1, 3)), textBlockFromLines(lines.slice(3))];
+    const merged = [textBlockFromLines(lines)];
+    expect(preserveEditedBlockPartitions(merged, old, () => false)).toEqual(merged);
+    const compatible = preserveEditedBlockPartitions(merged, old, (block) => block === old[1]);
+    expect(compatible.map((block) => block.text)).toEqual(old.map((block) => block.text));
+    expect(compatible[1]).toEqual(old[1]);
+    expect(compatible[1]!.lines[0]!.runs[0]).toBe(runs[1]);
+  });
+});
 
 const openDocuments: PDFDocumentProxy[] = [];
 

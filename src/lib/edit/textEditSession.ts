@@ -1,9 +1,10 @@
-import type { TextAlignment, TextSpan, TextStyle } from '@/lib/export/types';
+import type { TextAlignment, TextSpan, TextStyle, TextParagraphLayout } from '@/lib/export/types';
 
 export interface TextEditSessionValue {
   readonly text: string;
   readonly style: TextStyle;
   readonly spans?: readonly TextSpan[];
+  readonly paragraphs?: readonly TextParagraphLayout[];
   readonly width: number;
   readonly height: number;
   readonly dx: number;
@@ -80,6 +81,7 @@ export function sameTextEditSession(
     normalizeText(initial.text) === normalizeText(current.text) &&
     sameStyle(initial.style, current.style) &&
     sameSpans(initial.spans, current.spans) &&
+    JSON.stringify(initial.paragraphs) === JSON.stringify(current.paragraphs) &&
     initial.align === current.align &&
     initial.alignLeftPt === current.alignLeftPt &&
     initial.alignWidthPt === current.alignWidthPt &&

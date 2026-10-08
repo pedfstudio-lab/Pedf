@@ -116,6 +116,39 @@ function history(edits = allEditKinds()): HistoryState {
 }
 
 describe('project state serialization', () => {
+  it('round-trips and deep-clones paragraph spacing, retaining older saves without it', () => {
+    const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), boxText: 'First\nSecond',
+      boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }, { gapBeforePt: 3, firstIndentPt: 28.8, restIndentPt: 0 }] };
+    const saved = serializeProject(history([edit]), 0, 1), restored = deserializeProject(saved, 3);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    const copy = restored.value.history.present.edits[0] as TextEdit;
+    expect(copy.boxParagraphs).toEqual(edit.boxParagraphs);
+    expect(copy.boxParagraphs).not.toBe(edit.boxParagraphs);
+    expect(copy.boxParagraphs?.[1]).not.toBe(edit.boxParagraphs?.[1]);
+    for (const invalid of [-1, NaN, Infinity, '3']) {
+      const corrupt = serializeProject(history([{ ...edit, boxParagraphs: [{ ...edit.boxParagraphs![0]!, gapBeforePt: invalid as number }, edit.boxParagraphs![1]!] }]), 0, 1);
+      expect(deserializeProject(corrupt, 3)).toMatchObject({ ok: false, reason: 'corrupt' });
+    }
+    const old = { ...edit, boxParagraphs: undefined };
+    expect(deserializeProject(serializeProject(history([old]), 0, 1), 3).ok).toBe(true);
+  });
+  it('opens a save whose paragraph layouts no longer match its text, dropping only those layouts', () => {
+    // Saved before the placeholder-break fix: an empty paragraph added a
+    // phantom line, so three text lines carry two layouts.
+    const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), boxText: 'First\n\nSecond',
+      boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }, { gapBeforePt: 3, firstIndentPt: 0, restIndentPt: 0 }] };
+    const saved = serializeProject(history([edit]), 0, 1);
+    expect((saved.history.present.edits[0] as TextEdit).boxParagraphs).toBeUndefined();
+    const stored = { ...saved, history: { ...saved.history, present: { ...saved.history.present, edits: [edit] } } };
+    const restored = deserializeProject(stored, 3);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    const copy = restored.value.history.present.edits[0] as TextEdit;
+    expect(copy.boxText).toBe('First\n\nSecond');
+    expect(copy.text).toBe(edit.text);
+    expect(copy.boxParagraphs).toBeUndefined();
+  });
   it('round-trips all edit kinds, page operations, and capped undo history', () => {
     const source = history();
     const serialized = serializeProject(source, 2, 1.5);

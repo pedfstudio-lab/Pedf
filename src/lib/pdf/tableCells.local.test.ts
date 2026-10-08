@@ -160,6 +160,7 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
     expect(baseline.version).toBe(1);
     const comparisons: Comparison[] = [];
     let rejectedUnderlineCandidates = 0;
+    let priorParagraphSplits = 0;
 
     for (const [file, expected] of Object.entries(baseline.files).sort(([left], [right]) => left.localeCompare(right))) {
       const bytes = new Uint8Array(await readFile(file));
@@ -216,6 +217,22 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
         const pageCellSplits = separatedRunPairs(localLines, editorLines);
         const unexpectedCellJoins = separatedRunPairs(editorLines, localLines);
         const pageParagraphSplits = separatedBlockRunPairs(legacyBlocks, localBlocks);
+        const priorSplits = separatedBlockRunPairs(legacyBlocks, groupRunsIntoBlocks(runs, { ruleLines: [], preserveFillerSplits: true, preserveBulletTails: true }));
+        const tailOnlySplits = separatedBlockRunPairs(legacyBlocks, groupRunsIntoBlocks(runs, { ruleLines: [], preserveFillerSplits: true }));
+        priorParagraphSplits += priorSplits.length;
+        // Count repeated labels as separate boundaries, not membership in a set.
+        const removedSplits = difference(priorSplits, pageParagraphSplits);
+        const newSplits = difference(pageParagraphSplits, priorSplits);
+        const approvedTailSplits = difference(tailOnlySplits, priorSplits);
+        const beforeGaps = groupRunsIntoBlocks(runs, { ruleLines: [], preserveParagraphGaps: true });
+        const approvedGapSplits = separatedBlockRunPairs(beforeGaps, localBlocks);
+        expect(difference(newSplits, [...approvedTailSplits, ...approvedGapSplits]), `${file} p${expectedPage.pageIndex + 1}: unapproved paragraph splits`).toEqual([]);
+        if (approvedGapSplits.length) process.stdout.write(`CHANGE10 GAP SPLITS ${file} p${expectedPage.pageIndex + 1}: +${approvedGapSplits.length}\n${approvedGapSplits.join('\n')}\n`);
+        if (newSplits.length) process.stdout.write(`STEP5C.2 CHANGE9 SPLITS ${file} p${expectedPage.pageIndex + 1}: +${newSplits.length}\n${newSplits.join('\n')}\n`);
+        if (removedSplits.length) process.stdout.write(
+          `STEP5C.2 PARAGRAPH SPLIT DELTA ${file} p${expectedPage.pageIndex + 1}: -${removedSplits.length}\n`
+          + removedSplits.map((boundary) => `  ${boundary}`).join('\n') + '\n',
+        );
         const pageParagraphJoins = separatedBlockRunPairs(localBlocks, legacyBlocks);
         const pageRowSplits = separatedLinePairs(verticalOnlyBlocks, editorBlocks);
         const unexpectedRowJoins = separatedLinePairs(editorBlocks, verticalOnlyBlocks);
@@ -359,6 +376,15 @@ describe.skipIf(!enabled)('Task 70 local table-cell sweep', () => {
     expect(rowSplitTotal).toBe(44);
     expect(unexplained).toEqual([]);
     expect(rejectedUnderlineCandidates).toBe(32);
+    // This survey omits drawn markers and horizontal rules in its local arm.
+    // Changes 7–9 reduced run-pair splits 920 -> 278. Change 10 restores
+    // 471 deliberate larger-gap boundaries: 278 -> 749 in this rule-free arm.
+    // Every removed boundary is printed, with separate Change 9 additions.
+    // This is not the UI corpus's count of whole-box bridges. Borders and
+    // underline baselines remain unchanged.
+    expect(priorParagraphSplits).toBe(920);
+    process.stdout.write(`CHANGE7 TABLE PARAGRAPH SPLITS ${priorParagraphSplits} -> ${paragraphSplitTotal}\n`);
+    expect(paragraphSplitTotal).toBe(749);
 
     process.stdout.write(
       `TASK70 TOTAL files ${comparisons.length}, changed ${comparisons.filter((result) => result.removed.length > 0).length}\n`,

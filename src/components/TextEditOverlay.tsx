@@ -7,7 +7,7 @@ import type { PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
-import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
+import type { FontMetrics, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import {
   calculateBulletRoomPt,
   calculateInitialEditorWidth,
@@ -36,10 +36,16 @@ import {
   editorWidthMeasurementText,
   listSeedText,
   paragraphSeedText,
+  sourceParagraphs,
   widestLineWidth,
 } from '@/lib/edit/paragraphSeed';
 import { neighbourBoxWidth } from '@/lib/edit/neighbourBoxWidth';
 import { startsWithBulletMarker } from '@/lib/pdf/textUnits';
+import {
+  hasRootParagraphText, insertParagraphBreak, insertParagraphText, mergeParagraphBackward, normalizeParagraphDom,
+  paragraphGapPreset,
+} from '@/lib/edit/paragraphDom';
+import { wrapSelectionWithStyle } from '@/lib/edit/styleSelection';
 import { FontSizeCombobox } from './FontSizeCombobox';
 
 const FAMILY_KEYWORD = {
@@ -243,44 +249,18 @@ function elementAtRangeStart(range: Range, root: HTMLElement): HTMLElement {
   return node.parentElement ?? root;
 }
 
-function selectWrappedRange(wrapper: HTMLElement): Range {
-  const range = window.document.createRange();
-  range.selectNodeContents(wrapper);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  return range;
-}
-
-function wrapSelectionWithStyle(
-  range: Range,
-  styles: Record<string, string>,
-  data: Record<string, string>,
-  clearedProperties: readonly ('fontSize' | 'fontFamily' | 'color')[],
-): Range {
-  const fragment = range.extractContents();
-  const wrapper = window.document.createElement('span');
-  for (const [property, value] of Object.entries(styles)) {
-    (wrapper.style as unknown as Record<string, string>)[property] = value;
-  }
-  for (const [name, value] of Object.entries(data)) wrapper.dataset[name] = value;
-  for (const descendant of Array.from(fragment.querySelectorAll<HTMLElement>('*'))) {
-    for (const property of clearedProperties) descendant.style[property] = '';
-    if (clearedProperties.includes('fontSize')) delete descendant.dataset.fontSizePt;
-    if (clearedProperties.includes('fontFamily')) {
-      delete descendant.dataset.fontName;
-      delete descendant.dataset.fontRef;
-      delete descendant.dataset.sourceBold;
-      delete descendant.dataset.sourceStrokeBold;
-    }
-    if (clearedProperties.includes('color')) {
-      delete descendant.dataset.textColor;
-      delete descendant.dataset.colorKnown;
-    }
-  }
-  wrapper.append(fragment);
-  range.insertNode(wrapper);
-  return selectWrappedRange(wrapper);
+/** The root face's CSS ascent and descent, so saved lines are spaced as the editor shows them. */
+function measureFontMetrics(style: TextStyle, zoom: number): FontMetrics | undefined {
+  if (typeof TextMetrics === 'undefined' || !('fontBoundingBoxAscent' in TextMetrics.prototype)) return undefined;
+  const context = window.document.createElement('canvas').getContext('2d');
+  if (!context) return undefined;
+  const sizePx = style.fontSizePt * zoom;
+  context.font = textStyleToCanvasFont({ ...style, fontSizePt: sizePx });
+  const metrics = context.measureText('M');
+  const ascent = metrics.fontBoundingBoxAscent / sizePx;
+  const descent = metrics.fontBoundingBoxDescent / sizePx;
+  return Number.isFinite(ascent) && Number.isFinite(descent) && ascent > 0 && ascent < 3 && descent >= 0 && descent < 2
+    ? { ascent, descent } : undefined;
 }
 
 function measureWidestInitialLine(
@@ -418,6 +398,11 @@ export function TextEditOverlay({
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
   const usesAlignmentColumn = initialAlign !== 'left';
+  const paragraphMode = !bulletMode && !markerList && !usesAlignmentColumn
+    && (existing?.length ? existing[0]?.boxParagraphs !== undefined : block.lines.length > 0);
+  const initialParagraphs = paragraphMode ? existing?.[0]?.boxParagraphs ?? sourceParagraphs(block).layouts : undefined;
+  const paragraphCacheRef = useRef(new Map(initialParagraphs?.map((layout, index) => [`source-${index}`, layout] as const) ?? []));
+  const paragraphGap = paragraphGapPreset(initialParagraphs ?? []);
   const editingRect = existing?.length
     ? savedEditingRect(existing, block, initialAlign, initialAlignLeftPt, initialAlignWidthPt)
     : block.rect;
@@ -439,7 +424,7 @@ export function TextEditOverlay({
   // screenRect starts at the committed alignment region. Move only the visible box.
   const boxScreenLeft = screenRect.left + (usesAlignmentColumn
     ? (boxLeftPt - initialAlignLeftPt) * zoom : 0);
-  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans, zoom));
+  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans, zoom, initialParagraphs));
   const [style, setStyle] = useState<TextStyle>(initialStyle);
   const [selectionStyle, setSelectionStyle] = useState({
     bold: initialStyle.bold,
@@ -578,10 +563,14 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     if (!editable) return;
     const serialized = serializeRichText(editable, style, zoom);
+    const fontMetrics = paragraphMode ? measureFontMetrics(style, zoom) : undefined;
     const next: NextTextEdit = {
       text: serialized.text,
       style: serialized.style,
       ...(serialized.spans ? { spans: serialized.spans } : {}),
+      ...(paragraphMode ? { paragraphs: serialized.paragraphs } : {}),
+      ...(fontMetrics ? { fontMetrics } : {}),
+      ...(paragraphMode && !existing?.length && width === initialWidth ? { preserveSourceWrapping: true } : {}),
       width,
       height,
       dx: moveOffset.x / zoom,
@@ -599,6 +588,7 @@ export function TextEditOverlay({
         text: initialText,
         style: initialStyle,
         ...(initialSpans ? { spans: initialSpans } : {}),
+        ...(initialParagraphs ? { paragraphs: initialParagraphs } : {}),
         width: initialWidth,
         height: initialRenderedHeightRef.current,
         dx: 0,
@@ -679,7 +669,7 @@ export function TextEditOverlay({
   // outside that corner would sit back on the neighbour's words. Keep it inside, where
   // such a box always has empty room before its own text.
   const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -8, top: -8 };
-  const lineHeight = textBlockLineHeight(block, style);
+  const lineHeight = textBlockLineHeight(block, style, paragraphMode);
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
   const baselineCorrection = baselineCorrectionPx(
     expectedBaselinePx === undefined ? undefined
@@ -699,6 +689,11 @@ export function TextEditOverlay({
     if (sample && editable) {
       sample.replaceChildren(...Array.from(editable.childNodes, (node) => node.cloneNode(true)));
       if (!sample.hasChildNodes()) sample.textContent = 'M';
+      if (paragraphMode && marker) {
+        const first = sample.querySelector<HTMLElement>('[data-pdf-paragraph]');
+        if (first && !hasRootParagraphText(editable)) first.prepend(marker);
+        else probe?.insertBefore(marker, sample);
+      }
     }
     const probeRect = probe?.getBoundingClientRect();
     const markerRect = marker?.getBoundingClientRect();
@@ -706,7 +701,7 @@ export function TextEditOverlay({
     const offset = probeRect && markerRect && probeRect.height > 0
       ? markerRect.top - probeRect.top : undefined;
     setMeasuredBaselineOffset((current) => current === offset ? current : offset);
-  }, []);
+  }, [paragraphMode]);
   const visibleError = externalError
     ?? appearanceError
     ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
@@ -735,6 +730,14 @@ export function TextEditOverlay({
     setHeight(nextHeight);
     measureFrame();
   }, [lineHeight, measureFrame, zoom]);
+
+  const normalizeParagraphs = useCallback(() => {
+    const editable = editableRef.current;
+    if (editable && paragraphMode && !composingRef.current) {
+      normalizeParagraphDom(editable, paragraphCacheRef.current, paragraphGap, zoom);
+    }
+  }, [paragraphMode, paragraphGap, zoom]);
+  const handleInput = useCallback(() => { normalizeParagraphs(); resizeToContent(); }, [normalizeParagraphs, resizeToContent]);
 
   useLayoutEffect(() => {
     const editable = editableRef.current;
@@ -893,6 +896,7 @@ export function TextEditOverlay({
       return;
     }
     const selected = wrapSelectionWithStyle(
+      editable,
       range,
       { fontSize: `${fontSizePt * zoom}px` },
       { fontSizePt: String(fontSizePt) },
@@ -921,6 +925,7 @@ export function TextEditOverlay({
       return;
     }
     const selected = wrapSelectionWithStyle(
+      editable,
       range,
       { fontFamily: fontName },
       { fontName },
@@ -944,6 +949,7 @@ export function TextEditOverlay({
       return;
     }
     const selected = wrapSelectionWithStyle(
+      editable,
       range,
       { color: colorCss(color) },
       { textColor: `${color.r},${color.g},${color.b}`, colorKnown: 'true' },
@@ -960,8 +966,9 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     if (!editable) return;
     event.preventDefault();
-    insertPlainText(editable, event.clipboardData.getData('text/plain'));
-    resizeToContent();
+    if (paragraphMode) insertParagraphText(editable, event.clipboardData.getData('text/plain'));
+    else insertPlainText(editable, event.clipboardData.getData('text/plain'));
+    handleInput();
   };
 
   return (
@@ -1104,13 +1111,14 @@ export function TextEditOverlay({
         contentEditable={!committing}
         suppressContentEditableWarning
         spellCheck={false}
-        onInput={resizeToContent}
+        data-pdf-paragraph-editor={paragraphMode ? 'true' : undefined}
+        onInput={handleInput}
         onCompositionStart={()=>{composingRef.current=true;}}
         onCompositionUpdate={resizeToContent}
-        onCompositionEnd={()=>{composingRef.current=false;resizeToContent();}}
+        onCompositionEnd={()=>{composingRef.current=false;handleInput();}}
         onPaste={pastePlainText}
         onKeyDown={(event) => {
-          if (committing || event.nativeEvent.isComposing) return;
+          if (committing || composingRef.current || event.nativeEvent.isComposing) return;
           if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
             event.preventDefault();
             commit();
@@ -1120,6 +1128,9 @@ export function TextEditOverlay({
           } else if (event.key === 'Enter') {
             event.preventDefault();
             const editable = editableRef.current;
+            if (editable && paragraphMode) {
+              insertParagraphBreak(editable); handleInput(); return;
+            }
             if (editable) {
               const markerPrefix = markerList
                 ? markerPrefixAtLineEnd(editable, style, zoom)
@@ -1127,6 +1138,9 @@ export function TextEditOverlay({
               insertPlainText(editable, bulletMode ? '\n• ' : `\n${markerPrefix ?? ''}`);
             }
             resizeToContent();
+          } else if (event.key === 'Backspace' && paragraphMode && typeof document.execCommand !== 'function') {
+            const editable = editableRef.current;
+            if (editable && mergeParagraphBackward(editable)) { event.preventDefault(); handleInput(); }
           }
         }}
         className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words border-0 bg-transparent p-0 outline-none"

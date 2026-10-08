@@ -28,9 +28,11 @@ import {
 } from '@/lib/edit/buildTextEdits';
 import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
+import { wrapTextParagraphs } from '@/lib/edit/paragraphLayout';
 import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { coversOriginalRect } from '@/lib/edit/coverMatch';
+import { continuesCoverRun } from '@/lib/edit/coverTransactions';
 import { editorTopCorrection, freeTextBoxRect } from '@/lib/edit/editorPosition';
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import {
@@ -39,7 +41,7 @@ import {
   coverRectForRuleLine,
   ruleLineRect,
 } from '@/lib/edit/buildLineEdits';
-import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
+import { extractTextRuns, groupRunsIntoBlocks, preserveEditedBlockPartitions } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 import {
   availableBulletListHeight,
@@ -266,9 +268,14 @@ function freeTextBlockFromEdits(texts: readonly TextEdit[]): TextBlock {
   };
 }
 
-function wrapNextText(next: NextTextEdit) {
+function wrapNextText(next: NextTextEdit, source?: TextBlock) {
   const canvas = window.document.createElement('canvas');
   const context = canvas.getContext('2d');
+  if (next.paragraphs) return wrapTextParagraphs(next, (text, span) => {
+    const spanStyle = effectiveTextSpanStyle(next.style, span);
+    if (context) context.font = textStyleToCanvasFont(spanStyle);
+    return context?.measureText(text).width ?? text.length * spanStyle.fontSizePt * 0.55;
+  }, source);
   if (next.spans) {
     return wrapTextSpansToLines(
       next.spans,
@@ -356,7 +363,7 @@ export function OverlayLayer({
 }: OverlayLayerProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
-  const [blocks, setBlocks] = useState<TextBlock[]>([]);
+  const [sourceBlocks, setBlocks] = useState<TextBlock[]>([]);
   const [imageRegions, setImageRegions] = useState<ImageRegion[]>([]);
   const [shapeMarkerRegions, setShapeMarkerRegions] = useState<ImageRegion[]>([]);
   const [ruleLines, setRuleLines] = useState<RuleLine[]>([]);
@@ -432,13 +439,6 @@ export function OverlayLayer({
   }, [editMode, textAddMode]);
 
   const detectedDates = useMemo(() => detectDates(runs), [runs]);
-  const bulletLists = useMemo(
-    () => blocks
-      .map((block) => detectBulletListFromRegions(block, imageRegions, shapeMarkerRegions))
-      .filter((list): list is BulletList => list !== null),
-    [blocks, imageRegions, shapeMarkerRegions],
-  );
-
   const pageTextEdits = useMemo(
     () => edits
       .filter((edit): edit is TextEdit => edit.kind === 'text' && edit.pageIndex === pageIndex)
@@ -450,6 +450,37 @@ export function OverlayLayer({
       (edit): edit is CoverEdit => edit.kind === 'cover' && edit.pageIndex === pageIndex,
     ),
     [edits, pageIndex],
+  );
+  // The earlier groupings depend only on the page, not on the edits: regroup
+  // once per page, not on every edit.
+  const hasCoverEdits = pageCoverEdits.length > 0;
+  const legacyBlocks = useMemo(() => (hasCoverEdits ? [...groupRunsIntoBlocks(runs, {
+    ruleLines, markers: [...imageRegions, ...shapeMarkerRegions], preserveParagraphSplits: true, preserveBulletTails: true,
+  }), ...groupRunsIntoBlocks(runs, {
+    ruleLines, markers: [...imageRegions, ...shapeMarkerRegions], preserveParagraphGaps: true,
+  })] : []), [hasCoverEdits, runs, ruleLines, imageRegions, shapeMarkerRegions]);
+  const blocks = useMemo(() => {
+    if (!pageCoverEdits.length) return sourceBlocks;
+    const coversByZ = new Map(pageCoverEdits.map((cover) => [cover.z, cover]));
+    return preserveEditedBlockPartitions(sourceBlocks, legacyBlocks, (block) => (
+      pageCoverEdits.some((cover) => {
+        // Only the FIRST cover in an edit transaction can anchor its box. A
+        // newly edited merged paragraph has interior covers at the old starts;
+        // treating those as old saved edits would immediately split it again.
+        if (continuesCoverRun(cover, coversByZ, ruleLines) || !isBlockAnchor(block, cover)) return false;
+        let count = 1;
+        while (coversByZ.has(cover.z + count)) count += 1;
+        return count === coverRectsForTextBlock(block).length || (count === 1 && (
+          sameRect(cover.rect, coverRectForTextBlock(block)) || sameRect(cover.rect, block.rect)
+        ));
+      })
+    ));
+  }, [sourceBlocks, legacyBlocks, pageCoverEdits, ruleLines]);
+  const bulletLists = useMemo(
+    () => blocks
+      .map((block) => detectBulletListFromRegions(block, imageRegions, shapeMarkerRegions))
+      .filter((list): list is BulletList => list !== null),
+    [blocks, imageRegions, shapeMarkerRegions],
   );
   useEffect(() => {
     setSelectedInlineDate(null);
@@ -1379,7 +1410,7 @@ export function OverlayLayer({
                   if (!cleanActive) closeTextEditor();
                   return;
                 }
-                const wrappedLines = wrapNextText(next);
+                const wrappedLines = wrapNextText(next, activeBlock);
                 const built = buildTextBlockEdits(
                   activeBlock,
                   next,

@@ -1,10 +1,14 @@
-import type { Rgb, TextSpan, TextStyle } from '@/lib/export/types';
+import type { Rgb, TextSpan, TextStyle, TextParagraphLayout } from '@/lib/export/types';
+import {
+  alignParagraphLayouts, breakStartsLine, continuationParagraph, hasRootParagraphText, readParagraphLayout, ZERO_PARAGRAPH,
+} from './paragraphDom';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
 
 export interface SerializedRichText {
   readonly text: string;
   readonly style: TextStyle;
   readonly spans?: readonly TextSpan[];
+  readonly paragraphs?: readonly TextParagraphLayout[];
 }
 
 const BLOCK_ELEMENTS = new Set(['DIV', 'LI', 'P']);
@@ -62,7 +66,9 @@ function spanForRun(text: string, run: TextRun, baseStyle: TextStyle): TextSpan 
     ...(style.sourceStrokeBold !== baseStyle.sourceStrokeBold && style.sourceStrokeBold !== undefined
       ? { sourceStrokeBold: style.sourceStrokeBold }
       : {}),
-    ...(style.colorKnown !== baseStyle.colorKnown && style.colorKnown !== undefined
+    ...(!sameColor(style.color, baseStyle.color)
+      ? { colorKnown: style.colorKnown ?? true }
+      : style.colorKnown !== baseStyle.colorKnown && style.colorKnown !== undefined
       ? { colorKnown: style.colorKnown }
       : {}),
   };
@@ -72,6 +78,7 @@ function spanForRun(text: string, run: TextRun, baseStyle: TextStyle): TextSpan 
 export function sourceSpansForTextBlock(
   block: TextBlock,
   targetText = block.text,
+  preserveUniform = false,
 ): readonly TextSpan[] | undefined {
   const spans: TextSpan[] = [];
   for (const [lineIndex, line] of block.lines.entries()) {
@@ -98,13 +105,38 @@ export function sourceSpansForTextBlock(
   }
   const sourceText = textFromSpans(spans);
   if (sourceText !== block.text) return undefined;
-  const adjusted = targetText === sourceText
-    ? spans
-    : targetText === sourceText.replace(/\n/g, ' ')
-      ? spans.map((span) => ({ ...span, text: span.text.replace(/\n/g, ' ') }))
-      : undefined;
-  if (!adjusted) return undefined;
-  return finalizeTextSpans(adjusted, block.style).spans;
+  // Align unchanged letters with their source styles. A source line boundary
+  // may remain hard, become a space, or disappear with a soft hyphenated word.
+  // Never recover styles for changed letters by positional guessing.
+  const source = spans.flatMap((span) => [...span.text].map((character) => ({ character, span })));
+  const target = [...targetText], adjusted: TextSpan[] = [];
+  let cursor = 0, index = 0;
+  while (index < source.length) {
+    const item = source[index]!;
+    if (/[-\u2011]/u.test(item.character) && source[index + 1]?.character === '\n'
+      && /^\p{Ll}$/u.test(target[cursor] ?? '') && source[index + 2]?.character === target[cursor]) {
+      index += 2;
+      continue;
+    }
+    if (/\s/u.test(item.character)) {
+      let end = index;
+      while (end < source.length && /\s/u.test(source[end]!.character)) end += 1;
+      let targetEnd = cursor;
+      while (targetEnd < target.length && /\s/u.test(target[targetEnd]!)) targetEnd += 1;
+      const whitespace = target.slice(cursor, targetEnd).join('');
+      const sourceBreaks = source.slice(index, end).filter((value) => value.character === '\n').length;
+      if ((whitespace.match(/\n/gu)?.length ?? 0) > sourceBreaks) return undefined;
+      if (!whitespace && index !== 0 && end !== source.length) return undefined;
+      if (whitespace) adjusted.push({ ...item.span, text: whitespace });
+      cursor = targetEnd; index = end;
+      continue;
+    }
+    if (item.character !== target[cursor]) return undefined;
+    adjusted.push({ ...item.span, text: item.character });
+    index += 1; cursor += 1;
+  }
+  if (cursor !== target.length) return undefined;
+  return preserveUniform ? normalizeTextSpans(adjusted) : finalizeTextSpans(adjusted, block.style).spans;
 }
 
 export function normalizeTextSpans(spans: readonly TextSpan[]): TextSpan[] {
@@ -134,6 +166,15 @@ export function effectiveTextSpans(
   const normalized = spans ? normalizeTextSpans(spans) : [];
   if (normalized.length > 0 && textFromSpans(normalized) === text) return normalized;
   return text ? [{ text, bold: style.bold, italic: style.italic }] : [];
+}
+
+export function splitParagraphSpans(spans: readonly TextSpan[]): TextSpan[][] {
+  const paragraphs: TextSpan[][] = [[]];
+  for (const span of spans) for (const [index, text] of span.text.replace(/\r\n?/g, '\n').split('\n').entries()) {
+    if (index) paragraphs.push([]);
+    if (text) paragraphs.at(-1)!.push({ ...span, text });
+  }
+  return paragraphs;
 }
 
 /** Collapse DOM runs and keep the common uniform case on the legacy plain TextEdit path. */
@@ -250,6 +291,8 @@ export function serializeRichText(
   zoom = 1,
 ): SerializedRichText {
   const spans: TextSpan[] = [];
+  const structured = root.dataset?.pdfParagraphEditor === 'true' || !!root.querySelector?.('[data-pdf-paragraph]');
+  const paragraphs: TextParagraphLayout[] = structured && hasRootParagraphText(root) ? [ZERO_PARAGRAPH] : [];
   const append = (text: string, current: TextStyle) => {
     if (!text) return;
     spans.push({
@@ -275,11 +318,19 @@ export function serializeRichText(
     if (node.nodeType !== 1) return;
     const element = node as HTMLElement;
     if (element.tagName === 'BR') {
+      if (!structured) { append('\n', inherited); return; }
+      // Each saved text line needs its own paragraph layout, so a break that
+      // draws no line (an empty paragraph's placeholder) must add neither.
+      if (!breakStartsLine(element, root)) return;
       append('\n', inherited);
+      paragraphs.push(continuationParagraph(paragraphs.at(-1)));
       return;
     }
     if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return;
-    if (element !== root && BLOCK_ELEMENTS.has(element.tagName) && textFromSpans(spans) !== '' && !textFromSpans(spans).endsWith('\n')) {
+    if (structured && element.hasAttribute('data-pdf-paragraph')) {
+      if (paragraphs.length) append('\n', spans.at(-1) ? effectiveTextSpanStyle(baseStyle, spans.at(-1)!) : inherited);
+      paragraphs.push(paragraphs.length ? readParagraphLayout(element) : { ...readParagraphLayout(element), gapBeforePt: 0 });
+    } else if (element !== root && BLOCK_ELEMENTS.has(element.tagName) && textFromSpans(spans) !== '' && !textFromSpans(spans).endsWith('\n')) {
       append('\n', inherited);
     }
     const fontName = fontNameFromElement(element, inherited.fontName);
@@ -308,7 +359,9 @@ export function serializeRichText(
   for (const child of Array.from(root.childNodes)) {
     visit(child, baseStyle);
   }
-  return finalizeTextSpans(spans, baseStyle);
+  const serialized = finalizeTextSpans(spans, baseStyle);
+  if (!structured) return serialized;
+  return { ...serialized, paragraphs: alignParagraphLayouts(serialized.text, paragraphs.length ? paragraphs : [ZERO_PARAGRAPH]) };
 }
 
 function escapeHtml(text: string): string {
@@ -325,9 +378,9 @@ function escapeAttribute(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-function cssFontFamily(span: TextSpan): string | undefined {
+function cssFontFamily(span: TextSpan, baseStyle: TextStyle): string | undefined {
   if (!span.fontName && !span.fontRef) return undefined;
-  const family = span.fontName ?? 'sans-serif';
+  const family = span.fontName ?? baseStyle.fontName;
   return span.fontRef ? `"${span.fontRef.replace(/"/g, '\\"')}", ${family}` : family;
 }
 
@@ -341,11 +394,20 @@ export function richTextToHtml(
   style: TextStyle,
   spans?: readonly TextSpan[],
   zoom = 1,
+  paragraphs?: readonly TextParagraphLayout[],
 ): string {
+  if (paragraphs) {
+    const parts = splitParagraphSpans(effectiveTextSpans(text, style, spans));
+    return text.replace(/\r\n?/g, '\n').split('\n').map((part, index) => {
+      const layout = paragraphs[index] ?? ZERO_PARAGRAPH;
+      const gap = index ? layout.gapBeforePt : 0;
+      return `<div data-pdf-paragraph="true" data-paragraph-id="source-${index}" data-gap-before-pt="${gap}" data-first-indent-pt="${layout.firstIndentPt}" data-rest-indent-pt="${layout.restIndentPt}" style="margin-top:${gap * zoom}px;padding-left:${layout.restIndentPt * zoom}px;text-indent:${(layout.firstIndentPt - layout.restIndentPt) * zoom}px">${part ? richTextToHtml(part, style, spans ? parts[index] : undefined, zoom) : '<br>'}</div>`;
+    }).join('');
+  }
   if (!spans) return escapeHtml(text.replace(/\r\n?/g, '\n'));
   return effectiveTextSpans(text, style, spans).map((span) => {
     const content = escapeHtml(span.text);
-    const family = cssFontFamily(span);
+    const family = cssFontFamily(span, style);
     const declarations = [
       `font-weight:${span.bold ? 'bold' : 'normal'}`,
       `font-style:${span.italic ? 'italic' : 'normal'}`,
@@ -355,7 +417,7 @@ export function richTextToHtml(
     ].join(';');
     const data = [
       ...(span.fontSizePt ? [` data-font-size-pt="${span.fontSizePt}"`] : []),
-      ...(span.fontName ? [` data-font-name="${escapeAttribute(span.fontName)}"`] : []),
+      ...(span.fontName || span.fontRef ? [` data-font-name="${escapeAttribute(span.fontName ?? style.fontName)}"`] : []),
       ...(span.fontRef ? [` data-font-ref="${escapeAttribute(span.fontRef)}"`] : []),
       ...(span.color ? [` data-text-color="${span.color.r},${span.color.g},${span.color.b}"`] : []),
       ...(span.sourceBold !== undefined ? [` data-source-bold="${span.sourceBold}"`] : []),
@@ -364,6 +426,6 @@ export function richTextToHtml(
         : []),
       ...(span.colorKnown !== undefined ? [` data-color-known="${span.colorKnown}"`] : []),
     ].join('');
-    return `<span style="${declarations}"${data}>${content}</span>`;
+    return `<span style="${escapeAttribute(declarations)}"${data}>${content}</span>`;
   }).join('');
 }

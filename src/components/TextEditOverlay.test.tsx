@@ -51,7 +51,8 @@ function paragraph(...texts: string[]): TextBlock {
       rect: { x: 40, y: 680 - index * 24, w: 240, h: 20 },
       baselineY: 680 - index * 24,
       style,
-      runs: [],
+      runs: [{ pageIndex: 0, text, rect: { x: 40, y: 680 - index * 24, w: 240, h: 20 }, style,
+        characterWidthsPt: [...text].map(() => 240 / [...text].length), spaceWidthPt: 3 }],
     })),
   };
 }
@@ -442,14 +443,32 @@ describe('TextEditOverlay paragraph seed', () => {
     expect(onDone.mock.calls[0]?.[0].text).toBe('◦ First item\n◦ \n◦ Second item');
   });
 
-  it('inserts a plain newline for Enter in prose', () => {
-    renderEditor(paragraph('Plain paragraph'));
+  it('keeps paragraph DOM and the composing text node stable during IME input', () => {
+    const value = paragraph('First paragraph', 'Second paragraph');
+    const first = value.lines[0]!;
+    renderEditor({ ...value, lines: [{ ...first, rect: { ...first.rect, w: 30 } }, value.lines[1]!] });
     const editor = screen.getByRole('textbox', { name: 'Editable text' });
-    placeCaretAtTextEnd(editor.firstChild!);
+    const node = editor.firstChild!.firstChild!;
+    expect(editor.querySelectorAll('[data-pdf-paragraph]')).toHaveLength(2);
+    fireEvent.compositionStart(editor);
+    node.textContent = 'हिंदी'; fireEvent.input(editor); fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(editor.firstChild!.firstChild).toBe(node);
+    expect(editor.querySelectorAll('[data-pdf-paragraph]')).toHaveLength(2);
+    fireEvent.compositionEnd(editor);
+    expect(editor.firstChild!.firstChild).toBe(node);
+  });
+
+  it('inserts a paragraph break for Enter in prose', () => {
+    const onDone = vi.fn();
+    renderEditor(paragraph('Plain paragraph'), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    placeCaretAtTextEnd(editor.firstChild!.firstChild!);
 
     fireEvent.keyDown(editor, { key: 'Enter' });
 
-    expect(editor.textContent).toBe('Plain paragraph\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0].text).toBe('Plain paragraph\n');
+    expect(onDone.mock.calls[0]?.[0].paragraphs).toHaveLength(2);
   });
 
   it('keeps bullet mode in charge of Enter', () => {
@@ -465,6 +484,19 @@ describe('TextEditOverlay paragraph seed', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
     expect(onDone.mock.calls[0]?.[0].text).toBe('• First item\n• \n• Second item');
+  });
+
+  it('restores saved paragraph layout and treats an unchanged Done as a no-op', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    const paragraphs = [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }, { gapBeforePt: 3, firstIndentPt: 28.8, restIndentPt: 0 }];
+    const existing: TextEdit = { id: 'saved-paragraphs', kind: 'text', pageIndex: 0, rect: { x: 40, y: 650, w: 240, h: 20 }, z: 1,
+      text: 'Saved first', boxText: 'Saved first\nSaved second', style, boxHeight: 50, boxParagraphs: paragraphs };
+    renderEditor(paragraph('Original first', 'Original second'), 1, 0, { existing: [existing], onDone, onCancel });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    const second = editor.querySelectorAll<HTMLElement>('[data-pdf-paragraph]')[1]!;
+    expect(second.style.marginTop).toBe('3px'); expect(second.style.textIndent).toBe('28.8px');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled(); expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it('re-opens an edited block from boxText instead of reseeding the source paragraph', () => {

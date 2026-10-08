@@ -11843,7 +11843,9 @@ themselves, and where this outline differs from them, **the sections win**:
 4. **Step 5c** — the live visual frame and the toolbar.
 5. **Step 5c.1** — the editing view sits on the page's own baseline (small; added 2026-10-04 after the Ziro heading
    was measured opening 15 px above its line).
-6. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
+6. **Step 5c.2** — a line that wrapped stays in its paragraph (added 2026-10-05 after Ladakh's day paragraphs opened
+   as 2–3 boxes and exported paragraphs re-opened in pieces). Before 5d, so 5d measures the final boxes.
+7. **Step 5d** — the matrix, baseline and spacing; one layout decision; the DOM never decides a committed position.
    Without it 5a–5c look much better and occasional movement and spacing differences remain.
 
 The original typeface is not any of these — that is the font work, which reuses a page's own embedded font. It is
@@ -13360,7 +13362,7 @@ still pass and the user's résumé/Bhutan/top-and-bottom toolbar checks pass.
 
 ---
 
-#### Task 74 — Step 5c.1  🟡 ACCEPTED by the user (2026-10-05), committed on `codex/editor-baseline`, merge pending **from `main`, after Step 5c** — the editing view sits on the page's own baseline   *(Easy–Medium · half a day)*
+#### Task 74 — Step 5c.1  ✅ DONE → merged to `main` and live (`84ccfdd`) **from `main`, after Step 5c** — the editing view sits on the page's own baseline   *(Easy–Medium · half a day)*
 
 **What the user hit.** On some texts, pressing Done makes the text drop or rise by about 0.1 inch. Not every text —
 mostly big headings.
@@ -13514,7 +13516,704 @@ when storage fills — a separate issue worth its own task.
 
 ---
 
-#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c.1 is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
+#### Task 74 — Step 5c.2  ✅ DONE → merged to `main` — Changes 1–10 plus the code-review fixes (2026-10-08); the user checked the three visible fixes in Chrome; a real Hindi keyboard/IME check is still open → branch `paragraph-grouping` **from `main`** (5c.1 is merged: `84ccfdd`) — a line that wrapped stays in its paragraph   *(Medium · 1–2 days, mostly measuring)*
+
+**What the user hit.** Two things, one cause.
+
+1. *Ladakh opens in pieces.* `ladakh-original.pdf` page 3: each DAY paragraph is a regular sentence followed by bold
+   "Highlights: …" lines. DAY-2 opens as **3 boxes** (line 1 | line 2 | lines 3–4); DAY-1, DAY-3 and DAY-4 as 2.
+   PDFfiller gives one box per day.
+2. *An edited paragraph re-opens in pieces.* Edit the résumé's "ABOUT ME" paragraph, export, open the exported file:
+   one box of 6 lines comes back as **2 boxes** (measured live in the app, 2026-10-05).
+
+**Why, measured.** Two of `canJoinTextBlock`'s tests (`textUnits.ts:189–236`) split lines that belong together:
+
+| Test | What it does today | Where it is wrong |
+|---|---|---|
+| Weight (`sameParagraphStyle`, `textUnits.ts:139–144`) | Different weight ⇒ new box. A line's weight is its **single longest piece's** (`representativeStyle`, `textContent.ts:82–86`) | Ladakh DAY-2 line 3 is 30 regular letters + 19 bold, but the PDF chops it into tiny pieces and the longest is the bold "Highligh", so the line counts as bold |
+| Short line (`textUnits.ts:231–232`) | A line ending more than 2 × font size before the box's right edge ends the paragraph | It cannot tell a paragraph end from a wrap. DAY-2 line 1 ends 34.0 pt early (limit 33.3) only because "monasteries" did not fit. Every paragraph we export is ragged, so it splits on re-open (résumé line 2 ends 43 pt early; "North-East" did not fit) |
+
+What a reader — and the file itself — says instead: on Ladakh page 3 the lines inside a paragraph are 23 pt apart and
+paragraphs 55 pt apart; the file draws each paragraph's lines one after another; the PDF carries no paragraph tags
+(Canva → iLovePDF stripped them).
+
+**What the user gets.** A paragraph that simply wrapped — including onto bold words — opens as one box, as in
+PDFfiller; the checked edited/exported paragraphs re-open as one box. Change 7 deliberately permits nearby,
+similarly sized headings and plain items to share a box, while Change 8 preserves intentional display breaks and
+styling. Detected lists are frozen except Change 9's classified tail removals; table cells remain protected.
+
+**The rule — join-only.** Every existing test stays as it is. Add **one exception**: when today's tests would split
+two lines, they still join if the line above was **full** — the next line's first word could not have fitted in the
+space left before the column's right edge. Nothing that is together today may come apart.
+
+**Change 1 — the exception, with the guards the prototype proved necessary.** All must hold:
+- every one of today's other tests passes (page, number cell, horizontal border, line gap, family, italic, left
+  edge, line rhythm) — only the weight test and the short-line test may be overridden;
+- the two lines are the **same font size**, within 0.5 pt — a wrap never changes size;
+- **the column's right edge is proven by another line**: some other line starting at the same left edge (± 2 pt)
+  reaches the line above's right edge (− 2 pt). A line that is itself the widest in its column proves nothing;
+- the column is **at least 20 × the font size wide** — a narrow column is a list, not prose;
+- the lower line does **not** start an item: no bullet (`startsWithBulletMarker`), no dash item (`-Wrote`, `– x`),
+  no time (`3:15 PM`), no number (`1.`, `2)`), no `Day 2`;
+- the line above does not start an item (bullet, drawn marker, dash item) — today's list rules own those;
+- **a full stop then a capital, with no change of weight, is still a paragraph end** (`…competitors.` /
+  `Competition is…`). With a change of weight it may join (`…their rhythm.` / **`Highlights:`**);
+- "the next word could not have fitted": the space left = column right edge − the line's right edge; the word's
+  width is measured from that line's own runs, not estimated from an average letter.
+
+**Change 2 — weight by letters, for grouping only.** For the weight comparison, a line is bold, regular or *mixed* by
+counting letters across its runs; *mixed* matches either neighbour. `representativeStyle` and every line's and block's
+`style` stay exactly as today — the editor's initial style, colour and Step 5a's appearance must not change.
+
+**Change 3 — saved projects keep their boxes.** A saved edit finds its box by covering the box's **first line**
+(`isBlockAnchor`, `OverlayLayer.tsx:172–180`). If the new rule merges two of today's boxes and a saved edit is anchored
+on the second one, that edit would lose its box: the paragraph would open as unedited source text and a second Done
+would draw it twice. So: where a saved cover anchors on a line that the new grouping places inside a box (not first),
+split the box at that line, as today. Only the paragraphs the user had already edited keep their old split; fresh
+files and unedited paragraphs get the new grouping. Exported files open as fresh files.
+
+**Change 4 — measure, classify, compare (before anything merges).** A local `TASK74_GROUPING=1` test over the 45
+baseline files plus `ladakh-original.pdf` and `Ziro Festival Firgun.pdf`: print **every** join and split against
+today's grouping. Each must be classified *right* / *wrong* with a one-line reason; a wrong one is removed by a guard
+or reported to the user, never left unexplained. The user compares the boxes with PDFfiller on Ladakh pages 3–4, the
+GOA itinerary and `corporate-edited-3.pdf`.
+
+**Change 5 — uniform blocks: lines that look alike are one box, whatever their length** *(added 2026-10-06 on
+the user's direction, after Changes 1–4 were built).*
+
+*What the user hit.* An exam page's "Quick Snapshot" — `Total questions: 108` / `Total marks: 360` /
+`Total duration: 120 minutes (2 hours)` / `Sections: 3 (Language Skills, Quantitative Skills, Logical Reasoning)` —
+opens as **3 boxes**: the first two together, then each longer line alone. Same serif, same size, regular, same left
+edge, even spacing; no bullet, number or time. Another editor shows the four lines as one box. The split is the
+short-line test: each time a longer line follows, the line above "ends early" against the new right edge. Change 1
+cannot help — these lines are short on purpose, not full.
+
+*The rule.* Two neighbouring lines join — in the same frozen-partition step as Change 1, joining whole old boxes,
+never splitting one — when **every** one of these holds, and the short-line test is then not applied to them:
+- same font family, the same size within **0.5 pt**, the same italic;
+- the **same weight by letters** (Change 2's count): both bold or both regular. *Mixed* does not count as matching
+  here — a line with a bold label and a regular value is not uniform with a plain line;
+- the **same left edge** within **2 pt**;
+- the **same line gap**: within the existing gap limit (≤ 1.85 × size) and, once the box has two gaps, within
+  **10 %** of its usual gap — a bigger gap still ends the box;
+- no horizontal border between them, and no drawn marker (picture or shape dot) beside either line;
+- **neither line starts an item**: a bullet (`startsWithBulletMarker`); a dash item (`-Wrote`, `– x`); a number or
+  outline number (`1.`, `2)`, `5.1`, `1.10.2`); a bracketed letter or numeral (`(a)`, `(iii)`, `(2)`); a time
+  (`3:15`, `10.30`); `Day 2`; and Change 1's percent-number and copyright starts;
+- neither line belongs to a list that `bulletList.ts` already detects — a whole list is never absorbed (as Change 1).
+
+Line **length** plays no part. Change 1's extra guard against capitalised plain starts does **not** apply here: in
+a uniform block every line normally starts with a capital (`Total marks…`).
+
+*Before → after.*
+
+| On the page | Today | After Change 5 |
+|---|---|---|
+| Exam "Quick Snapshot" (4 fact lines) | 3 boxes | **1 box** |
+| Packing list (`Personal medications` / `ORS sachets` / `Basic first-aid kit` …) | pieces, by line length | **1 box** |
+| Inclusions (`Dinner on Day 1 and 2` / `Entry fees wherever applicable` …) | pieces | **1 box** |
+| CV skills (`Communication Skills` / `Teamwork Skills` …) | pieces | **1 box** |
+| Bullet list; numbered `5.1` / `5.2`; `(a)`, `(iii)`; `3:15 PM` / `4:15 PM` | separate / one list | **unchanged** |
+| **`GUEST NAME`** (bold) / `Mr. Pratik`; résumé `… \| 2020-2023` / **`BBA \| Tourism and Travel`** | separate | **unchanged** (weight differs) |
+| Bigger or bold heading above a list (**`Quick Snapshot`** / `Total questions…`) | separate | **unchanged** (size/weight differ) |
+| A subheading set exactly like body text (corporate `Accountability` / `It is a key requirement…`) | separate | **1 box** — the accepted trade-off: nothing on the page tells them apart |
+
+*Measured first (Claude's prototype, `GROUPING_MODE=uniform`, report `tmp/grouping-uniform.txt`).* On the 46 files,
+uniform blocks on top of the join-only exception: boxes **4,273 → 3,736**, **547 joins (214 distinct)**, all **151
+lists and every item identical**, **0** joins touching a number cell; ~10 knock-on splits, which the frozen partition
+should make 0. The prototype did not yet guard `(a)` / `(iii)` starts (it joined `(a) Board of Directors` / `Some
+points…`) — the rule above does. A spacing-only variant (no weight test at all) was measured and rejected: 4,273 →
+2,897 boxes, **16 lists broken**, and joins such as `GUEST NAME` / `Mr. Pratik` and `5.1` / `5.2`.
+
+*Checks for Change 5.*
+- The exam page — **`C:\Users\eddyu\Downloads\NMAT-syllabus.pdf`, supplied 2026-10-06** — opens each "Quick Snapshot"-style block of fact lines
+  as one box; its bullet lists and its one-line notes (`Order of sections is fixed…`) stay as they are.
+- `TASK74_GROUPING=1` lists every Change-5 join separately from Change-1 joins, each classified with a reason; zero
+  splits; 151 lists with identical items; no join onto a number cell, an item start or a weight change.
+- Résumé education and work lines still separate; `TASK74_REAL` — résumé 4 lists, Rishi 2.
+- `TASK70_TABLES=1`: no cell joins another cell.
+- Change 3 applies: a saved edit on a box that Change 5 merges keeps its old boundaries.
+
+**Change 6 — a line that wraps at a space drops that space** *(added 2026-10-06; the user approved this layout
+change explicitly — it is the one exception to this step's grouping-only guardrail).*
+
+*What Codex found.* Edit Ladakh DAY-2 (append ` QA`), Done, export, re-open: the paragraph returns as **two boxes**.
+The exported line starting `sunset at Shanti Stupa` begins at x 270.8 against x 266.2 for the line above — **4.6 pt,
+one space** — so on re-open it reads as an indent and fails the ±2 pt left-edge test.
+
+*Why.* Both wrappers in `src/lib/edit/textLayout.ts` — `wrapLogicalLine` (plain text, used by `wrapTextToLines`) and
+`wrapStyledLogicalLine` (rich text, used by `wrapTextSpansToLines`) — split text into word and whitespace tokens.
+When the **whitespace token itself** is what overflows a full line, they push the line and start the next one with
+that token (`current = token` / `current = [...token]`), so the next word follows a leading space. The editor does
+not show this: its `white-space: pre-wrap` lets a space at a soft break hang invisibly at the end of the line. The
+export draws it, so export and editor disagree and the export looks indented.
+
+*The fix.* At a **soft break** — a break the wrapper makes because the line is full — the whitespace at the break
+belongs to neither line: never start the next line with it, and do not count or draw it at the end of the previous
+line. Everything else about spaces is kept:
+- spaces **inside** a line, including double spaces, unchanged;
+- spaces the user typed at the **start of a paragraph** (after an explicit newline or at the very beginning) kept —
+  only an automatic break drops its space;
+- a long word split across lines (`splitLongWord` / `splitStyledToken`) unchanged;
+- rich spans keep their styles on both sides of the break (bold `Highlights` stays bold).
+
+*Checks for Change 6.*
+- Units for both wrappers: a line where the space overflows wraps to `…ending with a golden` / `sunset at Shanti
+  Stupa`, with no leading space on line 2 and no trailing space on line 1; typed leading spaces after `\n` survive;
+  mid-line double spaces survive; a split long word is unchanged; styles survive the break.
+- *Export matches the editor*: every line of a wrapped, left-aligned paragraph starts at the same x (± 0.5 pt) in the
+  exported PDF; a centred or right-aligned wrapped line is positioned on its visible text, not on a hidden space.
+- *The real case*: the Ladakh DAY-2 export/re-open probe returns **one box**, bold `Highlights` intact; the résumé
+  ABOUT ME export/re-open case still returns one box.
+- *Nothing else moves*: `TASK72_REAL` (paragraph reflow; any expectation that encoded the space is updated with the
+  reason), `TASK66_SWEEP`, `TASK74_PATCH`, `TASK74_PREVIEW` pixel parity, full suite.
+
+| File | Change |
+|---|---|
+| `src/lib/edit/textLayout.ts` + test | Drop the whitespace at a soft break in `wrapLogicalLine` and `wrapStyledLogicalLine` |
+
+**Change 7 — group like PDFfiller: same size and even spacing make one box** *(added 2026-10-06 on the user's
+direction, after testing PDFfiller with a purpose-built PDF).*
+
+*How PDFfiller was measured.* `tmp/grouping-probe/paragraph-grouping-test.pdf` (built by
+`tmp/grouping-probe/make.mjs`; made-up text, 15 labelled cases) was opened in PDFfiller's editor; the user's
+screenshots (2026-10-06) give its boxes:
+
+| Case | PDFfiller | Ours before Change 7 | Required after |
+|---|---|---|---|
+| 1 four short fact lines, different lengths | 1 box | 1 | 1 |
+| 2 ragged paragraph wrapping onto bold words | 1 box | 2 | **1** |
+| 3 two paragraphs, no extra space | 1 box | 1 | 1 |
+| 4 two paragraphs with extra space | 2 boxes | 2 | 2 |
+| 5 **bold label** line + regular value line | 1 box | 2 | **1** |
+| 6 subheading set like body + paragraph | 1 box | 1 | 1 |
+| 7 **bold heading**, same size + paragraph | 1 box | 2 | **1** |
+| 8 numbered items `1.` `2.` `3.` | 1 box | 2 + 1 | **1** |
+| 9 dash items | 1 box | 1 | 1 |
+| 10 timetable lines | 1 box | 1 | 1 |
+| 11 two columns side by side | **1 box spanning both** | 2 | **2 — deliberately kept** |
+| 12 paragraphs separated only by an indent | 1 box | 2 | **1** |
+| 13 18 pt title + 12 pt subtitle | 2 boxes | 2 | 2 |
+| 14 one gap 1.6 × the others | 2 boxes | 2 | 2 |
+| 15 centred lines of different lengths | 1 box | 2 + 1 | **1** |
+
+PDFfiller starts a new box only on a **size change** or a **bigger gap**; weight, line length, indent, item starts and
+centring never split. We match it on 14 of 15 and keep columns apart on purpose: editing one column must not reflow
+the other.
+
+*The rule.* In the same frozen-partition step as Changes 1 and 5 — joining whole old boxes, never splitting one — two
+neighbouring boxes join when **all** hold:
+- same page; no horizontal border between them; neither line is a lone number cell (`isTableNumber`);
+- the line gap is within today's limits: ≤ 1.85 × size, and, once the box has two gaps, within today's rhythm
+  tolerance (35 % / 2 pt) of its usual gap — a bigger gap still ends the box;
+- the size is within today's tolerance (max(1.5 pt, 22 %)) — a title and a smaller subtitle stay apart;
+- the **same font family** (serif / sans / mono) — a sans heading never joins serif body text;
+- the two lines **overlap horizontally** — a different column never joins;
+- **every list detected today is frozen**: a box that is, or belongs to, a detected bullet list is never joined to
+  anything and never absorbs a line; a bullet or drawn-marker line never joins a non-list box.
+
+Weight, line length, indent, numbers / dashes / times / `Day 2` at a line start, and centred line lengths are **not**
+reasons to split. For non-list boxes this rule supersedes the stricter guards of Changes 1 and 5; Change 3 (saved
+edits keep their boxes) and Change 6 stay.
+
+*Measured first (Claude's prototype `GROUPING_MODE=filler`, 2026-10-06, on top of this branch's Changes 1–5).* On the
+46 files: boxes **3,876 → 2,916**, **971 joins**, 11 knock-on splits (must reach **0** with the frozen partition),
+**0** number-cell joins, **0** joins onto a bullet line, **all 151 lists identical**, **126** joins on photo pages
+(bank details, packing lists, notes — the photos are untouched), **966** boxes whose first line changes (Change 3).
+Without freezing lists, 20 lists broke (résumé "Sales and Operations" absorbed the "HR Intern" list) — freezing is
+mandatory. To resolve: one terms note (`The company will not be responsible…`, the same page in 7 GOA / Ziro / Vietnam
+copies) becomes a 2-item list — confirm or prevent; one merged box (`Firgun_QT-H4SNASRX_SriLanka.pdf` p6,
+`13. Bali Tourist Tax`) would lose its styling on edit — Change 8's span fix must cover it.
+
+*Checks for Change 7.*
+- The 15-case probe matches the "Required after" column exactly (a permanent local test over that PDF).
+- `TASK74_GROUPING=1` lists every Change-7 join, classified; **0 splits**; 151 lists with identical items.
+- Ladakh page 3: one box per DAY paragraph. NMAT page 1: the fact list one box; each bullet list unchanged.
+- `TASK70_TABLES=1`: no cell joins another cell. `TASK74_REAL`: résumé 4 lists, Rishi 2.
+
+**Change 8 — editing a box keeps the line breaks the writer made** *(added 2026-10-06; needed for Change 5 already,
+and for Change 7's larger boxes).*
+
+*The problem, measured.* `TextEditOverlay.tsx:403–404` opens a left-aligned multi-line box without typed markers with
+`paragraphSeedText` (`paragraphSeed.ts`), which joins **every** line with a space; Done re-wraps the text to the box
+width. On the probe's case 1 (`src/lib/edit/seedCheck.local.test.ts`) the four fact lines open as one sentence and
+come back as `Total questions: 108 Total marks: 360 Total duration: 120 minutes (2` / `hours) Sections: 3 (Language
+Skills, …` — the list is destroyed by editing one word. The same would happen to a label + value, a bold heading +
+its paragraph, numbered items, packing lists and bank details.
+
+*The fix.* When seeding the editor, decide each line end separately:
+- **soft** (join with a space, or de-hyphenate as today) when the line was **full** — the next line's first word
+  could not have fitted in the space left before the box's right edge (measured from that line's own run widths, as
+  Change 1 measures; the box edge is its widest line or its alignment width);
+- **hard** (keep `\n`) otherwise — the writer ended the line.
+
+**Measured implementation correction (2026-10-07):** the width rule alone misclassifies case 5: the value is only
+slightly wider than `GUEST NAME`, so even `Mr.` cannot fit beside the label. A uniformly bold, all-capitals label
+followed by regular text keeps a hard break regardless. Painted emphasis is not treated as an intrinsically bold
+label. The probe and a browser no-op check cover this case.
+
+Centred and right-aligned boxes already keep their display lines (`preservesDisplayLines`) — unchanged. Explicit `\n`
+already survives `wrapTextToLines` / `wrapTextSpansToLines`, so each kept line wraps on its own at Done, and Task 72 /
+Step 3's unchanged-line preservation then matches the lines the user did not touch.
+
+`sourceSpansForTextBlock` (`richText.ts:72–108`) today accepts a seed only if it equals the block text with all line
+joins as `\n` or all as spaces; it must accept **a mix** of the two (map characters, treating each line join as
+either), so bold, italic and colour survive in every merged box.
+
+*Checks for Change 8.*
+- Probe case 1: change one word → the four lines stay four lines; only the edited line differs.
+- Case 5 `GUEST NAME` / `Mr. Pratik Sharma` stays two lines; case 7's heading stays on its own line while its
+  paragraph re-wraps; Ladakh DAY paragraphs and the résumé ABOUT ME paragraph still flow and re-wrap as today.
+- Styling survives editing in every merged box (the prototype's 152 of 153, plus the Sri Lanka p6 case).
+- Unchanged Done is still a no-op; `TASK72_REAL`; export → re-open keeps the boxes.
+
+**Change 9 — a bullet list does not swallow the line after it** *(added 2026-10-06; live on `main` as well).*
+
+*What the user hit.* `NMAT-syllabus (1).pdf` page 1 (copy in `tmp/nmat-check.pdf`; made by Chromium, bullets
+**drawn** as 3.8 × 3.7 pt shapes at x ≈ 43, item text at x 56): the list `Language Skills… / Quantitative Skills… /
+Logical Reasoning…` includes the next sentence `Order of sections is fixed…`, and `+3 marks… / No negative marks… /
+Unattempted questions = 0` includes `Scaled score range…` — both start at x 40, back at the margin. In the bullet
+editor that sentence appears **inside the last bullet item**.
+
+*Why.* In `canJoinTextBlock` (`textUnits.ts:189–236`), when the line above starts an item (`lineHasDrawnMarker` or a
+typed marker) the short-line test is skipped, and the left-edge test passes through its overlap clause: the long
+sentence overlaps all of the short item line (ratio ≥ 0.7) although it starts 16 pt to its left. Identical on `main`.
+
+*The fix.* A line following a bullet item continues that item only if it starts **to the right of the bullet**: its
+left edge ≥ the marker's right edge − 1 pt (the drawn or picture marker's rectangle; for a typed marker, the marker
+run's right edge). Otherwise it does not join the list; normal rules decide what it joins instead. Do not use "must
+start exactly under the item text": some genuine wrapped bullet lines start a little left of it.
+
+**Measured implementation correction (2026-10-07):** Ziro pp3–4 actually wrap back to the typed dot's **left** edge
+(e.g. x239.9453, body x249.8558, dot right x245.3118). The literal right-edge rule removes genuine text, including
+`festival begins.` and `Hapoli Market.`. Permit a narrow hanging-wrap exception: no farther left than the marker's
+left edge minus 1 pt, an unfinished preceding line, a measured first word that could not fit, and a lowercase
+continuation or a preceding linking punctuation mark (e.g. `& Hapoli`). This is not a general left-margin exception:
+NMAT's x40 notes remain outside its x43 drawn dots, and a new uppercase note after an unlinked item stays separate.
+
+*Measured first.* 22 lists in the corpus include a line that starts left of their item text — NMAT's two, Ziro pages
+3–4 (lines about 10 pt left of the text: likely genuine wrapped lines that must stay), corporate pp. 39, 76, 80, 82,
+83, and `rahul-rajput-edited.pdf` (`Travelmite`). Each is classified: right of the bullet → stays; left of the bullet
+→ leaves the list.
+
+*Checks for Change 9.*
+- NMAT page 1: `Order of sections is fixed…` and `Scaled score range…` are their own boxes; each list keeps exactly
+  its items; editing a list never shows those sentences.
+- Ziro pages 3–4: wrapped bullet lines stay inside their items.
+- 151 lists still detected; item text changes only in the classified cases; `TASK74_REAL` résumé 4 lists, Rishi 2.
+
+**Files for Changes 7–9**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textUnits.ts` + test | Change 7's join rule with frozen lists; Change 9's "right of the bullet" test |
+| `src/lib/pdf/textContent.ts` + test | Pass what Change 7 needs into the frozen-partition join |
+| `src/lib/edit/paragraphSeed.ts` + test | Change 8: soft or hard break per line end |
+| `src/lib/edit/richText.ts` + test | Change 8: `sourceSpansForTextBlock` accepts a mix of joins |
+| `src/components/TextEditOverlay.tsx` + test | Only if the seed call needs the box width |
+
+**Change 10 — paragraphs keep their own place: the gap above them and their indent** *(added 2026-10-07 on the
+user's direction)*
+
+*What the user hit.* Corporate governance, `tmp/text-doubling/corporate-edited-3.pdf` page 11. On the page, the box
+`The fundamental or key principles… below:` / `(i) Transparency` / `Transparency means…` (3 lines) / `In fact,
+transparency…` (4 lines) has baseline gaps of **16.3 pt** and **15.0 pt** before the heading and before each
+paragraph, but **12.0 pt** between lines inside a paragraph; `In fact,` starts **28.8 pt** in (x 174.4 against 145.6).
+Opened in the editor, every gap is 12.0 pt and the indent is gone: the paragraphs squeeze together. Every line is
+9.94 pt on the page and in the editor — the text is not smaller, it is squeezed and re-broken. In PDFfiller the same
+text opens with its gaps and indent, as on the page.
+
+*Why.* The editor is one `contenteditable` text stream (`whitespace-pre-wrap`, `richTextToHtml`) with a single line
+height (`textBlockLineHeight`, `buildTextEdits.ts:117`); a paragraph boundary is only a `\n`, so it cannot carry a gap
+or an indent. On Done, `baselinesForLines` (`buildTextEdits.ts:140`) spaces every line by the same height. Change 7
+made this visible: it puts several paragraphs into one box. Before it, each paragraph was its own box.
+
+*Measured scope* (`src/lib/edit/gapIndentScope.local.test.ts`, 2026-10-07, this branch): of 3,082 boxes, **183**
+contain a bigger paragraph gap, **147** an indented line; 152 bullet lists are outside this change.
+
+*What PDFfiller does when the user types a lot* (user's screenshot, 2026-10-07): the typed line grows past the column
+and the box widens; only the overflow drops to its own line; the following lines do **not** reflow up; the box grows
+over the content below. Our editor already reflows within a paragraph and keeps paragraphs apart (Change 8), which
+is better. **Keep our reflow** — Change 10 adds only the gaps and indents.
+
+**Part A — keep the gaps and indents, while editing and after Done.**
+- A paragraph is a Change-8 hard-break segment. For each paragraph, measure from the source lines:
+  `gapBeforePt` (its first baseline's distance from the previous paragraph's last baseline, minus the box's normal
+  line gap; 0 if within 0.5 pt), `firstIndentPt` (its first line's x − the box's left edge) and `restIndentPt`
+  (its continuation lines' x − the box's left edge). This covers first-line indents (`In fact,`) **and** hanging
+  indents (GOA p4 `1. Check-in & Check-out Timings:` with indented continuation lines).
+- **Editor:** each paragraph becomes its own block inside the `contenteditable`, with `margin-top = gapBeforePt`,
+  `padding-left = restIndentPt` and `text-indent = firstIndentPt − restIndentPt` (all × zoom). The first paragraph has
+  no gap above, so 5c.1's first-baseline measurement is unchanged; the hidden probe mirrors the new structure.
+- **Typing:** Enter starts a new paragraph block whose gap is the box's most common `gapBeforePt` (0 if the box has
+  none) and whose indent copies the paragraph it was split from; Backspace at a paragraph's start merges it into the
+  previous one and drops its gap and indent; pasted multi-line text becomes paragraphs; inline formatting, colour,
+  selection across paragraphs, undo and **IME composition** (Devanagari and the other supported scripts) keep working.
+- **Done:** `buildTextBlockEdits` places each paragraph's first baseline one line height **plus `gapBeforePt`** below
+  the previous paragraph's last baseline, and offsets each line's x by its paragraph's indent; `boxHeight` includes
+  the gaps. Export handlers are unchanged — they draw at the positions they are given.
+- **Saved edits:** the first `TextEdit` of a box gains an optional `boxParagraphs?: { gapBeforePt, firstIndentPt,
+  restIndentPt }[]` (beside `boxText` / `boxSpans`); `projectState.ts` saves and validates it; re-opening restores the
+  look. Edits saved before this change have no field and behave exactly as today.
+- **Unchanged Done stays a no-op**: gaps and indents come from the source, so opening and closing without typing
+  creates no edit. With the right gaps and indents, Step 3 / Task 72's unchanged-line preservation keeps every
+  untouched line's baseline and x identical.
+- Left-aligned boxes only. Centred and right-aligned boxes already keep their display lines
+  (`preservesDisplayLines`); bullet lists keep their own editor. Justification is **not** part of this change — it
+  belongs to Step 5d.
+
+**Part B — a clearly bigger gap starts a new box, as in PDFfiller.**
+- *Evidence.* On corporate p11 PDFfiller keeps `The fundamental… below:` as its own box (gap **16.3 pt** above
+  `(i) Transparency`) but puts `(i) Transparency` and both paragraphs in one box (gaps **15.0 pt** against 12.0 pt
+  lines). In the 15-case probe it splits at gaps 1.6–1.64 × the line gap (cases 4 and 14). Its threshold therefore
+  lies between **1.25 ×** and **1.36 ×** the normal line gap. Ours joins `The fundamental…` because Change 7's rhythm
+  check only applies once a box already has two gaps, so the first join is never compared.
+- *Rule.* The normal line gap for a line is the page's most common baseline gap for lines of the same size and family
+  (the page's line pitch), so the first join is judged too. A gap **greater than 1.3 ×** that pitch starts a new box;
+  a smaller extra gap may stay inside the box and is kept by Part A.
+- *Measure first.* List every box Part B splits across the corpus, classified. Required: corporate p11 → `The
+  fundamental…` separate, `(i) Transparency` + both paragraphs one box; the 15-case probe still matches its target
+  (cases 3 and 4 unchanged: no extra space → one box, extra space → two); Ladakh DAY paragraphs, NMAT's fact list and
+  lists unchanged; 151 lists identical.
+
+*Checks for Change 10.*
+- Corporate p11: the box opens with its paragraph gaps (16.3 / 15.0 against 12.0) and the 28.8 pt indent within
+  0.5 pt; Done unchanged is a no-op; after editing one word, every untouched line's baseline and x in the export are
+  identical to the source, and the edited paragraph keeps its gap and indent.
+- GOA p4 hanging indents survive editing; Enter, Backspace-merge and multi-line paste behave as above.
+- Typing, selection, undo and composition (simulated composition tests, plus a real Hindi keyboard check by the user)
+  work across paragraph blocks; 5c's frame hugs all paragraphs; 5c.1's first baseline stays within 0.5 pt.
+- A saved project re-opens with the same gaps and indents; an older saved project opens exactly as before.
+- `TASK72_REAL` (any baseline expectation that encoded the squeezed spacing is updated with the reason),
+  `TASK74_REAL`, `TASK66_SWEEP`, `TASK74_PATCH`, `TASK74_PREVIEW` pixel parity, `TASK74_GROUPING`, full suite,
+  typecheck, lint, build.
+
+**Files for Change 10**
+
+| File | Change |
+|---|---|
+| `src/components/TextEditOverlay.tsx` + test | Paragraph blocks with gap and indent; Enter / Backspace / paste; probe mirrors the structure |
+| `src/lib/edit/richText.ts` + test | Paragraph-aware HTML and reading the value back; spans unchanged per paragraph |
+| `src/lib/edit/paragraphSeed.ts` + test | Measure `gapBeforePt`, `firstIndentPt`, `restIndentPt` per paragraph |
+| `src/lib/edit/buildTextEdits.ts` + test | Place paragraphs with their gaps and indents; `boxHeight` includes gaps |
+| `src/lib/export/types.ts` | Optional `boxParagraphs` on `TextEdit` |
+| `src/lib/projects/projectState.ts` + test | Save and validate `boxParagraphs`; old projects unchanged |
+| `src/lib/pdf/textUnits.ts` / `textContent.ts` + test | Part B: page line pitch and the 1.3 × split |
+
+**The prototype this starts from** (Claude, 2026-10-05, local and untracked:
+`src/lib/edit/groupingPrototype.local.test.ts`, `GROUPING_PROTO=1`, report in `tmp/grouping-prototype.txt`). Built
+from today's code plus the exception above; it is a measurement tool, not the implementation.
+
+| Version | Joins | Splits | Bullet lists (151) | Note |
+|---|---|---|---|---|
+| Replace the short-line test with "would the next word fit" | 174 | **359** | 148 | Dead: split broken headings, one-per-line lists, résumé company + role pairs |
+| Join-only exception | 136 | 11 | 151 | A date line joined the heading below it (Ladakh p5) |
+| + same size, proven column edge | 102 | 2 | 151 | New paragraphs after a full line, name lists, timed items joined |
+| + full stop/capital, item starts, 20-em column | **51** (21 distinct) | **2** | **151, every item identical** | ~16 of 21 right (all Ladakh DAY paragraphs; wrapped GOA, Ziro and Delhi sentences); ~5 questionable |
+
+The ~5 questionable joins to resolve: `…transfer in a traveller` / `Accommodation in a 3-star…` (GOA);
+`…share price of the company` / `Creditors and their interests` and `… Independence of Directors` / `Summary`
+(corporate); and two knock-on effects in Delhi (`3:15 PM` / `4:15 PM`) and GOA (`factors.` / `Any such changes`), where
+a new join changed which box a later line joined. The 2 splits are the same knock-on (`…or similar` /
+`3:15 PM…`, `…Summary` / `Questions…`) and must reach 0. The 20-em guard also lost good joins of big headings broken
+over two lines (`…THAT` / `STRANGERS`, `HERE'S` / `WHAT OUR`); recover them if a guard allows, otherwise say so.
+
+**Checks**
+- *Ladakh*: page 3 opens as one box per DAY paragraph (4 boxes), page 4 likewise; the DAY labels stay separate.
+- *Exported paragraph*: edit the résumé "ABOUT ME" paragraph → export → re-open → **one** box
+  (`reeditSplit.local.test.ts` is the local probe for this; make it a permanent `TASK74_REAL` check).
+- *Join-only*: across the corpus, every pair joined today is still joined; any exception is listed and explained.
+- *Bullet lists*: `TASK74_REAL` — résumé 4 lists, Rishi 2; corpus 151 lists, every item text identical.
+- *Tables*: `TASK70_TABLES=1` — no cell joins another cell; no join touches a number cell.
+- *Bold survives*: a merged Ladakh paragraph opens with "Highlights: …" still bold in the editor
+  (`sourceSpansForTextBlock` must match the seeded text), and after Done the export keeps it bold.
+- *Saved projects*: a project saved with an edit on today's second Ladakh DAY-2 box re-opens with that box, opens
+  as edited text, and a second Done does not duplicate it.
+- *Untouched elsewhere*: chat/search/dates/places use `mergeRunsIntoLines` without options and must not change;
+  `TASK74_PATCH`, `TASK74_PREVIEW`, `TASK66_SWEEP`, `TASK72_REAL`; full suite; typecheck; lint; build. The 1,458-split
+  and 85/416 corpus numbers may move — each change is explained, then re-baselined.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/textUnits.ts` + test | The join-only exception and its guards in `canJoinTextBlock`; letter-weighted comparison for grouping |
+| `src/lib/pdf/textContent.ts` + test | Pass what the exception needs (page lines for the column edge) through `groupRunsIntoBlocks`; `representativeStyle` unchanged |
+| `src/components/OverlayLayer.tsx` + test | Split a merged box where a saved edit anchors (Change 3) |
+| `src/lib/pdf/tableCells.local.test.ts`, `src/lib/edit/neighbourBoxWidth.test.ts` | Re-baseline, with every moved count explained |
+
+**Files that must not change:** `bulletList.ts` and `canJoinTextBulletList`; `ruleLines.ts`; `mergeRunsIntoLines`'
+no-options path (chat, search, dates, places); `representativeStyle` and every `style` field; export, fonts, covers,
+image tools, Add text; Steps 5a–5c.1 behaviour.
+
+**Guardrails:** join-only — nothing joined today comes apart; a saved edit never loses its box; bullet lists and
+table cells are byte-identical in grouping; every join and split in the corpus is listed and explained.
+
+**Verify (user):** Corporate governance page 11 → `The fundamental…` is its own box; `(i) Transparency` and both
+paragraphs are one box and open with their spaces and the indent on `In fact,` (Change 10); type a sentence → Done →
+the spaces and indent are still there; press Enter inside the box → the new paragraph gets the same space.
+The 15-case probe PDF → boxes match PDFfiller except case 11 (Change 7). NMAT page 1 → edit one
+word in "Total questions…" → the four lines stay four lines (Change 8); open each bullet list → "Order of sections…"
+and "Scaled score range…" are not inside it (Change 9).
+The exam page → "Total questions / Total marks / Total duration / Sections" is one box (Change 5).
+Ladakh page 3 → each DAY paragraph is one box; edit one → bold "Highlights" stays bold. Résumé →
+edit "ABOUT ME" → export → open the export → one box. Résumé education and work lines → still separate boxes. A
+bullet list → unchanged. Compare Ladakh pages 3–4 with PDFfiller.
+
+**Known limits (updated for Change 7):** consecutive paragraphs, headings or plain items with similar faces/sizes
+and regular spacing can share a box even when punctuation, weight or indentation distinguishes their meaning.
+Change 8 keeps proven hard display breaks within that box; geometry cannot recover every author's intent. Old
+list fragmentation can remain because list ownership is preserved; turned-page editing is not covered here.
+
+**Implementation and verification — 2026-10-05 (Codex, uncommitted).**
+
+- Freeze the old block partition first, then join whole old blocks. This prevents the prototype's knock-on splits:
+  a new bridge cannot change which old box a later line belongs to. The no-options grouping path is unchanged.
+- Grouping-only letter weights leave all source styles and rich spans intact. First-word measurement uses complete
+  run geometry or the source font's glyph widths normalized to that run's measured width; never average letters.
+  Missing, conflicting or multi-character glyph metrics leave an uncertain partial word in its old box. This is
+  not a new exact text-matrix/character-spacing engine (that remains Step 5d).
+- Additional conservative guards reject same-weight capitalized plain starts without linking punctuation, extra
+  paragraph leading, percent-number item starts and copyright starts. Whole typed/drawn list groups cannot be
+  absorbed by a paragraph. These removed the prototype's questionable GOA/corporate joins and the copyright join
+  revealed by using the browser's actual `fontExtraProperties: true` setting in the new corpus test.
+- Saved edited boxes retain both their leading and trailing old boundaries. Only the first cover of an old edit
+  transaction can identify it; interior covers of a newly merged paragraph must not split that paragraph again.
+  Pure partition, real-PDF session and component tests cover old second-box edits, no-op Done, no duplication,
+  and editing/re-editing a newly merged box. Browser-saved projects were not created or evicted during these checks.
+- `TASK74_GROUPING=1`: **46 unique files, 4,331 → 4,304 boxes, 27 joins, 0 splits; all 151 lists and their items
+  identical.** Every new boundary is individually classified with a reason in `tmp/pdfs/task74-grouping.json`.
+  The 27 are 20 Ladakh boundaries across two copies, three Ziro wrapped `unforeseen / circumstances` boundaries,
+  one merged-GOA `near the / summit` boundary, two corporate p68 SEBI sentence boundaries, and one corporate p83
+  `On the other / hand` boundary. Ladakh page 3 has four DAY paragraphs; page 4 has five; labels stay separate.
+- `TASK70_TABLES=1`: 45 files, 31 changed versus the older baseline, **0 unexplained**, 14 cell splits, 44 row splits,
+  32 rejected underline candidates. Paragraph-split count explicitly re-baselined **1,458 → 1,438 (-20)**:
+  nine résumé certification wraps, two Ladakh `monasteries` wraps, one Vietnam `factors` wrap, four Ziro wraps,
+  four GOA wraps (including `summit`). Each removed split is printed by the test. This survey's local-block arm
+  deliberately omits drawn markers and horizontal rules and differs from the browser corpus; do not equate its
+  -20 with the actual editor's 27 joins. Neighbour-width counts remain **85/416**, unchanged.
+- `TASK74_REAL=1` and `TASK72_REAL=1` passed, including résumé four lists and Rishi two. New permanent gated real-PDF
+  checks export/re-open an edited résumé ABOUT ME paragraph as one box, keep Ladakh Highlights bold through export,
+  and verify no-op Done on both merged and old saved partitions. Realistic edits carry source rich spans/fonts.
+- `TASK74_PATCH=1`: **335/335** covers emitted; zero skipped/drawn/refused. `TASK74_PREVIEW=1`: **40 clean pages / 49
+  selections**, nine reasoned fallbacks, clean-page pixel parity. `TASK66_SWEEP=1`: **121 round trips**, 47 files /
+  242 pages, zero failures. These export guards ran before the final conservative grouping guards; export code
+  was not changed. Full final suite: **165 files passed, 23 gated/skipped; 1,401 tests passed, 50 skipped**.
+  Typecheck, lint and production build passed (existing bundle-size advisory only).
+- Browser visual QA used real PageCanvas/OverlayLayer and document/edit stores in an isolated, non-autosaving
+  harness (`tmp/5c2/qa.html`). Ladakh pages 3–4, bold Highlights, no-op Done (zero edit entries), edit/re-edit of
+  a merged paragraph, résumé edit → export → reopen → one box, GOA inclusion list, corporate p25 heading boundary,
+  and the p68/p83 merged sentences were checked. Proof: `tmp/pdfs/5c2-ladakh-browser.jpg` and
+  `tmp/pdfs/5c2-resume-browser.jpg`. The old saved-edit path is covered by session/component tests, not a live
+  browser-project round trip.
+- Narrow large two-line headings and ambiguous capitalized wraps remain unchanged where the guards prohibit a
+  bridge; preserving every existing list can also leave some list-item continuations fragmented. This is not a
+  promise that every exported PDF/font combination will re-open as one box. **User PDFfiller comparisons and
+  acceptance are still pending. No commit or merge has been made.**
+- **Remaining failure found in the final extra browser check:** edit Ladakh DAY-2, append ` QA`, Done, export and
+  reopen in memory: bold survives, but the paragraph returns as **two boxes**. The real exported line starting
+  `sunset at Shanti Stupa` is indented; the repeatable real-PDF export probe measures its start at x270.8 versus
+  x266.2 on the preceding line (**about 4.6 pt**). It therefore fails the exception's required ±2 pt left-edge
+  guard. The rich wrapper preserves spaces at soft breaks, which can put a leading space onto an exported line;
+  source Ladakh's aligned lines and the résumé export case pass. Do not silently relax the alignment guard or
+  claim universal export/reopen success. Resolve the wrapping/leading-space case with tests distinguishing
+  accidental soft-wrap spaces from intentional indentation; that changes layout/export behaviour outside this
+  step's stated grouping-only guardrails and needs the user's direction. **This step is not fully done.**
+
+**Changes 5–6 implementation and verification — 2026-10-06 (Codex, uncommitted; supersedes the spacing diagnosis above).**
+
+- The user's actual `NMAT-syllabus.pdf` was read and checked in the browser. Quick Snapshot's four facts are
+  **one block instead of three**; its `CONCEPT Quick Snapshot` heading remains separate. Done without typing
+  leaves **zero changes and zero edit entries**. The `Order of sections is fixed…` note was already grouped with
+  its preceding bullet section by the old rules; that existing grouping is preserved, not claimed newly separate.
+  NMAT page 3's table cells remain separate click targets. The original file was not modified; an ignored test copy
+  is `tmp/pdfs/nmat-syllabus.pdf`. Proof: `tmp/pdfs/5c2-oct6-nmat-browser.jpg`.
+- Uniform joining uses the approved letter-weight, face, size, italic, left-edge, gap-rhythm, item-start and marker
+  guards. Lettered `a.` / `iii.` items are also protected. Corpus review caught three borderless-table row joins
+  in corporate pp35–36; a parallel cell on **either** adjacent baseline now prevents a new uniform bridge.
+  This conservative table guard can also leave aligned multi-column prose split; it does not break old joins.
+- `TASK74_GROUPING=1`: **46 files, 4,331 → 4,009 boxes; 322 joins = 27 wrap + 295 uniform; zero splits; 151 lists,
+  every item identical; no number-cell joins.** All new boundaries are listed with reasons in
+  `tmp/pdfs/task74-grouping.json`. A checksum freezes the reviewed uniform report so future additions fail review.
+  Uniform additions include the approved packing/inclusion/skills/fact blocks, same-face prose, and recovered
+  multi-line titles. Adjacent same-face sentences and body-styled headings can form one block: the explicit
+  Change-5 trade-off, not semantic paragraph detection. Differently styled headings/items remain guarded.
+- `TASK70_TABLES=1`: **45 files, 27 changed, zero unexplained; 14 cell / 44 row splits; 32 rejected underlines**.
+  The separate marker/rule-free survey's paragraph splits are **1,458 → 920 (-538)**, or **1,438 → 920 (-518)**
+  against the preceding implementation. Every removed boundary is printed, including repeated labels counted
+  independently. Most new reductions are uniform travel packing/inclusions, CV skills/certifications and corporate
+  same-face prose. This survey is not the UI corpus, so its reduction is not the UI's 322 joins.
+- Neighbour reach is **85/413**, previously 85/416, unchanged on re-edit. All three moved fragments are printed
+  and verified inside their joined blocks: Vietnam p3 `Transfer to Ha Long Bay`, Vietnam p4
+  `Breakfast with a beach view`, and corporate p79 `The corporate social responsibility has become complete decree.`
+  They no longer count as lone centred fragments; their text is not lost.
+- Both plain/rich wrappers remove whitespace on both sides of automatic breaks. Typed indentation after explicit
+  newlines, internal repeated spaces, blank lines, long-word splitting and rich metadata remain covered by units.
+  Six actual export tests check plain/rich left, centre and right alignment against **visible glyph widths** (±0.5 pt).
+  Source-font-measured résumé and Ladakh round trips pass, as do old saved-partition and no-op tests. Résumé has
+  four lists; Rishi has two; `TASK72_REAL` retains the six-line/576-character no-op paragraph.
+- **Browser failure still open:** append ` QA` to Ladakh DAY-2, Done, export/reopen. The four browser-wrapped lines
+  all start at **x266.2104** (the previous x270.8 space indent is gone), and Highlights remains bold, but they still
+  return as **two boxes**. The upper line ends at **x668.20353**; the furthest other same-left peer ends at about
+  **x642.02282**. Therefore no other peer reaches the upper edge within 2 pt, and Change 1's explicit column-proof
+  guard rejects the bridge. The lower line is mixed-weight, so uniform joining correctly cannot bypass that guard.
+  The lower-level test wraps with source-font widths into **five** lines and passes; it is **not** an end-to-end test
+  of `OverlayLayer.wrapNextText`, which uses browser canvas font metrics and produces four. Do not conflate them.
+  Proof: `tmp/pdfs/5c2-oct6-ladakh-remaining-browser.jpg`. Matching browser/export font measurements or adding
+  explicit paragraph-boundary persistence needs a separately scoped change; no font/export changes or silent
+  relaxation of the approved grouping guard were made. **Step 5c.2 is still partial, not ready to merge.**
+- Final guards: **335/335 covers omitted successfully (zero white patches drawn, zero pages refused)**;
+  clean preview **40/49 selections**, nine reasoned fallbacks, pixel parity; **121 round trips / zero failures**.
+  Full suite **166 files passed, 23 skipped; 1,439 tests passed, 53 skipped**, run with two workers after the first
+  heavily concurrent run hit three 5-second timeouts. Typecheck, lint and build passed (existing bundle-size warning).
+  No commits, merges, autosaved browser projects or changes to `embeddedFont.ts`, paint, rich-text, covers or export
+  logic. User comparisons/acceptance and the browser failure above remain outstanding.
+
+**Changes 7–9 implementation and verification — 2026-10-07 (Codex, uncommitted; supersedes the historical partial reports above).**
+
+- Change 7 first freezes the entire Changes 1–6 partition, then adds spacing-led non-list bridges. Merely freezing
+  the older legacy arm initially lost four already-proven Ladakh boundaries; the two-stage partition fixes that.
+  Whole typed/drawn list boxes stay frozen, including headings and unmarked continuations. The measured parallel-cell
+  guard remains for borderless tables; the no-options grouping path, appearance styles and font-reuse gate are unchanged.
+- Change 8 decides each line end from its own first-word geometry; unknown partial-word metrics keep a hard break.
+  Rich source spans now map mixed hard/soft joins and soft de-hyphenation without positional guesses. The all-caps
+  label exception above fixes case 5. Opening mixed-colour text initially promoted known-colour metadata only in the
+  DOM, falsely creating an edit on unchanged Done; source spans now carry the same knowledge, including retaining
+  explicit unknown-colour flags. No session comparison logic, font, paint, export or cover logic was changed.
+- Change 9 applies the marker edge to the current item even after a wrap. The proven hanging-wrap exception above
+  preserves Ziro pp3–4. Previously saved edited boxes keep their complete old partition, including a tail that fresh
+  detection now detaches; existing covers are not duplicated by a second Done.
+- The real **15-case probe passes**: counts **1,1,1,2,1,1,1,1 / 1,1,2,1,2,2,1**. Case 11 stays two columns, not one
+  combined box. Editing `questions` to `items` keeps four fact lines through export/reopen and leaves the other three
+  line rectangles unchanged. Case 5 keeps two lines and bold; case 7 keeps its heading line and flowing body.
+- `TASK74_GROUPING=1`: **46 files, 4,009 → 3,041 boxes, 974 added boundaries, six approved Change-9 splits, zero
+  unapproved splits, 151 lists still detected**. Every boundary, measured reason, and changed list's complete
+  before/after items is in `tmp/pdfs/task74-grouping-789.json`; its join digest is frozen. The six split locations are
+  merged-GOA p4 (`Important Notes` / numbered notes), corporate pp39/76/80/82 (outdented prose or `Definitions` after
+  a list), and Delhi p4 (the next timed activity after a bullet). Only **four detected lists** change item text, at
+  those corporate pages; Change 7 makes no further list changes. Both NMAT files are additional acceptance fixtures
+  outside this 46-file baseline: their two notes detach and their three lists retain exactly their own items.
+- The approved Change-7 trade-off is visible in the report: similar-size headings, dates, labels, plain numbered or
+  dash items and consecutive sentences may share a box. This is spacing-based editing, not semantic paragraph
+  detection. Wider gaps, incompatible sizes/families, separate columns, number cells and ruled borders remain guarded.
+  Old list fragmentation is preserved rather than reconstructed; exact font/position fidelity still belongs to 5d.
+- `TASK70_TABLES=1`: **45 files, 31 changed versus its original baseline, zero unexplained, 14 cell / 44 row splits,
+  32 rejected underlines**. Its separate marker/rule-free paragraph survey moves **920 → 278**, net **-642**, comprising
+  **649 removed boundaries and seven classified tail additions**; every moved pair is printed, including repeated
+  labels. This count is not the UI corpus. Sri Lanka p1 moves 31 → 29 boxes only through the named bridges
+  `Grand Kesambi… / Deluxe Room` and `One Bedroom Villa… / Add-ons:`; Fraction Chart remains 218 separate boxes.
+- Neighbour reach moves **85/413 → 85/377**, the same on re-edit. All moved pages and each old fragment's owning
+  block are printed and verified; no text disappears. Résumé still has four detected lists; Rishi two. `TASK72_REAL`
+  retains its six-line, 576-character no-op paragraph; source-rich résumé/Ladakh and saved-partition round trips pass.
+- **Actual browser verification**, isolated non-autosaving PageCanvas/OverlayLayer harness: Ladakh DAY-2 → append
+  ` QA` → Done → export/reopen → **one four-line box with bold Highlights preserved**, resolving the October-6
+  failure. Done unchanged on both source and reopened text creates zero changes/entries. Actual NMAT → change one
+  word → Done/export/reopen → four lines in one box; the two notes remain separate, and each of their bullet editors
+  shows only three items. Unchanged bullet-list Done creates no edit. The bold label also opens as two lines and its
+  unchanged Done is a no-op. Proofs: `tmp/pdfs/5c2-789-ladakh-browser.png`, `5c2-789-nmat-browser.png`,
+  `5c2-789-nmat-bullet-browser.png`, and `5c2-789-probe-label-browser.png` (all under `tmp/pdfs`). No original PDF or
+  browser-saved project was modified. Automated checks cover the remaining probe cases and corpus geometry.
+- Final guards: **335/335 covers omitted, zero white patches drawn or pages refused**; **40/49 clean previews**, nine
+  reasoned fallbacks, pixel parity; **121 round trips / zero failures**, 47 files / 242 pages. Full suite: **167 files
+  passed, 28 gated/skipped; 1,449 tests passed, 62 skipped** (two workers). Typecheck, lint and build pass; the existing
+  bundle-size advisory remains. Logs are `tmp/pdfs/5c2-789-{full-reviewed,reviewed-gates,real-complete,safety}.txt`.
+  **Changes 7–9 are implemented and checked. User comparison/acceptance is pending. No commit or merge.**
+
+**Change 10 implementation and verification — 2026-10-08 (Codex, uncommitted).**
+
+- Paragraph-aware sessions retain measured gap-before, first-line indent and continuation indent as PDF-point
+  values. The editor uses independent blocks inside its existing uncontrolled contenteditable; its hidden baseline
+  probe mirrors that structure, with no extra first paragraph margin. Enter copies the indent and common gap;
+  start Backspace merges; multiline paste uses native browser transactions. Composition does not rewrite text nodes.
+- Done wraps each paragraph at its first/hanging widths and places its baselines from the model, including gaps.
+  Untouched paragraphs retain their source display lines/positions when text and appearance match; a changed line
+  count reflows following paragraphs rather than preserving overlapping old positions. Box height includes gaps.
+  Export handlers, font reuse, paint, covers, image tools and Add Text are unchanged.
+- Only the first line edit stores optional `boxParagraphs`. Project serialization deep-clones and validates it;
+  malformed/negative/non-finite entries or paragraph-count mismatches are rejected. Older saved edits without the
+  field keep the previous editor path. The compatibility partition includes both older strict boxes and the entire
+  pre-Change-10 box, so a saved nine-line corporate edit is not reduced to a newly detected fragment.
+- Part B measures repeated page pitch by family/size and splits only left-aligned non-list boxes at gaps greater
+  than 1.3 times that pitch. Unknown/non-repeatable pitch does not guess. Ruled cells and existing centred/right
+  boxes stay atomic; every typed/drawn list remains frozen. The initial unprotected measurement proposed 526 splits;
+  the protected live corpus accepts **517**: corporate **512**, two Ladakh price/booking-note boundaries in each of
+  two copies (**4**, not DAY paragraphs), and Delhi p6's duration/subtitle boundary (**1**).
+- `TASK74_GROUPING`: **46 files, 3,041 → 3,558 boxes; 517 named gap splits, no new joins, all 151 lists/items
+  identical, 507 ruled boxes protected**. Corporate p11: the introductory sentence is its own box; Transparency
+  and the two body paragraphs remain one eight-line box. The 517 boundaries, exact gaps/pitches and reasons are in
+  `tmp/pdfs/change10-corpus.json`, with a frozen checksum. The Changes-1–9 partition also retains its historical guard.
+- `TASK70_TABLES`: **45 files, 31 changed versus the original baseline, zero unexplained; 14 cell / 44 row splits;
+  32 rejected underlines**. Its separate marker/rule-free survey explicitly moves **278 → 749 paragraph splits
+  (+471)**, each added gap boundary printed; that artificial arm has no cell borders and is not the live UI corpus.
+  Neighbour reach is **85/402**, formerly 85/377: 25 recovered non-left fragments from split left boxes; every moved
+  page/owner is listed, existing non-left boxes remain intact, and first/re-edit reach is identical.
+- Real corporate edit/export test: `quality` → `clarity`, every unchanged line's baseline and x stays within **0.5 pt**
+  of its source, and the 28.8 pt indent survives. Saved-project round-trip, restored-editor no-op and pre-Change-10
+  partition tests pass. The 15-case probe, Ladakh/resume, NMAT facts/notes, Ziro continuations, four resume lists and
+  two Rishi lists pass; `TASK72_REAL` remains a six-line, 576-character no-op.
+- Actual non-autosaving browser QA: the corporate editor has **12 pt leading**, paragraph transitions about
+  **14.98 pt** (target 15), and **28.8 pt** first indent. Original and exported/reopened Done without typing leave
+  zero changes/entries. A one-word browser edit/export/reopen preserves the displayed gaps and indent. Enter creates
+  the copied indent/common gap; Backspace merges; paste creates separate paragraphs; native Undo restores text.
+  Proof: `tmp/pdfs/change10-corporate-browser.png`. No original PDF or browser-saved project was modified.
+- Final travel-note browser QA (`sample-goa-merged.pdf` p4): the heading and its two indented body lines retain
+  **8.04 pt** body indentation. Typing `hotel approval` → `hotel consent`, Done, export and reopen keeps the first
+  note separate from Full-Day Tours. This check exposed page-wide leading borrowed from the bullet lists:
+  **16.01 pt** instead of the note's local **13.035 pt**. Repeated in-box leading now wins for the editor/model;
+  Part B's grouping threshold is unchanged. Source heading size no longer scales that measured pitch a second
+  time. A unit regression and real edit/export/re-edit regression lock down the correction; all three line
+  baselines remain within **0.5 pt** of source. Proof: `tmp/pdfs/change10-hanging-browser.png`.
+- The visual check found an existing rich-HTML bug: quoted font-family names were not escaped inside the style
+  attribute, causing body runs to inherit a heading font. HTML attribute escaping now preserves the font reference
+  and correct base-family fallback; a real-DOM test locks this down. `embeddedFont.ts`'s reuse gate was not changed.
+- Final automated checks: **1,460 tests passed, 70 gated/skipped** in the full run (168 files passed; 34 gated/skipped);
+  real guard run **120 tests passed**. The 46-file live corpus and 45-file table sweep were rerun after the travel
+  correction; the recorded split/list/cell counts are unchanged. Typecheck, lint and build pass (existing bundle
+  size advisory). **335/335 covers omitted**, zero patches drawn/refused; **40/49 clean previews**, nine reasoned
+  fallbacks and pixel parity; **121 round trips / zero failures**, 47 files / 242 pages. Logs are under
+  `tmp/pdfs/change10-{full-handoff,real-handoff,gates-handoff,safety}.txt` (earlier diagnostic runs are also retained).
+- Limits: exact justification/text matrices remain Step 5d. Fresh-PDF extraction conservatively keeps uncertain
+  display-line breaks when partial-word glyph metrics are unavailable; saved projects retain explicit paragraph
+  structure. Simulated Devanagari composition tests pass; **the user's real Hindi keyboard/IME check and comparison
+  acceptance are still pending**. No commit or merge has been made.
+
+**Code-review fixes — 2026-10-08 (Claude, before merging; the user said "do it yourself").** An independent review of
+Changes 7–10 found two serious bugs that only a real browser shows (jsdom never builds Chrome's DOM), plus five
+smaller ones. Bugs 1, 2 and 5 were reproduced in the built-in browser on Ladakh page 2 first, then re-run after the
+fix by Claude and by the user in Chrome.
+
+| # | What the user saw | Cause | Fix |
+|---|---|---|---|
+| 1 | Enter at a paragraph end, nothing typed, Done → a double gap; Save & close → *"This saved file can't be opened."* | Chrome copies the style span into the new paragraph and puts its placeholder `<br>` **inside** it; the serializer only skipped a `<br>` sitting directly in the paragraph, so it counted an extra line. `boxParagraphs` (3) then disagreed with `boxText` (4 lines) and validation rejected the **whole project** | A `<br>` that ends its block draws no line, wherever it sits (`breakStartsLine`); a `<br>` inside a paragraph is a line with a continuation layout; the serializer always returns one layout per line (`alignParagraphLayouts`). **Safety net:** a mismatched `boxParagraphs` no longer rejects the file — restore drops just those layouts and that box reopens on the plain path (supersedes "paragraph-count mismatches are rejected" above) |
+| 2 | Font, size or colour across two paragraphs → 2 paragraphs became 4, "experi / encing"; select-all left an empty first paragraph | One wrapper span around the whole selection; `extractContents` cloned each partly selected paragraph | The selection is cut at every paragraph edge and each piece wrapped on its own (`paragraphSelectionRanges`, `styleSelection.ts`) |
+| 3 | A reopened edit could get a different line pitch from its first edit | The saved box is swapped for an older-grouping copy without `paragraphLineHeightPt` | Same lines → keep the current block; a larger saved box takes the pitch of the block it starts in |
+| 4 | An old saved edit made just after deleting a picture or rule line could lose its box and draw twice | Any cover at z−1 counted as "an interior line of the same edit" | Only a text cover can be the line before; a picture- or rule-line-delete cover cannot (`coverTransactions.ts`) |
+| 5 | One word made big ("Pangong" 36 pt), Done → the next line dropped ~12 pt into the next paragraph | Export stepped `max(pitch, glyph)` above and below the big line; the editor is CSS (half-leading) | Export lays lines out as CSS does: a size *s* puts *s·(r+k)/2* above the baseline and *s·(r−k)/2* below (*r* = pitch ÷ size, *k* = ascent − descent, measured from the editor's real font at Done; Helvetica fallback). Uniform lines still step exactly one pitch |
+| 6 | Speed | Bullet check before the cheap gap test; page pitch compared every line with every line; two extra regroupings on every edit | Reordered; pitch by sorted buckets + binary search; the older groupings memoised per page |
+| 7 | Untouched lines *above* an edit moved when the line count changed; a margin note level with a typed bullet that shares its run with the words joined the list | Whole box reflowed from the first line; the dot's left edge used | Unchanged leading lines stay put and the rest flows from them; the dot's right edge from the run's glyph advances |
+
+- **Measured in the browser (Ladakh p2):** A — two paragraphs stay two, nothing split, the saved page matches the
+  editor; B — editor steps 36.2 / 23.7, saved 36.16 / 23.72 (before: 36 / 36); C — one empty line, saved as 3
+  layouts / 3 lines, Save & close → Continue editing opens with all three edits. The earlier broken save also opens.
+  The user repeated A, B and C in Chrome: all pass.
+- **Tests:** `src/lib/edit/change10Fixes.test.ts`, `src/lib/pdf/change10Fixes.test.ts`, a project-state restore test;
+  bugs 3 and 7b's tests were confirmed to fail on the old code. One expectation changed on purpose
+  (`change10.test.ts`, heading line: 686.98 → the CSS value 686.66) and one real-PDF test now expects the reopened box
+  to carry its pitch. Full suite **1,476 passed, 0 failed**; with every real-PDF switch **1,516 passed** plus the one
+  updated test. Corpus numbers identical to before the fixes: 749 splits / 758 joins, 335/335 covers, 85/402
+  neighbour reach, 40/49 previews, 121/0 round trips, 0 unexplained, picture-dot lists 0 patches. Build passes.
+- **Known leftover:** enlarge a word, press Enter right after it and leave the new line empty — that empty line is
+  ~1.5 pt taller in the editor than on the page (the empty line keeps the bigger size in Chrome, the export uses the
+  body size). Rare; not fixed.
+
+**Land:** branch `paragraph-grouping` from `main` — the user asked for a branch so it can be removed if anything goes
+wrong. Commit: `A line that wrapped stays in its paragraph (Task 74, Step 5c.2)`. Merge only after every corpus
+join/split is classified, lists are preserved apart from the approved Change-9 tail removals, table cells remain
+unchanged, and the user's checks pass. Do not commit or merge without the user's approval.
+
+---
+
+#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c.2 is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
 
 *Steps 5a to 5c make editing look right. This step makes it land right. Without it they will look much better and
 occasional movement and spacing differences will remain, because the DOM — not our model — still decides where the

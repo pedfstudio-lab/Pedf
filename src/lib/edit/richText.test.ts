@@ -212,7 +212,7 @@ describe('rich text serialization', () => {
 
     expect(sourceSpansForTextBlock(block)).toEqual([
       { text: 'Black', bold: false, italic: false },
-      { text: ' Red', bold: false, italic: false, color: red },
+      { text: ' Red', bold: false, italic: false, color: red, colorKnown: true },
     ]);
   });
 });

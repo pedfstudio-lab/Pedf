@@ -3,12 +3,50 @@ import { fitTextToBlock, wrapTextSpansToLines, wrapTextToLines } from './textLay
 
 const monospaceMeasure = (text: string) => text.length;
 
+describe.each(['plain', 'rich'] as const)('soft-break whitespace (%s)', (kind) => {
+  const wrap = (text: string, width: number) => kind === 'plain'
+    ? wrapTextToLines(text, width, monospaceMeasure)
+    : wrapTextSpansToLines([{ text, bold: false, italic: false }], width, monospaceMeasure).map((line) => line.text);
+
+  it('drops a separator that itself overflows, without adding an empty last line', () => {
+    expect(wrap('ending with a golden sunset at Shanti Stupa', 20)).toEqual([
+      'ending with a golden', 'sunset at Shanti', 'Stupa',
+    ]);
+    expect(wrap('golden ', 6)).toEqual(['golden']);
+  });
+  it('drops a fitting separator when the next word makes a soft break', () => {
+    expect(wrap('golden sunset', 8)).toEqual(['golden', 'sunset']);
+  });
+  it('keeps typed indentation, internal double spaces and explicit blank lines', () => {
+    expect(wrap('  a  b\n   c  d\n\n', 20)).toEqual(['  a  b', '   c  d', '', '']);
+    expect(wrap('   a longer\n   b longer', 7)).toEqual(['   a', 'longer', '   b', 'longer']);
+    expect(wrap('    word', 3)).toEqual(['   ', ' ', 'wor', 'd']);
+  });
+  it('still splits long words and preserves whitespace-only logical lines', () => {
+    expect(wrap('abcdefgh', 3)).toEqual(['abc', 'def', 'gh']);
+    expect(wrap('   \n', 3)).toEqual(['   ', '']);
+  });
+});
+
+it('keeps the styled words on both sides of a discarded wrap separator', () => {
+  const bold = { bold: true, italic: false, fontRef: 'own-bold', color: { r: 1, g: 0, b: 0 }, sourceBold: true };
+  const lines = wrapTextSpansToLines([
+    { text: 'golden ', bold: false, italic: false },
+    { text: 'Highlights', ...bold },
+  ], 6, monospaceMeasure);
+  expect(lines).toEqual([
+    { text: 'golden', spans: [{ text: 'golden', bold: false, italic: false }] },
+    { text: 'Highli', spans: [{ text: 'Highli', ...bold }] },
+    { text: 'ghts', spans: [{ text: 'ghts', ...bold }] },
+  ]);
+});
+
 describe('wrapTextToLines', () => {
   it('wraps words greedily and preserves explicit newlines', () => {
     expect(wrapTextToLines('one two three\nfour five', 7, monospaceMeasure)).toEqual([
       'one two',
-      ' three',
-      'four ',
+      'three',
+      'four',
       'five',
     ]);
   });
@@ -61,7 +99,7 @@ describe('wrapTextSpansToLines', () => {
 
     expect(result.flatMap((line) => line.spans ?? [])).toEqual([
       expect.objectContaining({
-        text: 'red ', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
+        text: 'red', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
       }),
       expect.objectContaining({
         text: 'word', color: red, sourceBold: true, sourceStrokeBold: true, colorKnown: true,
@@ -79,7 +117,7 @@ describe('wrapTextSpansToLines', () => {
     ], 5, (text) => text.length);
 
     expect(result).toEqual([
-      { text: 'go ', spans: [{ text: 'go ', bold: false, italic: false }] },
+      { text: 'go', spans: [{ text: 'go', bold: false, italic: false }] },
       { text: 'abcde', spans: [{ text: 'abcde', bold: true, italic: false }] },
       { text: 'f', spans: [{ text: 'f', bold: true, italic: false }] },
     ]);
@@ -107,8 +145,8 @@ describe('wrapTextSpansToLines', () => {
 
     expect(result).toEqual([
       {
-        text: 'ab ',
-        spans: [{ text: 'ab ', bold: false, italic: false, fontSizePt: 10 }],
+        text: 'ab',
+        spans: [{ text: 'ab', bold: false, italic: false, fontSizePt: 10 }],
       },
       {
         text: 'CD',

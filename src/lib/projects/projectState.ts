@@ -4,6 +4,7 @@ import type {
   ReplacedImage,
   ReplacedText,
   Rgb,
+  TextEdit,
   TextSpan,
   TextStyle,
 } from '@/lib/export/types';
@@ -38,15 +39,23 @@ function clonePlan(plan: PagePlan): PagePlan {
   return plan.map((entry) => ({ ...entry }));
 }
 
+/** Paragraph layouts only reseed the editor; without a match it reopens on the plain path. */
+function matchingBoxParagraphs(edit: TextEdit): boolean {
+  return edit.boxParagraphs !== undefined && typeof edit.boxText === 'string'
+    && edit.boxParagraphs.length === edit.boxText.replace(/\r\n?/g, '\n').split('\n').length;
+}
+
 function cloneEdit(edit: Edit): Edit {
   if (edit.kind === 'image') return { ...edit, rect: { ...edit.rect }, bytes: edit.bytes.slice() };
   if (edit.kind === 'text') {
+    const { boxParagraphs, ...rest } = edit;
     return {
-      ...edit,
+      ...rest,
       rect: { ...edit.rect },
       style: { ...edit.style, color: { ...edit.style.color } },
       ...(edit.spans ? { spans: edit.spans.map((span) => ({ ...span })) } : {}),
       ...(edit.boxSpans ? { boxSpans: edit.boxSpans.map((span) => ({ ...span })) } : {}),
+      ...(boxParagraphs && matchingBoxParagraphs(edit) ? { boxParagraphs: boxParagraphs.map(paragraph => ({ ...paragraph })) } : {}),
     };
   }
   return {
@@ -219,6 +228,11 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
     && isStyle(value.style)
     && spansValid(value.spans)
     && spansValid(value.boxSpans)
+    // A layout count that disagrees with the box text is dropped on restore
+    // (cloneEdit), never a reason to refuse the whole saved file.
+    && (value.boxParagraphs === undefined || (Array.isArray(value.boxParagraphs)
+      && value.boxParagraphs.every(paragraph => isRecord(paragraph)
+        && ['gapBeforePt', 'firstIndentPt', 'restIndentPt'].every(key => isFiniteNumber(paragraph[key]) && (paragraph[key] as number) >= 0))))
     && (value.origin === undefined || value.origin === 'free')
     && (value.boxId === undefined || typeof value.boxId === 'string')
     && (value.boxText === undefined || typeof value.boxText === 'string')

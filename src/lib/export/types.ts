@@ -63,6 +63,12 @@ export interface BaseEdit {
   readonly z: number;
 }
 
+export interface TextParagraphLayout {
+  readonly gapBeforePt: number;
+  readonly firstIndentPt: number;
+  readonly restIndentPt: number;
+}
+
 export interface TextEdit extends BaseEdit {
   readonly kind: 'text';
   readonly text: string;
@@ -77,6 +83,8 @@ export interface TextEdit extends BaseEdit {
   readonly boxText?: string;
   /** Unwrapped rich value retained so re-editing does not lose styles at soft-wrap boundaries. */
   readonly boxSpans?: readonly TextSpan[];
+  /** Paragraph spacing/indents; absent on edits saved before Task 74 Change 10. */
+  readonly boxParagraphs?: readonly TextParagraphLayout[];
   /** Manual editor-box height in PDF points; repeated on wrapped line edits for re-editing. */
   readonly boxHeight?: number;
   /** Display-only left edge of the editor box; export continues to use `rect`. */

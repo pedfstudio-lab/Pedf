@@ -4,6 +4,7 @@ import type {
   TextEdit,
   TextSpan,
   TextStyle,
+  TextParagraphLayout,
 } from '@/lib/export/types';
 import type { PdfRect } from '@/lib/export/types';
 import type { TextRun } from '@/lib/pdf/textContent';
@@ -11,6 +12,7 @@ import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
 import type { BulletList } from '@/lib/pdf/bulletList';
 import { formatBulletEditorText } from '@/lib/pdf/bulletList';
 import type { WrappedTextLine } from './textLayout';
+import { sourceParagraphLineHeight } from './paragraphSeed';
 
 let fallbackId = 0;
 
@@ -29,6 +31,9 @@ function replacedText(runs: readonly TextRun[]) {
 export interface NextTextEdit {
   readonly text: string;
   readonly spans?: readonly TextSpan[];
+  readonly paragraphs?: readonly TextParagraphLayout[];
+  /** UI-only: untouched source paragraphs retain their displayed wraps. */
+  readonly preserveSourceWrapping?: boolean;
   readonly style: TextStyle;
   readonly width: number;
   readonly height: number;
@@ -39,7 +44,17 @@ export interface NextTextEdit {
   readonly alignWidthPt?: number;
   readonly boxLeftPt?: number;
   readonly boxWidthPt?: number;
+  /** The editor font's ascent and descent as fractions of its size (paragraph mode). */
+  readonly fontMetrics?: FontMetrics;
 }
+
+export interface FontMetrics {
+  readonly ascent: number;
+  readonly descent: number;
+}
+
+/** Arial/Helvetica, the editor's fallback face, when the real face was not measured. */
+const DEFAULT_FONT_METRICS: FontMetrics = { ascent: 0.905, descent: 0.212 };
 
 export function buildTextEdits(
   run: TextRun,
@@ -114,8 +129,9 @@ export function coverRectForTextBlock(block: TextBlock): PdfRect {
 const MIN_LINE_HEIGHT_RATIO = 1.0;
 const MAX_LINE_HEIGHT_RATIO = 1.5;
 
-export function textBlockLineHeight(block: TextBlock, style: TextStyle): number {
+export function textBlockLineHeight(block: TextBlock, style: TextStyle, paragraphs = false): number {
   const scale = style.fontSizePt / Math.max(1, block.style.fontSizePt);
+  if (paragraphs) return Math.max(0.1, sourceParagraphLineHeight(block) * scale);
   const detected = block.lineHeightPt * scale;
   return Math.min(
     style.fontSizePt * MAX_LINE_HEIGHT_RATIO,
@@ -137,17 +153,23 @@ export function wrappedLineFontSize(
   return Math.max(...line.spans.map((span) => span.fontSizePt ?? baseStyle.fontSizePt));
 }
 
+type LineStep = (upper: string | WrappedTextLine, lower: string | WrappedTextLine) => number;
+
+function tallerLineStep(lineHeight: (line: string | WrappedTextLine) => number): LineStep {
+  return (upper, lower) => Math.max(lineHeight(upper), lineHeight(lower));
+}
+
 function baselinesForLines(
   lines: readonly (string | WrappedTextLine)[],
   firstBaseline: number,
-  lineHeight: (line: string | WrappedTextLine) => number,
+  step: LineStep,
 ): number[] {
   const baselines: number[] = [];
   let baseline = firstBaseline;
   lines.forEach((line, index) => {
     baselines.push(baseline);
     const next = lines[index + 1];
-    if (next !== undefined) baseline -= Math.max(lineHeight(line), lineHeight(next));
+    if (next !== undefined) baseline -= step(line, next);
   });
   return baselines;
 }
@@ -162,6 +184,33 @@ function wrappedText(line: string | WrappedTextLine): string {
   return typeof line === 'string' ? line : line.text;
 }
 
+function paragraphLayout(line: string | WrappedTextLine, next: NextTextEdit): TextParagraphLayout | undefined {
+  return typeof line === 'string' || line.paragraphIndex === undefined ? undefined : next.paragraphs?.[line.paragraphIndex];
+}
+function paragraphGap(line: string | WrappedTextLine, next: NextTextEdit): number {
+  return typeof line !== 'string' && line.paragraphStart && line.paragraphIndex ? paragraphLayout(line, next)?.gapBeforePt ?? 0 : 0;
+}
+function modelLineHeight(block: TextBlock, next: NextTextEdit, line: string | WrappedTextLine): number {
+  return textBlockLineHeight(block, { ...next.style, fontSizePt: wrappedLineFontSize(line, next.style) });
+}
+
+/** Baseline to baseline distance from `upper` to `lower`, excluding any paragraph gap. */
+function modelLineStep(block: TextBlock, next: NextTextEdit, upper: string | WrappedTextLine, lower: string | WrappedTextLine): number {
+  if (!next.paragraphs) return Math.max(modelLineHeight(block, next, upper), modelLineHeight(block, next, lower));
+  // The paragraph editor is a CSS block with a unitless line-height, so lay out
+  // exactly as CSS does or Done moves the lines. Every size s on a line gets
+  // that ratio's leading split evenly, leaving s*(ratio+k)/2 above the baseline
+  // and s*(ratio-k)/2 below (k = ascent - descent). The block's own size is
+  // always present (the strut), so uniform lines step by exactly the pitch.
+  const base = next.style.fontSizePt;
+  const ratio = textBlockLineHeight(block, next.style, true) / Math.max(0.1, base);
+  const metrics = next.fontMetrics ?? DEFAULT_FONT_METRICS;
+  const k = metrics.ascent - metrics.descent;
+  const size = (line: string | WrappedTextLine) => Math.max(base, wrappedLineFontSize(line, next.style));
+  const below = Math.max(base * (ratio - k), size(upper) * (ratio - k)) / 2;
+  return below + size(lower) * (ratio + k) / 2;
+}
+
 function preservedTextLinePositions(
   block: TextBlock,
   next: NextTextEdit,
@@ -169,6 +218,10 @@ function preservedTextLinePositions(
   fullPositions: readonly TextLinePosition[],
 ): readonly TextLinePosition[] {
   if (block.lines.length === 0 || wrappedLines.length === 0) return fullPositions;
+  // A changed line count must reflow the following paragraphs, not strand them
+  // at old baselines with an enlarged gap or overlapping new lines. Untouched
+  // lines above the change stay where they are.
+  const reflowTail = Boolean(next.paragraphs) && wrappedLines.length !== block.lines.length;
   const nextTexts = wrappedLines.map(wrappedText);
   let prefixLength = 0;
   while (
@@ -178,6 +231,7 @@ function preservedTextLinePositions(
   ) {
     prefixLength += 1;
   }
+  if (reflowTail) return reflowedTextLinePositions(block, next, wrappedLines, fullPositions, prefixLength);
 
   let suffixLength = 0;
   while (
@@ -188,7 +242,7 @@ function preservedTextLinePositions(
   ) {
     suffixLength += 1;
   }
-  if (prefixLength === 0 && suffixLength === 0) return fullPositions;
+  if (prefixLength === 0 && suffixLength === 0 && !wrappedLines.some(line => typeof line !== 'string' && line.sourcePosition)) return fullPositions;
 
   const positions = fullPositions.map((position) => ({ ...position }));
   const preserve = (nextIndex: number, sourceIndex: number) => {
@@ -204,29 +258,58 @@ function preservedTextLinePositions(
   for (let offset = 0; offset < suffixLength; offset += 1) {
     preserve(nextTexts.length - 1 - offset, block.lines.length - 1 - offset);
   }
+  wrappedLines.forEach((line, index) => {
+    if (typeof line !== 'string' && line.sourcePosition) positions[index] = {
+      x: line.sourcePosition.x + next.dx, y: line.sourcePosition.y + next.dy, width: line.sourcePosition.width,
+    };
+  });
 
   const middleEnd = nextTexts.length - suffixLength;
   for (let index = prefixLength; index < middleEnd; index += 1) {
     if (index === 0) continue;
+    if (typeof wrappedLines[index] !== 'string' && (wrappedLines[index] as WrappedTextLine).sourcePosition) continue;
     const previous = wrappedLines[index - 1];
     const current = wrappedLines[index];
     const previousPosition = positions[index - 1];
     if (!previous || !current || !previousPosition) continue;
-    const previousHeight = textBlockLineHeight(block, {
-      ...next.style,
-      fontSizePt: wrappedLineFontSize(previous, next.style),
-    });
-    const currentHeight = textBlockLineHeight(block, {
-      ...next.style,
-      fontSizePt: wrappedLineFontSize(current, next.style),
-    });
     positions[index] = {
       ...(positions[index] ?? { x: block.rect.x + next.dx, width: next.width }),
-      y: previousPosition.y - Math.max(previousHeight, currentHeight),
+      y: previousPosition.y - modelLineStep(block, next, previous, current) - paragraphGap(current, next),
     };
   }
+  return overlappingLines(next, wrappedLines, positions) ? fullPositions : positions;
+}
 
-  const overlaps = positions.slice(1).some((lower, index) => {
+/** Keep the unchanged leading lines in place; everything after them flows from the last one. */
+function reflowedTextLinePositions(
+  block: TextBlock,
+  next: NextTextEdit,
+  wrappedLines: readonly (string | WrappedTextLine)[],
+  fullPositions: readonly TextLinePosition[],
+  prefixLength: number,
+): readonly TextLinePosition[] {
+  if (prefixLength === 0) return fullPositions;
+  const positions = fullPositions.map((position) => ({ ...position }));
+  for (let index = 0; index < prefixLength; index += 1) {
+    const source = block.lines[index]!;
+    positions[index] = { x: source.rect.x + next.dx, y: source.baselineY + next.dy, width: source.rect.w };
+  }
+  for (let index = prefixLength; index < wrappedLines.length; index += 1) {
+    const previous = wrappedLines[index - 1]!, current = wrappedLines[index]!;
+    positions[index] = {
+      ...positions[index]!,
+      y: positions[index - 1]!.y - modelLineStep(block, next, previous, current) - paragraphGap(current, next),
+    };
+  }
+  return overlappingLines(next, wrappedLines, positions) ? fullPositions : positions;
+}
+
+function overlappingLines(
+  next: NextTextEdit,
+  wrappedLines: readonly (string | WrappedTextLine)[],
+  positions: readonly TextLinePosition[],
+): boolean {
+  return positions.slice(1).some((lower, index) => {
     const upper = positions[index];
     const upperLine = wrappedLines[index];
     const lowerLine = wrappedLines[index + 1];
@@ -239,7 +322,6 @@ function preservedTextLinePositions(
       && lower.y + lowerHeight > upper.y + 0.01
       && upper.y + upperHeight > lower.y + 0.01;
   });
-  return overlaps ? fullPositions : positions;
 }
 
 export function buildFreeTextEdits(
@@ -257,10 +339,10 @@ export function buildFreeTextEdits(
   const baselines = baselinesForLines(
     wrappedLines,
     firstBaseline,
-    (line) => freeTextLineHeight({
+    tallerLineStep((line) => freeTextLineHeight({
       ...next.style,
       fontSizePt: wrappedLineFontSize(line, next.style),
-    }),
+    })),
   );
   return wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
@@ -312,10 +394,7 @@ export function buildTextBlockEdits(
   const baselines = baselinesForLines(
     wrappedLines,
     firstBaseline,
-    (line) => textBlockLineHeight(block, {
-      ...next.style,
-      fontSizePt: wrappedLineFontSize(line, next.style),
-    }),
+    (upper, lower) => modelLineStep(block, next, upper, lower) + paragraphGap(lower, next),
   );
   const align = next.align ?? block.align ?? 'left';
   const usesAlignmentColumn = align !== 'left';
@@ -323,12 +402,15 @@ export function buildTextBlockEdits(
   const alignWidthPt = next.alignWidthPt ?? block.alignWidthPt ?? next.width;
   const textLeft = usesAlignmentColumn ? alignLeftPt + next.dx : base.x + next.dx;
   const textWidth = usesAlignmentColumn ? alignWidthPt : next.width;
-  const fullPositions = wrappedLines.map<TextLinePosition>((_line, index) => ({
-    x: textLeft,
+  const fullPositions = wrappedLines.map<TextLinePosition>((line, index) => ({
+    x: textLeft + (typeof line !== 'string' && line.paragraphStart ? paragraphLayout(line, next)?.firstIndentPt ?? 0 : paragraphLayout(line, next)?.restIndentPt ?? 0),
     y: baselines[index] ?? firstBaseline,
-    width: textWidth,
+    width: Math.max(1, textWidth - (typeof line !== 'string' && line.paragraphStart ? paragraphLayout(line, next)?.firstIndentPt ?? 0 : paragraphLayout(line, next)?.restIndentPt ?? 0)),
   }));
   const positions = preservedTextLinePositions(block, next, wrappedLines, fullPositions);
+  const paragraphHeight = next.paragraphs ? Math.max(next.height, ...positions.map((position, index) => (
+    firstBaseline - position.y + wrappedLineFontSize(wrappedLines[index]!, next.style)
+  ))) : next.height;
   const texts = wrappedLines.map<TextEdit>((line, index) => {
     const text = typeof line === 'string' ? line : line.text;
     const spans = typeof line === 'string' ? undefined : line.spans;
@@ -354,7 +436,8 @@ export function buildTextBlockEdits(
       ...(spans && spans.length > 0 ? { spans } : {}),
       boxText: next.text,
       ...(next.spans ? { boxSpans: next.spans } : {}),
-      boxHeight: next.height,
+      boxHeight: paragraphHeight,
+      ...(index === 0 && next.paragraphs ? { boxParagraphs: next.paragraphs } : {}),
       ...(next.boxLeftPt !== undefined ? { boxLeftPt: next.boxLeftPt } : {}),
       ...(next.boxWidthPt !== undefined ? { boxWidthPt: next.boxWidthPt } : {}),
       ...(usesAlignmentColumn ? {
@@ -424,7 +507,7 @@ export function buildBulletListEdits(
       ...next.style,
       fontSizePt: wrappedLineFontSize(line, next.style),
     });
-    const baselines = baselinesForLines(lines, nextItemBaseline, lineHeight);
+    const baselines = baselinesForLines(lines, nextItemBaseline, tallerLineStep(lineHeight));
     const lastLine = lines.at(-1) ?? '';
     const lastBaseline = baselines.at(-1) ?? nextItemBaseline;
     nextItemBaseline = lastBaseline - lineHeight(lastLine);

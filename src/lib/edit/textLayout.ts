@@ -6,6 +6,9 @@ export type MeasureTextSpan = (text: string, span: TextSpan) => number;
 export interface WrappedTextLine {
   readonly text: string;
   readonly spans?: readonly TextSpan[];
+  readonly paragraphIndex?: number;
+  readonly paragraphStart?: boolean;
+  readonly sourcePosition?: { readonly x: number; readonly y: number; readonly width: number };
 }
 
 export interface FittedTextLayout {
@@ -59,8 +62,12 @@ function wrapLogicalLine(
     }
 
     if (current) {
-      output.push(current);
+      // Only a soft break discards its separator. Indentation and whitespace-
+      // only logical lines remain literal user input, not wrap separators.
+      const hasWord = /\S/u.test(current);
+      output.push(hasWord ? current.trimEnd() : current);
       current = '';
+      if (hasWord && /^\s+$/u.test(token)) continue;
     }
     if (measureText(token) <= maxWidth) {
       current = token;
@@ -72,11 +79,11 @@ function wrapLogicalLine(
     current = chunks.at(-1) ?? '';
   }
 
-  output.push(current);
+  if (current || output.length === 0) output.push(current);
   return output;
 }
 
-/** Greedy wrapping that preserves typed spaces, explicit newlines, and blank lines. */
+/** Preserve literal spaces/newlines; omit only separators at automatic breaks. */
 export function wrapTextToLines(
   text: string,
   maxWidth: number,
@@ -210,8 +217,12 @@ function wrapStyledLogicalLine(
       continue;
     }
     if (current.length > 0) {
-      output.push(richLine(current));
+      const hasWord = current.some((item) => /\S/u.test(item.character));
+      let end = current.length;
+      if (hasWord) while (end > 0 && /\s/u.test(current[end - 1]!.character)) end -= 1;
+      output.push(richLine(current.slice(0, end)));
       current = [];
+      if (hasWord && token.every((item) => /\s/u.test(item.character))) continue;
     }
     if (measureCharacters(token, measureText) <= maxWidth) {
       current = [...token];
@@ -221,7 +232,7 @@ function wrapStyledLogicalLine(
     output.push(...chunks.slice(0, -1).map(richLine));
     current = [...(chunks.at(-1) ?? [])];
   }
-  output.push(richLine(current));
+  if (current.length > 0 || output.length === 0) output.push(richLine(current));
   return output;
 }
 

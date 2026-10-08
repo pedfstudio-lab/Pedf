@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { PageViewport, PDFPageProxy } from 'pdfjs-dist';
-import type { Edit } from '@/lib/export/types';
+import type { Edit, TextEdit } from '@/lib/export/types';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import type { SnapTarget } from '@/lib/edit/moveSnap';
 import type { TextBlock } from '@/lib/pdf/textContent';
@@ -23,6 +23,7 @@ interface CapturedEditorProps {
   readonly baselineFontSizeSlopePx?: number;
   readonly toolbarObstacles?: readonly ScreenRect[];
   readonly block: TextBlock;
+  readonly existing?: readonly TextEdit[];
   readonly screenRect: ScreenRect;
   readonly topCorrectionPx?: number;
   readonly horizontalTargets: readonly SnapTarget[];
@@ -32,6 +33,7 @@ interface CapturedEditorProps {
 const mocks = vi.hoisted(() => ({
   edits: [] as Edit[],
   blocks: [] as TextBlock[],
+  legacyBlocks: undefined as TextBlock[] | undefined,
   graphicRegions: {
     imageRegions: [] as ImageRegion[],
     shapeMarkerRegions: [] as ImageRegion[],
@@ -96,7 +98,8 @@ vi.mock('@/lib/pdf/textContent', async (importOriginal) => {
   return {
     ...actual,
     extractTextRuns: vi.fn(async () => []),
-    groupRunsIntoBlocks: vi.fn(() => mocks.blocks),
+    groupRunsIntoBlocks: vi.fn((_runs, options) => options?.preserveParagraphSplits
+      ? mocks.legacyBlocks ?? mocks.blocks : mocks.blocks),
   };
 });
 
@@ -193,6 +196,7 @@ async function openEditor(buttonName: RegExp) {
 beforeEach(() => {
   mocks.edits = [];
   mocks.blocks = [textBlock];
+  mocks.legacyBlocks = undefined;
   mocks.graphicRegions = { imageRegions: [], shapeMarkerRegions: [] };
   mocks.ruleLines = [];
   mocks.editorProps = undefined;
@@ -201,6 +205,41 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('OverlayLayer editor top correction', () => {
+  it('does not mistake a new merged-paragraph edit for several old saved boxes', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/pdf/textContent')>('@/lib/pdf/textContent');
+    const lines = actual.mergeRunsIntoLines(['First fragment', 'Second fragment', 'Third fragment'].map((text, index) => ({
+      pageIndex: 0, text, style, rect: { x: 20, y: 700 - index * 30, w: 250, h: 20 },
+    })), { ruleLines: [] });
+    const merged = actual.textBlockFromLines(lines);
+    mocks.blocks = [merged];
+    mocks.legacyBlocks = lines.map((line) => actual.textBlockFromLines([line]));
+    const built = buildTextBlockEdits(merged, {
+      text: 'New whole paragraph', style, width: 250, height: 80, dx: 0, dy: 0,
+    }, ['New whole paragraph'], 1);
+    mocks.edits = [...built.covers, ...built.texts];
+    renderOverlay();
+    const props = await openEditor(/^Text actions for edited text: New whole paragraph$/);
+    expect(props?.block.lines).toHaveLength(3);
+    expect(props?.existing).toEqual(built.texts);
+  });
+  it('finds a saved edit on the old second box after the fresh grouping merges it', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/pdf/textContent')>('@/lib/pdf/textContent');
+    const lines = actual.mergeRunsIntoLines(['First paragraph fragment', 'Original second fragment', 'Third fragment'].map((text, index) => ({
+      pageIndex: 0, text, style, rect: { x: 20, y: 700 - index * 30, w: 250, h: 20 },
+    })), { ruleLines: [] });
+    const old = lines.map((line) => actual.textBlockFromLines([line]));
+    mocks.blocks = [actual.textBlockFromLines(lines)];
+    mocks.legacyBlocks = old;
+    const built = buildTextBlockEdits(old[1]!, {
+      text: 'Saved replacement', style, width: 250, height: 20, dx: 0, dy: 0,
+    }, ['Saved replacement'], 1);
+    mocks.edits = [...built.covers, ...built.texts];
+    renderOverlay();
+    const props = await openEditor(/^Text actions for edited text: Saved replacement$/);
+    expect(props?.block.text).toBe('Original second fragment');
+    expect(props?.existing).toEqual(built.texts);
+    expect(props?.block.lines).toHaveLength(1);
+  });
   it('passes only neighbouring text in viewport coordinates for toolbar subtitle clearance', async () => {
     const subtitle = { ...textBlock, text: 'Subtitle', rect: { x: 25, y: 675, w: 200, h: 10 } };
     mocks.blocks = [textBlock, subtitle];

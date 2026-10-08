@@ -18,7 +18,9 @@ function paragraph(...texts: string[]): TextBlock {
     rect: { x: 40, y: 700 - index * 16, w: 300, h: 14 },
     baselineY: 700 - index * 16,
     style,
-    runs: [],
+    // These fixtures describe full wrapped lines, with known own-run advances.
+    runs: [{ pageIndex: 0, text, rect: { x: 40, y: 700 - index * 16, w: 300, h: 14 }, style,
+      characterWidthsPt: [...text].map(() => 300 / [...text].length), spaceWidthPt: 3 }],
   }));
   return {
     pageIndex: 0,
