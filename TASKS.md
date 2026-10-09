@@ -14352,3 +14352,132 @@ Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case
 is identical, and the user's six checks pass.
 
 ---
+
+### Task 76 — One dot per bullet, and a symbol bullet never stops the save  🔲 TODO → branch `bullet-fixes` **from `main`** (`4deeeb9`)   *(Medium · 1–2 days)*
+
+*Number 76, not 75: Task 75 was the typing task that was reverted and removed from this file.*
+
+**What the user hit.** Two bullet problems, two causes.
+
+1. *Double dots.* `NMAT-syllabus (1).pdf` (copy: `tmp/nmat-check.pdf`): edit any bullet list → Done → every item
+   shows **two dots**, the old one and ours, slightly apart. Not seen on the Rahul résumé or Word files.
+2. *The save fails.* `Green_Technologies_Module_3_Part_1.pdf` (copy: `tmp/green-check.pdf`): edit a box that starts
+   with Word's arrow bullet **➢** → Save / Export → *"WinAnsi cannot encode "" (0xf0d8)"* → **nothing is saved**,
+   not just that box.
+
+**Why, measured (on `main`, 2026-10-08).**
+
+| | Measured | Cause |
+|---|---|---|
+| Double dots | Drawn-dot test file `tmp/grouping-probe/bullets-vector-test.pdf`: edit the 4-item list and add one item → the export removes the 4 old text items and draws **5 new "•"**; **4 old drawn dots are still on the page**; no patch is painted | A dot comes in three kinds; across the corpus **345 typed "•", 77 pictures, 295 drawn shapes**. Typed dots are removed with the words (`replaces`); picture dots since Fix 1 (`markerImage` → `replacesImages`). **Drawn dots are recorded nowhere**, so nothing removes them, and the cover still counts as satisfied (Fix 2's `picturesGone` rule only looks at pictures) → no patch → old dots stay, and `buildBulletListEdits` draws its own "•" beside them |
+| Save fails | Green p7, p8 (two boxes), p16: **4 of 4 boxes with ➢ fail to export** | Word stores ➢ as the Wingdings private-use code **U+F0D8**. `startsWithBulletMarker` does not know it, so the box opens as plain text with the code inside. The export draws with a standard font (`englishFont.ts`, WinAnsi), pdf-lib cannot encode the code and **throws**, and one character stops the whole save |
+| NMAT, unexplained | A quick probe on NMAT page 1 found its 3-item list with 3 drawn dots, but the export reported **0 text items removed and 0 "•" drawn** | Not understood yet — Change 0 explains it before anything is built |
+
+**What the user gets.**
+
+| | Before | After |
+|---|---|---|
+| Edit a list with drawn dots, Done | Two dots per item | **One dot** per item |
+| Add an item to that list | The new item has one dot, the old ones two | All items one dot |
+| Drawn-dot list on a photo or colour | Two dots | One dot, **no rectangle** |
+| Exported PDF | The old dots are still in the file | Removed from the file |
+| Open a ➢ list | Plain text with a strange character | Opens as a **bullet list**, like any other |
+| Edit it, save | ❌ *"WinAnsi cannot encode…"*, nothing saves | ✅ Saves, and the arrows are still **arrows** |
+| Any character a font cannot write, anywhere | The whole save fails | **The save always finishes**; that one character is drawn as its shape or skipped, with a note |
+
+**Change 0 — measure first; publish before building.**
+1. **NMAT:** for every list on every page, per item: dot kind (typed / picture / drawn), whether each drawn dot is
+   **its own path** or part of a larger shared drawing, and what today's export does (text removed, "•" drawn,
+   patch). Explain the page-1 result above.
+2. **Corpus:** for all 295 drawn dots, how many are their own path (removable) and how many share one (patch
+   fallback). Print each file's count.
+3. **Symbol bullets:** every line-leading private-use character (U+F000–U+F0FF) in the corpus and both files above,
+   with its font name and count. Only codes actually found get a mapping in Part B.
+
+**Part A — drawn dots are removed like picture dots.**
+1. `bulletList.ts`: when an item's marker is a drawn shape (`detectBulletMarkers(…, 'shape')`), record it on the item
+   as `markerShape: { rect }` — the same way `markerImage` is recorded for pictures.
+2. `buildBulletListEdits`: the list's cover carries those as a new optional `replacesShapes` (like `replacesImages`).
+3. Export (`exportPdf.ts`, new `coveredShapes.ts`): remove a painted path **only when its whole bounding box lies
+   inside a recorded dot's rect** (≤ 0.5 pt slack), counted the same way removed text and images are. A path that
+   reaches outside — a dot drawn together with other dots, a border, a background — is never cut.
+4. Fix 2's rule becomes: skip the patch only if the text, the pictures **and** the drawn dots are all gone
+   (`shapesGone` beside `picturesGone`). **If any recorded dot could not be removed, paint the patch as before** —
+   the worst case is a rectangle, never two dots.
+5. The clean page preview (`exportPagePreview.ts`, Step 5b) hides the same dots, so the screen matches the export.
+6. Project format: `replacesShapes` is optional; validated and cloned like `replacesImages`. Older saves are unchanged.
+
+**Part B — symbol bullets are bullets, and the save never fails.**
+1. New `symbolBullets.ts`: map each code found in Change 0 to its real character, e.g. U+F0D8 → ➢, U+F0A7 → ▪,
+   U+F0B7 → •, U+F076 → ❖, U+F0FC → ✓ (Codex confirms each against the corpus).
+2. `startsWithBulletMarker` accepts them, so a ➢ line opens as a list. The bullet editor shows the real character.
+   **Do not change the extracted run text** — map only where markers are detected and where the editor seeds.
+3. A list keeps **each item's own symbol** when it is redrawn (not always "•"); a new item copies the item above.
+4. `handlers/text.ts`: before drawing, any character the chosen font cannot encode is handled, **never thrown**:
+   a known symbol (➢ ▪ ■ ❖ ✓ •) is drawn as a small vector shape at its size and position; anything else is
+   skipped and reported in the export's existing warnings. This is the safety net for every box, not only lists.
+5. Making ➢ lines list starts changes grouping on those pages (lists are frozen). The corpus grouping report must
+   print every changed box; the only changes allowed are lines that start with a symbol bullet.
+
+**Tests**
+- Unit: a path fully inside a dot's rect is removed; a path crossing it is kept and the patch is painted; text +
+  pictures + dots all gone → no patch; any one missing → patch.
+- Pixel: `bullets-vector-test.pdf` → edit and add an item → export → exactly one dot per item, nothing left at the
+  old dot positions.
+- `projectState`: `replacesShapes` round-trips; a save without it opens unchanged.
+- Text handler: U+F0D8, ➢, ✓ and an unencodable character (e.g. `漢` in Helvetica) → no throw; known symbols drawn
+  as shapes; the rest skipped with a warning.
+- Real files (`TASK76_REAL=1`): every ➢ box on Green pp7/8/16 opens as a list, edits, exports and re-opens;
+  NMAT lists → one dot per item after edit and export; open a list → Done without typing → no change.
+- Unchanged elsewhere: `TASK74_REAL=1`, `TASK72_REAL=1`, `TASK66_SWEEP=1`, `TASK70_TABLES=1`, `TASK74_PATCH=1`,
+  `TASK74_PREVIEW=1`, `TASK74_GROUPING=1` (only symbol-bullet changes), full suite, typecheck, lint, build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/export/coveredShapes.ts` + test | Find and remove a drawn dot's own path |
+| `src/lib/pdf/symbolBullets.ts` + test | Private-use symbol codes → real characters and marker kinds |
+| `src/lib/export/markerShapes.ts` + test | Draw ➢ ▪ ■ ❖ ✓ as small vector shapes |
+| a local `TASK76_REAL` test | Change 0's report, NMAT and Green round trips |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/bulletList.ts` + test | Record `markerShape` for drawn dots and each item's own symbol |
+| `src/lib/pdf/textUnits.ts` + test | `startsWithBulletMarker` accepts symbol bullets (nothing else in grouping) |
+| `src/lib/edit/buildTextEdits.ts` + test | `buildBulletListEdits` carries `replacesShapes` and redraws each item's own symbol |
+| `src/lib/edit/paragraphSeed.ts` + test | The bullet editor shows ➢, not the private code |
+| `src/lib/export/types.ts` | Optional `replacesShapes` on `CoverEdit` |
+| `src/lib/export/exportPdf.ts` + test | Remove recorded dots; `shapesGone` joins Fix 2's rule |
+| `src/lib/export/exportPagePreview.ts` + test | Same in the clean preview |
+| `src/lib/export/handlers/text.ts` + test | Never throw on a character; shapes for known symbols; warnings |
+| `src/lib/projects/projectState.ts` + test | Validate and clone `replacesShapes` |
+
+**Files that must not change:** extracted run text and `lineText`; the Changes 7–10 grouping rules (apart from
+`startsWithBulletMarker`); `coveredGlyphs.ts` matching; `coveredImages.ts` and picture-dot removal (Fix 1/2);
+`embeddedFont.ts` and font selection; the bullet editor's bold handling (Problem 2 is parked); all tools; `PagePlan`.
+
+**Guardrails:** never remove a drawing that is not wholly a recorded dot; when unsure, paint the patch; a save never
+fails because of one character; no extracted text changes; saved projects from before open unchanged; Done without
+typing changes nothing; typed-dot and picture-dot lists behave exactly as today.
+
+**Verify (user):**
+1. NMAT → edit a word in a bullet list → Done → **one dot** per item. Add an item → it has one dot too.
+2. Export → open the file → one dot per item, no rectangle.
+3. Green Technologies p7 → click the ➢ text → it opens as a **bullet list** → change a word → Done → the arrows are
+   still arrows → **Export** → it saves → open it → the arrows are there, one per item.
+4. Same on p8 (both boxes) and p16.
+5. Rahul résumé (picture dots) and any Word list (typed •) → edit → one dot each, exactly as today.
+6. Open any list → Done without typing → nothing changes.
+
+**Known limits:** a drawn dot that is part of a larger shared drawing cannot be cut out, so that list keeps the old
+patch (a rectangle on a photo); symbol codes not found in Change 0 draw as "•"; bold phrases inside a list still
+come back plain in the bullet editor (Problem 2, parked by the user — re-bolding works and is saved).
+
+**Land:** branch `bullet-fixes` from `main`. Commit: `One dot per bullet, and a symbol bullet never stops the save
+(Task 76)`. Merge only after Change 0's report is reviewed, every grouping change is a symbol-bullet line, and the
+user's six checks pass.
+
+---
