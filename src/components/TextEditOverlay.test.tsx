@@ -63,7 +63,7 @@ interface RenderEditorOptions {
   readonly toolbarObstacles?: readonly ScreenRect[];
   readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
-  readonly bulletMode?: { readonly items: readonly string[]; readonly maxHeightPt: number };
+  readonly bulletMode?: { readonly items: readonly string[]; readonly symbols?: readonly string[]; readonly maxHeightPt: number };
   readonly onDone?: ReturnType<typeof vi.fn>;
   readonly onCancel?: ReturnType<typeof vi.fn>;
   readonly measureTextWidth?: (line: string) => number;
@@ -413,6 +413,24 @@ describe('TextEditOverlay paragraph seed', () => {
 
     expect(screen.getByRole('textbox', { name: 'Editable bullet list' }).innerHTML)
       .toBe('• First item<br>• Second item');
+  });
+
+  it('keeps real arrow symbols and treats unchanged Done as a no-op',()=>{
+    const onDone=vi.fn(),onCancel=vi.fn();
+    renderEditor(paragraph('First item','Second item'),1,0,{onDone,onCancel,
+      bulletMode:{items:['First item','Second item'],symbols:['➢','➢'],maxHeightPt:200}});
+    expect(screen.getByRole('textbox',{name:'Editable bullet list'}).innerHTML).toBe('➢ First item<br>➢ Second item');
+    fireEvent.click(screen.getByRole('button',{name:'Done'}));
+    expect(onDone).not.toHaveBeenCalled();expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('copies an arrow on Enter rather than inserting a dot',()=>{
+    const onDone=vi.fn();
+    renderEditor(paragraph('First item','Second item'),1,0,{onDone,
+      bulletMode:{items:['First item','Second item'],symbols:['➢','➢'],maxHeightPt:200}});
+    const editor=screen.getByRole('textbox',{name:'Editable bullet list'});placeCaretAtTextEnd(editor.firstChild!);
+    fireEvent.keyDown(editor,{key:'Enter'});fireEvent.click(screen.getByRole('button',{name:'Done'}));
+    expect(onDone.mock.calls[0]?.[0].text).toBe('➢ First item\n➢ \n➢ Second item');
   });
 
   it('opens an inline-marker list as one editor line per item', () => {

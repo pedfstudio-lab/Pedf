@@ -75,6 +75,9 @@ function cloneEdit(edit: Edit): Edit {
         rect: { ...replacement.rect },
       })),
     } : {}),
+    ...(edit.kind === 'cover' && edit.replacesShapes ? {
+      replacesShapes: edit.replacesShapes.map(replacement => ({ rect: { ...replacement.rect } })),
+    } : {}),
   } as Edit;
 }
 
@@ -212,6 +215,9 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
       ))
       && (value.replacesImages === undefined || (
         Array.isArray(value.replacesImages) && value.replacesImages.every(isReplacedImage)
+      ))
+      && (value.replacesShapes === undefined || (
+        Array.isArray(value.replacesShapes) && value.replacesShapes.every(replacement => isRecord(replacement) && isRect(replacement.rect))
       ));
   }
   if (value.kind === 'image') return value.bytes instanceof Uint8Array;

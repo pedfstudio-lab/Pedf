@@ -1,6 +1,7 @@
 import type { TextEdit, TextParagraphLayout } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import { firstWordWidthPt, intrinsicBold, startsWithBulletMarker } from '@/lib/pdf/textUnits';
+import { normalizeSymbolBulletPrefix } from '@/lib/pdf/symbolBullets';
 
 const SOFT_HYPHENATED_LINE_END = /[-\u2011]$/;
 const LOWERCASE_LINE_START = /^\p{Ll}/u;
@@ -80,7 +81,7 @@ export function paragraphSeedText(block: TextBlock): string {
 
 /** Keep marker-list items separate while allowing each item to flow within its own line. */
 export function listSeedText(block: TextBlock): string {
-  if (block.lines.length <= 1) return block.text;
+  if (block.lines.length <= 1) return normalizeSymbolBulletPrefix(block.text);
   if (!block.lines.some((line) => startsWithBulletMarker(line.text))) {
     return paragraphSeedText(block);
   }
@@ -94,7 +95,7 @@ export function listSeedText(block: TextBlock): string {
       items.at(-1)?.push(normalized);
     }
   }
-  return items.map(flowingLines).join('\n');
+  return items.map(flowingLines).map(normalizeSymbolBulletPrefix).join('\n');
 }
 
 /** Preserve the line breaks currently displayed when measuring an editor's width. */

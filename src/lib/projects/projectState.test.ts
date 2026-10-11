@@ -324,6 +324,20 @@ describe('project state serialization', () => {
 });
 
 describe('hasDocumentChanges', () => {
+  it('round-trips and deep-clones optional shape replacements, rejects malformed rectangles and keeps old saves valid',()=>{
+    const edit={id:'shape-cover',kind:'cover' as const,pageIndex:0,z:1,rect:{x:10,y:10,w:50,h:50},sampleBackground:true,replacesShapes:[{rect:{x:20,y:20,w:4,h:4}}]};
+    const history:HistoryState={past:[],future:[],present:{plan:[{id:'page',kind:'source',sourceIndex:0}],edits:[edit]}};
+    const saved=serializeProject(history,0,1), cloned=saved.history.present.edits[0]!;
+    expect(cloned.kind).toBe('cover');if(cloned.kind!=='cover')throw new Error('Wrong kind');
+    expect(cloned.replacesShapes).toEqual(edit.replacesShapes);expect(cloned.replacesShapes![0]!.rect).not.toBe(edit.replacesShapes[0]!.rect);
+    expect(deserializeProject(saved,1).ok).toBe(true);
+    for(const w of [-1,NaN,Infinity,'4']){
+      const invalid=structuredClone(saved);(invalid.history.present.edits[0] as unknown as {replacesShapes:unknown[]}).replacesShapes=[{rect:{x:20,y:20,w,h:4}}];
+      expect(deserializeProject(invalid,1).ok).toBe(false);
+    }
+    const older=structuredClone(saved);delete (older.history.present.edits[0] as unknown as {replacesShapes?:unknown}).replacesShapes;
+    expect(deserializeProject(older,1).ok).toBe(true);
+  });
   const openingPlan: PagePlan = [
     { id: 'source-0', kind: 'source', sourceIndex: 0 },
     { id: 'source-1', kind: 'source', sourceIndex: 1 },

@@ -216,6 +216,7 @@ function markerPrefixAtLineEnd(
   root: HTMLElement,
   style: TextStyle,
   zoom: number,
+  requireLineEnd = true,
 ): string | undefined {
   const caret = selectionRangeInside(root);
   if (!caret?.collapsed) return undefined;
@@ -229,10 +230,10 @@ function markerPrefixAtLineEnd(
   const fullText = serializeRichText(root, style, zoom).text;
   const nextBreak = fullText.indexOf('\n', prefixText.length);
   const lineEnd = nextBreak < 0 ? fullText.length : nextBreak;
-  if (prefixText.length !== lineEnd) return undefined;
+  if (requireLineEnd && prefixText.length !== lineEnd) return undefined;
 
   const lineStart = prefixText.lastIndexOf('\n') + 1;
-  const line = prefixText.slice(lineStart);
+  const line = requireLineEnd ? prefixText.slice(lineStart) : fullText.slice(lineStart, lineEnd);
   if (!startsWithBulletMarker(line)) return undefined;
   const leadingSpace = line.match(/^\s*/u)?.[0] ?? '';
   const afterLeadingSpace = line.slice(leadingSpace.length);
@@ -341,6 +342,7 @@ interface TextEditOverlayProps {
   readonly horizontalTargets: readonly SnapTarget[];
   readonly bulletMode?: {
     readonly items: readonly string[];
+    readonly symbols?: readonly string[];
     readonly maxHeightPt: number;
   };
   /** Test seam for deterministic line-width measurements; production uses canvas. */
@@ -378,7 +380,7 @@ export function TextEditOverlay({
   const markerList = !bulletMode
     && block.lines.some((line) => startsWithBulletMarker(line.text));
   const initialText = existing?.[0]?.boxText ??
-    (bulletMode ? formatBulletEditorText(bulletMode.items) : undefined) ??
+    (bulletMode ? formatBulletEditorText(bulletMode.items, bulletMode.symbols) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
     ((block.align ?? 'left') === 'left'
       ? (markerList ? listSeedText(block) : paragraphSeedText(block))
@@ -388,7 +390,7 @@ export function TextEditOverlay({
   // list damaged by an earlier re-edit heals its embedded font on the next edit.
   const initialStyle = (() => {
     if (!bulletMode) return existing?.[0]?.style ?? block.style;
-    const body = existing?.find((edit) => edit.text !== '•')?.style ?? block.style;
+    const body = existing?.find((edit) => edit.text !== '•' && edit.text !== '➢')?.style ?? block.style;
     return body.fontRef ? body : { ...body, fontRef: block.style.fontRef };
   })();
   const initialSpans = existing?.[0]?.boxSpans
@@ -1132,10 +1134,10 @@ export function TextEditOverlay({
               insertParagraphBreak(editable); handleInput(); return;
             }
             if (editable) {
-              const markerPrefix = markerList
-                ? markerPrefixAtLineEnd(editable, style, zoom)
+              const markerPrefix = markerList || bulletMode
+                ? markerPrefixAtLineEnd(editable, style, zoom, !bulletMode)
                 : undefined;
-              insertPlainText(editable, bulletMode ? '\n• ' : `\n${markerPrefix ?? ''}`);
+              insertPlainText(editable, `\n${markerPrefix ?? (bulletMode ? '• ' : '')}`);
             }
             resizeToContent();
           } else if (event.key === 'Backspace' && paragraphMode && typeof document.execCommand !== 'function') {

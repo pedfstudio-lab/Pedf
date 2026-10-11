@@ -112,6 +112,10 @@ export interface ReplacedImage {
   readonly rect: PdfRect;
 }
 
+export interface ReplacedShape {
+  readonly rect: PdfRect;
+}
+
 export interface CoverEdit extends BaseEdit {
   readonly kind: 'cover';
   readonly color?: Rgb;
@@ -120,6 +124,7 @@ export interface CoverEdit extends BaseEdit {
   readonly replaces?: readonly ReplacedText[];
   /** Source image draws intentionally hidden by this cover. */
   readonly replacesImages?: readonly ReplacedImage[];
+  readonly replacesShapes?: readonly ReplacedShape[];
 }
 
 export interface ImageEdit extends BaseEdit {
@@ -158,4 +163,6 @@ export interface ExportRedactionResult {
   readonly unmatchedImages: number;
   readonly outsideCoverImages: number;
   readonly imageSkippedPages: number;
+  readonly removedShapes?: number;
+  readonly unmatchedShapes?: number;
 }

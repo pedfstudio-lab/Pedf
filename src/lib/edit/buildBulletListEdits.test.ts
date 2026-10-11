@@ -6,8 +6,10 @@ import { EMPTY_HISTORY, historyReducer } from '@/state/editsStore';
 import {
   buildBulletListEdits,
   coverRectForBulletList,
+  savedBulletListBase,
 } from './buildTextEdits';
 import type { NextTextEdit } from './buildTextEdits';
+import { textPreviewSelection } from '@/lib/pdf/textPreviewSelection';
 
 const style = {
   fontName: 'Helvetica',
@@ -91,6 +93,19 @@ const next: NextTextEdit = {
 };
 
 describe('buildBulletListEdits', () => {
+  it('records drawn markers, retains mixed symbols and lets a new item inherit the preceding symbol',()=>{
+    const source=fixtureList();
+    const list={...source,items:source.items.map((item,index)=>({...item,markerShape:{rect:item.markerRect},markerSymbol:index===0?'•':'➢'}))};
+    const built=buildBulletListEdits(list,{...next,text:'• First item\n➢ Second item\nThird item'},[
+      {text:'First item',lines:['First item']},{text:'Second item',lines:['Second item']},{text:'Third item',lines:['Third item']},
+    ],1,100);
+    expect(built.covers[0]!.replacesShapes).toEqual(source.items.map(item=>({rect:item.markerRect})));
+    expect(built.texts.filter(edit=>edit.text==='•'||edit.text==='➢').map(edit=>edit.text)).toEqual(['•','➢','➢']);
+    expect(built.texts[0]!.boxText).toBe('• First item\n➢ Second item\n➢ Third item');
+    expect(textPreviewSelection(list.block,undefined,list).unsafeReason).toBeUndefined();
+    expect(textPreviewSelection(list.block,{covers:built.covers,texts:built.texts},list).unsafeReason).toBeUndefined();
+    expect(textPreviewSelection(list.block,{covers:built.covers.map(cover=>({...cover,replacesShapes:undefined})),texts:built.texts},list).unsafeReason).toContain('older saved list');
+  });
   it('covers the painted marker strip and draws one aligned bullet per item', () => {
     const list = fixtureList();
     const built = buildBulletListEdits(
@@ -267,6 +282,19 @@ describe('buildBulletListEdits', () => {
     expect(Math.max(...bodies.map((edit) => edit.rect.y))).toBe(144);
     expect(bodies[0]?.rect.x).not.toBe(list.textX + 4);
     expect(bodies[0]?.rect.y).not.toBe(list.block.topBaselineY - 6);
+  });
+
+  it.each(['•', '➢'])('a moved %s list stays where it was moved when reopened and saved again', (symbol) => {
+    const source = fixtureList();
+    const list = { ...source, items: source.items.map((item) => ({ ...item, markerSymbol: symbol })) };
+    const items = [{ text: 'First item', lines: ['First item'] }, { text: 'Second item', lines: ['Second item'] }];
+    const text = `${symbol} First item\n${symbol} Second item`;
+    const moved = buildBulletListEdits(list, { ...next, text, dx: 5, dy: -8 }, items, 7, 100);
+    // Reopen the saved list and press Done without moving it.
+    const reopened = buildBulletListEdits(list, { ...next, text }, items, 7, 100, savedBulletListBase(moved.texts));
+    const where = (built: typeof moved) => built.texts.map((edit) => [edit.text, edit.rect.x, edit.rect.y]);
+    expect(where(reopened)).toEqual(where(moved));
+    expect(moved.texts.filter((edit) => edit.text === symbol)).toHaveLength(2);
   });
 
   it('defaults to the original list geometry for a first edit', () => {

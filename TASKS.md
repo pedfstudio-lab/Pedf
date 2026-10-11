@@ -14353,7 +14353,7 @@ is identical, and the user's six checks pass.
 
 ---
 
-### Task 76 — One dot per bullet, and a symbol bullet never stops the save  🔲 TODO → branch `bullet-fixes` **from `main`** (`4deeeb9`)   *(Medium · 1–2 days)*
+### Task 76 — One dot per bullet, and a symbol bullet never stops the save  🟡 PARTS A/B BUILT — automated and PDF-render checks pass; live browser/user checks pending; no commit or merge → branch `bullet-fixes` **from `main`** (`4deeeb9`)   *(Medium · 1–2 days)*
 
 *Number 76, not 75: Task 75 was the typing task that was reverted and removed from this file.*
 
@@ -14394,6 +14394,58 @@ is identical, and the user's six checks pass.
 3. **Symbol bullets:** every line-leading private-use character (U+F000–U+F0FF) in the corpus and both files above,
    with its font name and count. Only codes actually found get a mapping in Part B.
 
+**Change 0 result — 2026-10-09 (Codex, uncommitted).** Full report: `TASK76_CHANGE0_REPORT.md`; per-item/path
+data: `tmp/pdfs/task76-change0.json`. The historical 46-file bullet corpus has **295 own-path drawn markers,
+0 shared, 0 unknown** (191 on pages, 104 inside Forms), and **77 picture markers**. Current production-reader
+typed-list count is **344**, not 345: the old probe omitted font metadata and counted Corporate p30's first
+"Rights and equitable treatment" item in the following list; the production reader leaves it separate. That
+pre-existing discrepancy is named in the report and is not changed by Task 76.
+
+All five NMAT pages were measured: **8 lists / 31 drawn markers**. Edit-only exports remove old text and add
+one new glyph per item, while **all 31 old drawn paths remain**, with no patch. The old p1 zero/zero result was
+an **overflow-rejected fourth item** (62.68 pt needed, 53.25 available), so no edits reached export. Its separate
+top-as-bottom argument error is not the cause in that case; the actual editor's boundary call is correct.
+Four of eight add-item probes fit and reproduce the old-dot defect; four are correctly rejected for no room.
+
+Green's full 50 pages were scanned: **15 U+F0D8 markers in ASJHEX+Wingdings**, four plain boxes on pp7/8/16,
+**4/4 export exceptions**. Only U+F0B7 (225 raw leading markers, existing normalization) and U+F0D8 were found;
+do not add the other example private-use mappings without evidence. Main measurement and focused comparison,
+typecheck and lint pass; actual defects remain unfixed. The PDF skill's rendering check confirmed source arrows
+and inspected current NMAT/control exports; original PDFs and saved projects are unchanged. **Review the report
+before Parts A/B. No production source changes, commit or merge.**
+
+**Change 0 review — 2026-10-09 (Claude). Approved, with one added rule.** Re-running `TASK76_MEASURE=1`
+reproduces every number above (295 own / 0 shared / 0 unknown; 344 typed; 77 pictures; NMAT 8 lists; Green 4/4
+exceptions), and **all 31 NMAT old paths are still present after edit + export**. The four "no room" NMAT add-item
+cases are 62.68/53.25, 61.00/53.25, 110.50/103.50 and 62.68/54.00 pt — the old probe's fault, not a bug. Three notes:
+- *0 shared is partly by construction:* a drawn dot is only detected when it is a small filled path (≤ 7 pt), so a dot
+  tangled into a larger drawing is never counted. True, but weaker evidence than it reads.
+- *Reused Form XObjects:* a PDF can draw one form many times (one "dot" form stamped beside every item, or one form
+  on several pages). Deleting a path inside such a form deletes it **everywhere it is drawn**. Checked the nine
+  files with form dots: every form holding dots is drawn **once**; the only reused form (`healing.pdf` `287 0 R`,
+  pages 4 and 6) is a page background, not dots. Other users' PDFs can differ → Part A step 3's reuse rule.
+- *The two dots often overlap in the export:* in the NMAT and control renders the old and new dot sit almost on top
+  of each other and read as **one heavier dot**; they separate when items move (delete, reorder, move the list)
+  and at some screen scales. So a screenshot cannot prove the fix — the tests must prove the old path is **gone
+  from the file**.
+
+**Parts A/B implementation — 2026-10-09 (Codex, uncommitted).** Report: `TASK76_REPORT.md`. Source paths are
+recorded, removed conservatively and included in cover satisfaction; the preview shares the export pass.
+Full-document Form reuse counts include nested/aliased uses. Reused marker Forms remain untouched, including
+their words, and get the patch; once-used Form paths are removed through the existing stream tree. Optional
+shape data is cloned/validated; older saved lists lacking it retain their legacy preview until actually edited.
+U+F0D8 becomes a readable per-item arrow; Enter/new items inherit symbols. A vector glyph with Unicode metadata
+keeps exported arrows editable. Other unencodable characters are skipped with an export warning, not allowed
+to abort the save. No font-reuse or extraction changes; selective list bold remains parked.
+
+Checks: all **295** measured paths match, including all **104** Form paths; NMAT **31/31 old dots removed** in
+eight lists; Green **4/4 boxes and 15 arrows** edit/export/reopen; moved vector control has five new bullets and
+no old paths/pixels. Full suite **1,496 passed**, followed by focused final seed/type checks; real paragraph/list
+guards **142 passed**; frozen grouping/table sweeps unchanged (**151 lists, 507 ruled boxes, zero unexplained**).
+Safety: **335/335 covers omitted**, **40/49 clean previews**, pixel parity, **121 round trips / zero failures**.
+Typecheck/lint/build pass (existing bundle advisory). Rendered PDFs were inspected. **Live browser verification
+could not run: its Windows sandbox setup fails. The user's six checks below remain pending. No commit or merge.**
+
 **Part A — drawn dots are removed like picture dots.**
 1. `bulletList.ts`: when an item's marker is a drawn shape (`detectBulletMarkers(…, 'shape')`), record it on the item
    as `markerShape: { rect }` — the same way `markerImage` is recorded for pictures.
@@ -14401,6 +14453,10 @@ is identical, and the user's six checks pass.
 3. Export (`exportPdf.ts`, new `coveredShapes.ts`): remove a painted path **only when its whole bounding box lies
    inside a recorded dot's rect** (≤ 0.5 pt slack), counted the same way removed text and images are. A path that
    reaches outside — a dot drawn together with other dots, a border, a background — is never cut.
+   Dots inside Form XObjects (104 of 295) are removed inside that form, **but only when the form is drawn exactly
+   once in the whole document** (count its `Do` uses on every page and inside other forms). A form drawn more than
+   once is never edited, because removing the dot there removes it everywhere the form appears — that list keeps
+   its old dot and gets the patch (step 4). Never copy or rename a form to work around this in this task.
 4. Fix 2's rule becomes: skip the patch only if the text, the pictures **and** the drawn dots are all gone
    (`shapesGone` beside `picturesGone`). **If any recorded dot could not be removed, paint the patch as before** —
    the worst case is a rectangle, never two dots.
@@ -14408,20 +14464,25 @@ is identical, and the user's six checks pass.
 6. Project format: `replacesShapes` is optional; validated and cloned like `replacesImages`. Older saves are unchanged.
 
 **Part B — symbol bullets are bullets, and the save never fails.**
-1. New `symbolBullets.ts`: map each code found in Change 0 to its real character, e.g. U+F0D8 → ➢, U+F0A7 → ▪,
-   U+F0B7 → •, U+F076 → ❖, U+F0FC → ✓ (Codex confirms each against the corpus).
+1. New `symbolBullets.ts`: map the codes Change 0 found. **Only U+F0D8 → ➢ is new** (Wingdings, Green). U+F0B7
+   keeps its existing normalization to •. U+F0A7, U+F076, U+F0FC and others were not found and are **not** added.
 2. `startsWithBulletMarker` accepts them, so a ➢ line opens as a list. The bullet editor shows the real character.
    **Do not change the extracted run text** — map only where markers are detected and where the editor seeds.
 3. A list keeps **each item's own symbol** when it is redrawn (not always "•"); a new item copies the item above.
 4. `handlers/text.ts`: before drawing, any character the chosen font cannot encode is handled, **never thrown**:
-   a known symbol (➢ ▪ ■ ❖ ✓ •) is drawn as a small vector shape at its size and position; anything else is
-   skipped and reported in the export's existing warnings. This is the safety net for every box, not only lists.
+   ➢ is drawn as a small vector arrow at its size and position; anything else is skipped and reported in the
+   export's existing warnings. This is the safety net for every box, not only lists.
 5. Making ➢ lines list starts changes grouping on those pages (lists are frozen). The corpus grouping report must
    print every changed box; the only changes allowed are lines that start with a symbol bullet.
 
 **Tests**
 - Unit: a path fully inside a dot's rect is removed; a path crossing it is kept and the patch is painted; text +
   pictures + dots all gone → no patch; any one missing → patch.
+- Forms: a dot inside a form drawn once is removed; a fixture whose dot form is drawn **twice** (two `Do` on one
+  page, and separately on two pages) is left untouched, its list gets the patch, and the other drawing still has
+  its dot.
+- Removal is proven **in the file**: after export, re-read the page's operators and assert no path remains in any
+  old dot rect (the old and new dots can overlap, so a render alone cannot prove it).
 - Pixel: `bullets-vector-test.pdf` → edit and add an item → export → exactly one dot per item, nothing left at the
   old dot positions.
 - `projectState`: `replacesShapes` round-trips; a save without it opens unchanged.
@@ -14438,7 +14499,7 @@ is identical, and the user's six checks pass.
 |---|---|
 | `src/lib/export/coveredShapes.ts` + test | Find and remove a drawn dot's own path |
 | `src/lib/pdf/symbolBullets.ts` + test | Private-use symbol codes → real characters and marker kinds |
-| `src/lib/export/markerShapes.ts` + test | Draw ➢ ▪ ■ ❖ ✓ as small vector shapes |
+| `src/lib/export/markerShapes.ts` + test | Draw ➢ as a small vector arrow |
 | a local `TASK76_REAL` test | Change 0's report, NMAT and Green round trips |
 
 **Existing files that change**
@@ -14459,7 +14520,8 @@ is identical, and the user's six checks pass.
 `startsWithBulletMarker`); `coveredGlyphs.ts` matching; `coveredImages.ts` and picture-dot removal (Fix 1/2);
 `embeddedFont.ts` and font selection; the bullet editor's bold handling (Problem 2 is parked); all tools; `PagePlan`.
 
-**Guardrails:** never remove a drawing that is not wholly a recorded dot; when unsure, paint the patch; a save never
+**Guardrails:** never remove a drawing that is not wholly a recorded dot; never edit a form that is drawn more than
+once; when unsure, paint the patch; a save never
 fails because of one character; no extracted text changes; saved projects from before open unchanged; Done without
 typing changes nothing; typed-dot and picture-dot lists behave exactly as today.
 
@@ -14473,7 +14535,9 @@ typing changes nothing; typed-dot and picture-dot lists behave exactly as today.
 6. Open any list → Done without typing → nothing changes.
 
 **Known limits:** a drawn dot that is part of a larger shared drawing cannot be cut out, so that list keeps the old
-patch (a rectangle on a photo); symbol codes not found in Change 0 draw as "•"; bold phrases inside a list still
+patch (a rectangle on a photo), and so does a list whose dots sit in a form drawn more than once; a symbol code
+other than ➢ and the Symbol dot is not recognised as a bullet, and on save that character is skipped with a note
+instead of failing; bold phrases inside a list still
 come back plain in the bullet editor (Problem 2, parked by the user — re-bolding works and is saved).
 
 **Land:** branch `bullet-fixes` from `main`. Commit: `One dot per bullet, and a symbol bullet never stops the save

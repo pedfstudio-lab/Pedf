@@ -2,7 +2,7 @@ import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import type { RuleLine } from './ruleLines';
 import type { TextLine, TextRun } from './textContent';
 
-const TEXT_BULLET = /^\s*[\uF0B7\uF0A7\uF0A8\uF0D8\uF06C\uF075\uF0FC\uF0FD\u2022\u25CF\u25AA\u25E6\u2023\u2043\u00B7\u2219]/u;
+const TEXT_BULLET = /^\s*[\uF0B7\uF0A7\uF0A8\uF0D8\uF06C\uF075\uF0FC\uF0FD\u2022\u25CF\u25AA\u25E6\u2023\u2043\u00B7\u2219➢]/u;
 
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0;

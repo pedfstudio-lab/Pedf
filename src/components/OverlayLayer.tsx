@@ -25,6 +25,7 @@ import {
   coverRectForTextBlock,
   coverRectsForTextBlock,
   freeTextLineHeight,
+  savedBulletListBase,
 } from '@/lib/edit/buildTextEdits';
 import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
@@ -1306,16 +1307,7 @@ export function OverlayLayer({
             }
           : undefined;
         const bulletBase = activeBulletList && existing && existing.texts.length > 0
-          ? (() => {
-              const body = existing.texts.filter((edit) => edit.text !== '•' && edit.text !== '');
-              const glyphs = existing.texts.filter((edit) => edit.text === '•');
-              if (body.length === 0 || glyphs.length === 0) return undefined;
-              return {
-                bulletX: Math.min(...glyphs.map((edit) => edit.rect.x)),
-                textX: Math.min(...body.map((edit) => edit.rect.x)),
-                topBaselineY: Math.max(...body.map((edit) => edit.rect.y)),
-              };
-            })()
+          ? savedBulletListBase(existing.texts)
           : undefined;
         return (
           <>
@@ -1364,6 +1356,7 @@ export function OverlayLayer({
               onMoveStateChange={setMoveGuideState}
               bulletMode={activeBulletList ? {
                 items: activeBulletList.items.map((item) => item.text),
+                symbols: activeBulletList.items.map(item => item.markerSymbol ?? '•'),
                 maxHeightPt: availableBulletListHeight(
                   activeBulletList,
                   blocks,

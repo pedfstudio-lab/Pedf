@@ -21,12 +21,15 @@ export function textPreviewSelection(
     list?.block.style.fontSizePt ?? block.lines[index]?.style.fontSizePt ?? block.style.fontSizePt,
   ));
   const sourceStyles = [block.style, ...block.lines.flatMap((line) => [line.style, ...line.runs.map((run) => run.style)])];
+  const missingSavedShapes = existing && list?.items.some(item => item.markerShape && !existing.covers.some(cover =>
+    cover.replacesShapes?.some(shape => ['x','y','w','h'].every(key => Math.abs(shape.rect[key as keyof typeof shape.rect] - item.markerShape!.rect[key as keyof typeof shape.rect]) <= 0.5))));
   return {
     key, transientEdits,
     omitTextIds: existing?.texts.map((edit) => edit.id) ?? [],
     coverIds: (existing?.covers ?? transientEdits).map((cover) => cover.id),
     paintSupported: sourceStyles.every((style) => style.colorKnown !== false),
-    ...(list?.items.some((item) => !item.markerRun && !item.markerImage)
-      ? { unsafeReason: 'This list uses vector markers that the text-removal path cannot remove.' } : {}),
+    ...(list?.items.some((item) => !item.markerRun && !item.markerImage && !item.markerShape)
+      ? { unsafeReason: 'This list uses vector markers that the text-removal path cannot remove.' }
+      : missingSavedShapes ? { unsafeReason: 'This older saved list does not record its drawn markers; keep the legacy preview until an edit records them.' } : {}),
   };
 }

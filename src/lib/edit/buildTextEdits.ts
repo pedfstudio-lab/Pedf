@@ -11,6 +11,7 @@ import type { TextRun } from '@/lib/pdf/textContent';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
 import type { BulletList } from '@/lib/pdf/bulletList';
 import { formatBulletEditorText } from '@/lib/pdf/bulletList';
+import { isArrowBullet, visibleBulletSymbol } from '@/lib/pdf/symbolBullets';
 import type { WrappedTextLine } from './textLayout';
 import { sourceParagraphLineHeight } from './paragraphSeed';
 
@@ -469,6 +470,23 @@ export interface BulletListBase {
   readonly topBaselineY: number;
 }
 
+/**
+ * Where a saved list sits now, read from its own edits: markers ("•", or "➢"
+ * since Task 76) and body lines. Without it a moved list returns to its source
+ * position on the next Done.
+ */
+export function savedBulletListBase(texts: readonly TextEdit[]): BulletListBase | undefined {
+  const marker = (edit: TextEdit) => edit.text === '•' || isArrowBullet(edit.text);
+  const body = texts.filter((edit) => !marker(edit) && edit.text !== '');
+  const glyphs = texts.filter(marker);
+  if (body.length === 0 || glyphs.length === 0) return undefined;
+  return {
+    bulletX: Math.min(...glyphs.map((edit) => edit.rect.x)),
+    textX: Math.min(...body.map((edit) => edit.rect.x)),
+    topBaselineY: Math.max(...body.map((edit) => edit.rect.y)),
+  };
+}
+
 /** One sampled patch owns both the original text and its painted bullet strip. */
 export function coverRectForBulletList(list: BulletList): PdfRect {
   const padding = Math.max(0.75, list.block.style.fontSizePt * 0.08);
@@ -527,6 +545,7 @@ export function buildBulletListEdits(
   const replacesImages = list.items.flatMap((item) => (
     item.markerImage ? [{ ...item.markerImage, rect: { ...item.markerImage.rect } }] : []
   ));
+  const replacesShapes = list.items.flatMap(item => item.markerShape ? [{ rect: { ...item.markerShape.rect } }] : []);
   const cover: CoverEdit = {
     id: id(),
     kind: 'cover',
@@ -539,9 +558,16 @@ export function buildBulletListEdits(
       ...item.lines.flatMap((line) => line.runs),
     ])),
     ...(replacesImages.length > 0 ? { replacesImages } : {}),
+    ...(replacesShapes.length > 0 ? { replacesShapes } : {}),
   };
   const texts: TextEdit[] = [];
-  const boxText = formatBulletEditorText(items.map((item) => item.text));
+  const typedSymbols = next.text.split('\n').filter(line => line.trim()).map(line => {
+    const character = [...line.trimStart()][0] ?? '';
+    return character === '•' || isArrowBullet(character) ? visibleBulletSymbol(character) : undefined;
+  });
+  const symbols: string[] = [];
+  items.forEach((_, index) => symbols.push(typedSymbols[index] ?? list.items[index]?.markerSymbol ?? symbols[index - 1] ?? '•'));
+  const boxText = formatBulletEditorText(items.map((item) => item.text), symbols);
   const indent = Math.max(1, list.textX - list.bulletX);
   const textWidth = Math.max(1, next.width - indent);
   const bulletX = base.bulletX + next.dx;
@@ -577,21 +603,22 @@ export function buildBulletListEdits(
     });
   }
 
-  for (const { lines, baselines } of itemLayouts) {
+  for (const [itemIndex, { lines, baselines }] of itemLayouts.entries()) {
     const itemBaseline = baselines[0] ?? firstBaseline;
+    const arrow = isArrowBullet(symbols[itemIndex]!);
     texts.push({
       id: id(),
       kind: 'text',
       pageIndex: list.block.pageIndex,
       rect: {
         x: bulletX,
-        y: itemBaseline - bulletGlyphDy,
+        y: itemBaseline - (arrow ? 0 : bulletGlyphDy),
         w: next.width,
-        h: bulletGlyphSizePt,
+        h: arrow ? next.style.fontSizePt : bulletGlyphSizePt,
       },
       z: z + 1 + texts.length,
-      text: '•',
-      style: bulletGlyphStyle,
+      text: symbols[itemIndex]!,
+      style: arrow ? { ...bulletGlyphStyle, fontSizePt: next.style.fontSizePt } : bulletGlyphStyle,
       boxText,
       ...(next.spans ? { boxSpans: next.spans } : {}),
       boxHeight: usedHeightPt,

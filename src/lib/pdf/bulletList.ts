@@ -1,9 +1,10 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfRect, ReplacedImage, TextSpan } from '@/lib/export/types';
+import type { PdfRect, ReplacedImage, ReplacedShape, TextSpan } from '@/lib/export/types';
 import { normalizeTextSpans, textFromSpans } from '@/lib/edit/richText';
 import type { ImageRegion } from './images';
 import { detectPageGraphicRegions } from './shapeMarkers';
 import type { TextBlock, TextLine, TextRun } from './textContent';
+import { isArrowBullet, visibleBulletSymbol } from './symbolBullets';
 
 const MIN_MARKER_SIZE_PT = 1;
 const MAX_MARKER_SIZE_PT = 7;
@@ -15,6 +16,7 @@ const MIN_LIST_ITEMS = 2;
 
 /** Text glyphs commonly used as list markers by Word and other PDF producers. */
 export const TEXT_BULLET_CHARACTERS: ReadonlySet<string> = new Set([
+  '➢',
   '\uF0B7',
   '\uF0A7',
   '\uF0A8',
@@ -44,6 +46,7 @@ export interface BulletMarker {
   readonly markerRun?: TextRun;
   /** Present only when the marker came from a detected image region. */
   readonly markerImage?: ReplacedImage;
+  readonly markerShape?: ReplacedShape;
 }
 
 interface TextBulletMatch {
@@ -52,6 +55,7 @@ interface TextBulletMatch {
 }
 
 export interface BulletListItem {
+  readonly markerSymbol?: string;
   readonly bulletX: number;
   readonly baselineY: number;
   readonly text: string;
@@ -61,6 +65,7 @@ export interface BulletListItem {
   readonly markerRun?: TextRun;
   /** Present only for image markers; shape and text markers do not claim an image. */
   readonly markerImage?: ReplacedImage;
+  readonly markerShape?: ReplacedShape;
 }
 
 export interface BulletList {
@@ -184,7 +189,7 @@ export function detectBulletMarkers(
       centerY: match.region.rect.y + match.region.rect.h / 2,
       ...(source === 'image' ? {
         markerImage: { kind: 'image', rect: { ...match.region.rect } },
-      } : {}),
+      } : { markerShape: { rect: { ...match.region.rect } } }),
     });
   }
 
@@ -205,7 +210,7 @@ function textBulletMatch(line: TextLine): TextBulletMatch | undefined {
   const markerSize = Math.min(markerRun.rect.w, markerRun.rect.h);
   if (
     markerSize < MIN_MARKER_SIZE_PT ||
-    markerSize > Math.min(MAX_MARKER_SIZE_PT, line.style.fontSizePt * 0.85)
+    markerSize > (isArrowBullet(markerText) ? line.style.fontSizePt * 1.2 : Math.min(MAX_MARKER_SIZE_PT, line.style.fontSizePt * 0.85))
   ) {
     return undefined;
   }
@@ -214,7 +219,7 @@ function textBulletMatch(line: TextLine): TextBulletMatch | undefined {
   // recognised marker character on its own, which is evidence enough. Only the image
   // detector needs a real gap, because there the shape itself is all it has to go on.
   const leftGap = bodyRun.rect.x - (markerRun.rect.x + markerRun.rect.w);
-  if (leftGap < MIN_TEXT_LEFT_GAP_PT || leftGap > MAX_LEFT_GAP_PT) return undefined;
+  if (leftGap < MIN_TEXT_LEFT_GAP_PT || leftGap > (isArrowBullet(markerText) ? Math.max(MAX_LEFT_GAP_PT, line.style.fontSizePt) : MAX_LEFT_GAP_PT)) return undefined;
 
   const baselineDistance = Math.abs(markerRun.rect.y - bodyRun.rect.y);
   if (baselineDistance > Math.max(1.5, line.style.fontSizePt * 0.25)) return undefined;
@@ -281,8 +286,8 @@ function itemText(lines: readonly TextLine[]): string {
     .replace(/\s+/g, ' ');
 }
 
-export function formatBulletEditorText(items: readonly string[]): string {
-  return items.map((item) => `• ${item.trim()}`).join('\n');
+export function formatBulletEditorText(items: readonly string[], symbols: readonly string[] = []): string {
+  return items.map((item, index) => `${symbols[index] ?? symbols[Math.min(index - 1, symbols.length - 1)] ?? '•'} ${item.trim()}`).join('\n');
 }
 
 export function parseBulletEditorItems(text: string): string[] {
@@ -361,7 +366,7 @@ export function parseBulletEditorItemSpans(
 export function bulletEditorBlock(list: BulletList): TextBlock {
   return {
     ...list.block,
-    text: formatBulletEditorText(list.items.map((item) => item.text)),
+    text: formatBulletEditorText(list.items.map((item) => item.text), list.items.map(item => item.markerSymbol ?? '•')),
     rect: list.coverRect,
   };
 }
@@ -435,6 +440,7 @@ export function buildBulletList(
     const relativeEnd = nextLineIndex - firstMarker.lineIndex;
     const lines = listLines.slice(relativeStart, relativeEnd);
     return {
+      markerSymbol: visibleBulletSymbol(marker.textCharacter ?? '•'),
       bulletX: marker.rect.x,
       baselineY: marker.line.baselineY,
       text: itemText(lines),
@@ -442,6 +448,7 @@ export function buildBulletList(
       markerRect: marker.rect,
       ...(marker.markerRun ? { markerRun: marker.markerRun } : {}),
       ...(marker.markerImage ? { markerImage: marker.markerImage } : {}),
+      ...(marker.markerShape ? { markerShape: marker.markerShape } : {}),
     };
   });
   const itemSpacing = items.slice(0, -1).map((item, index) => {

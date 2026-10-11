@@ -25,6 +25,11 @@ import {
 } from './coveredImages';
 import type { CoveredImageRewrite } from './coveredImages';
 import type { PDFRef } from 'pdf-lib';
+import { planCoveredShapeRemoval, rewriteShapePaintOperators, sourceShapeFormUses } from './coveredShapes';
+import type { CoveredShapeRewrite } from './coveredShapes';
+import { shapeMarkerRegionsFromOperatorList } from '@/lib/pdf/shapeMarkers';
+import { isArrowBullet } from '@/lib/pdf/symbolBullets';
+import type { PdfRect } from './types';
 
 const REMOVE_COVERED_TEXT = true;
 const REMOVE_COVERED_IMAGES = true;
@@ -32,6 +37,7 @@ const REMOVE_COVERED_IMAGES = true;
 export interface PageWritingOptions {
   readonly removeCoveredText?: boolean;
   readonly removeCoveredImages?: boolean;
+  readonly removeCoveredShapes?: boolean;
   /** Preview can reuse the already-loaded pristine reader; it never owns/destroys it. */
   readonly reader?: Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>;
   readonly omitTextIds?: ReadonlySet<string>;
@@ -41,10 +47,14 @@ function rewriteCombinedStream(
   original: readonly ContentToken[],
   imageRewrites: readonly CoveredImageRewrite[],
   textRewrites: readonly CoveredGlyphRewrite[],
+  shapeRewrites: readonly CoveredShapeRewrite[] = [],
 ): Uint8Array | null {
+  const shapeBytes = shapeRewrites.length ? rewriteShapePaintOperators(original, shapeRewrites) : serializeContentStream(original);
+  if (!shapeBytes) return null;
+  const afterShapes = tokenizeContentStream(shapeBytes);
   const imageBytes = imageRewrites.length > 0
-    ? rewriteImagePaintOperators(original, imageRewrites)
-    : serializeContentStream(original);
+    ? rewriteImagePaintOperators(afterShapes, imageRewrites)
+    : shapeBytes;
   if (!imageBytes) return null;
   const afterImages = tokenizeContentStream(imageBytes);
   return textRewrites.length > 0 ? rewriteStream(afterImages, textRewrites) : imageBytes;
@@ -121,7 +131,23 @@ async function readForRedaction(
  */
 function removesText(edit: EditDocument['edits'][number]): edit is CoverEdit {
   return edit.kind === 'cover'
-    && (edit.replacesImages === undefined || (edit.replaces?.length ?? 0) > 0);
+    && ((edit.replacesImages === undefined && edit.replacesShapes === undefined) || (edit.replaces?.length ?? 0) > 0);
+}
+
+/**
+ * A bullet list edited before Task 76 never recorded its drawn dots, so they are
+ * still on the page. Its cover is followed by the redrawn dot (or the empty
+ * anchor of an emptied list).
+ */
+function isOldListCover(cover: CoverEdit, pageEdits: EditDocument['edits']): boolean {
+  if (cover.replacesShapes !== undefined || !cover.replaces?.length) return false;
+  return pageEdits.some((edit) => edit.kind === 'text' && edit.z === cover.z + 1
+    && (edit.text === '•' || edit.text === '' || isArrowBullet(edit.text)));
+}
+
+function insideRect(inner: PdfRect, outer: PdfRect, slack = 0.5): boolean {
+  return inner.x >= outer.x - slack && inner.y >= outer.y - slack
+    && inner.x + inner.w <= outer.x + outer.w + slack && inner.y + inner.h <= outer.y + outer.h + slack;
 }
 
 async function removeCoveredContent(
@@ -133,6 +159,7 @@ async function removeCoveredContent(
   textEnabled: boolean,
   imagesEnabled: boolean,
   sharedReader?: PageWritingOptions['reader'],
+  shapesEnabled = true,
 ): Promise<ExportRedactionResult> {
   const textPages = [...editsByPage.entries()].flatMap(([pageIndex, edits]) => (
     edits.some(removesText) ? [pageIndex] : []
@@ -144,7 +171,9 @@ async function removeCoveredContent(
   ));
   const eligibleTextPages = textEnabled ? textPages : [];
   const eligibleImagePages = imagesEnabled ? imagePages : [];
-  const eligiblePages = [...new Set([...eligibleTextPages, ...eligibleImagePages])];
+  const shapePages = [...editsByPage.entries()].filter(([, edits]) => edits.some(edit => edit.kind === 'cover' && (edit.replacesShapes?.length ?? 0) > 0)).map(([index]) => index);
+  const eligibleShapePages = shapesEnabled ? shapePages : [];
+  const eligiblePages = [...new Set([...eligibleTextPages, ...eligibleImagePages, ...eligibleShapePages])];
   const empty = {
     removedItems: 0,
     skippedPages: 0,
@@ -152,6 +181,7 @@ async function removeCoveredContent(
     unmatchedImages: 0,
     outsideCoverImages: 0,
     imageSkippedPages: 0,
+    ...(shapePages.length ? { removedShapes: 0, unmatchedShapes: 0 } : {}),
   };
   if (eligiblePages.length === 0) return empty;
   if (pdf.context.trailerInfo.Encrypt) {
@@ -176,6 +206,7 @@ async function removeCoveredContent(
   let removedImages = 0;
   let unmatchedImages = 0;
   let outsideCoverImages = 0;
+  let removedShapes = 0, unmatchedShapes = 0;
   const removedImageRefs: PDFRef[] = [];
   try {
     reader = sharedReader ?? await readForRedaction(doc.originalBytes);
@@ -197,17 +228,21 @@ async function removeCoveredContent(
     for (const pageIndex of eligiblePages) {
       const removeText = eligibleTextPages.includes(pageIndex);
       const removeImages = eligibleImagePages.includes(pageIndex);
+      const removeShapes = eligibleShapePages.includes(pageIndex);
       let textReason: string | undefined;
       let imageReason: string | undefined;
+      let shapeReason: string | undefined;
       try {
         const tree = buildPageStreamTree(pdf, pageIndex);
         const originalPageIndex = sourcePageIndex(doc, pageIndex);
         if (!tree) {
           if (removeText) textReason = 'the content streams could not be decoded';
           if (removeImages) imageReason = 'the content streams could not be decoded';
+          if (removeShapes) shapeReason = 'the content streams could not be decoded';
         } else if (originalPageIndex === null || originalPageIndex < 0 || originalPageIndex >= reader.numPages) {
           if (removeText) textReason = 'the page has no original text source';
           if (removeImages) imageReason = 'the page has no original image source';
+          if (removeShapes) shapeReason = 'the page has no original shape source';
         } else {
           const sourcePage = await reader.getPage(originalPageIndex + 1);
           // 0 = AnnotationMode.DISABLE: form-field appearances are separate objects.
@@ -215,6 +250,7 @@ async function removeCoveredContent(
           const viewport = sourcePage.getViewport({ scale: 1, rotation: 0 });
           const pageEdits = editsByPage.get(pageIndex) ?? [];
           const textCoverEdits = pageEdits.filter(removesText);
+          const shapeCoverEdits = pageEdits.filter((edit): edit is CoverEdit => edit.kind === 'cover');
           const textCovers = textCoverEdits.map((edit) => ({
             rect: edit.rect,
             replaces: edit.replaces,
@@ -236,6 +272,24 @@ async function removeCoveredContent(
           const imagePlan = removeImages
             ? planCoveredImageRemoval(operatorList, viewport, pageIndex, tree, imageCovers)
             : undefined;
+          let shapePlan: ReturnType<typeof planCoveredShapeRemoval> | undefined;
+          if (removeShapes) {
+            try {
+              const uses = await sourceShapeFormUses(doc.originalBytes);
+              shapePlan = planCoveredShapeRemoval(pdf, pageIndex, shapeCoverEdits, uses[originalPageIndex] ?? new Map(), tree);
+              // Do not copy/rewrite a reused marker Form just to remove its words
+              // or images. Keep the entire shared drawing on the patch fallback.
+              const protectedStreams = new Set(shapePlan.protectedStreams);
+              if (textPlan?.rewrites.some(rewrite => protectedStreams.has(rewrite.streamKey))) textReason = 'a marker Form is drawn more than once in the source document';
+              if (imagePlan?.rewrites.some(rewrite => protectedStreams.has(rewrite.streamKey))) imageReason = 'a marker Form is drawn more than once in the source document';
+              unmatchedShapes += shapePlan.unmatchedShapes;
+              if (shapePlan.unmatchedShapes) warnings.push(`A drawn bullet on page ${pageIndex + 1} could not be removed safely; it stays hidden under the cover.`);
+            } catch (error) {
+              // Only the drawn dots fall back to the patch; their words and
+              // pictures are still removed as before Task 76.
+              shapeReason = error instanceof Error ? error.message : 'the paths could not be mapped safely';
+            }
+          }
           if (imagePlan) {
             unmatchedImages += imagePlan.unmatchedImages;
             outsideCoverImages += imagePlan.outsideCoverImages;
@@ -254,32 +308,53 @@ async function removeCoveredContent(
 
           const textRewrites = textReason ? [] : (textPlan?.rewrites ?? []);
           const imageRewrites = imageReason ? [] : (imagePlan?.rewrites ?? []);
-          const rewritten = new Map<string, Uint8Array>();
-          const streamKeys = new Set([
-            ...textRewrites.map((rewrite) => rewrite.streamKey),
-            ...imageRewrites.map((rewrite) => rewrite.streamKey),
-          ]);
-          for (const key of streamKeys) {
-            const tokens = tree.tokensFor(key);
-            const bytes = tokens ? rewriteCombinedStream(
-              tokens,
-              imageRewrites.filter((rewrite) => rewrite.streamKey === key),
-              textRewrites.filter((rewrite) => rewrite.streamKey === key),
-            ) : null;
-            if (!bytes) {
-              if (textRewrites.some((rewrite) => rewrite.streamKey === key)) {
-                textReason = 'the rewritten stream failed its round-trip guard';
-              }
-              if (imageRewrites.some((rewrite) => rewrite.streamKey === key)) {
-                imageReason = 'the rewritten stream failed its round-trip guard';
-              }
-              break;
+          const rewriteStreams = (shapeRewrites: readonly CoveredShapeRewrite[]) => {
+            const rewritten = new Map<string, Uint8Array>();
+            const streamKeys = new Set([
+              ...textRewrites.map((rewrite) => rewrite.streamKey),
+              ...imageRewrites.map((rewrite) => rewrite.streamKey),
+              ...shapeRewrites.map((rewrite) => rewrite.streamKey),
+            ]);
+            for (const key of streamKeys) {
+              const tokens = tree.tokensFor(key);
+              const bytes = tokens ? rewriteCombinedStream(
+                tokens,
+                imageRewrites.filter((rewrite) => rewrite.streamKey === key),
+                textRewrites.filter((rewrite) => rewrite.streamKey === key),
+                shapeRewrites.filter((rewrite) => rewrite.streamKey === key),
+              ) : null;
+              if (!bytes) return { failedKey: key };
+              rewritten.set(key, bytes);
             }
-            rewritten.set(key, bytes);
+            return { rewritten };
+          };
+          let attempt = rewriteStreams(shapeReason ? [] : (shapePlan?.rewrites ?? []));
+          if (attempt.failedKey && !shapeReason && shapePlan?.rewrites.some((rewrite) => rewrite.streamKey === attempt.failedKey)) {
+            // The dots' stream failed its guard: keep the dots on the patch and
+            // still remove the words and pictures, rather than give up on all three.
+            shapeReason = 'the rewritten stream failed its round-trip guard';
+            attempt = rewriteStreams([]);
           }
-          if (!textReason && !imageReason) {
+          if (attempt.failedKey) {
+            if (textRewrites.some((rewrite) => rewrite.streamKey === attempt.failedKey)) {
+              textReason = 'the rewritten stream failed its round-trip guard';
+            }
+            if (imageRewrites.some((rewrite) => rewrite.streamKey === attempt.failedKey)) {
+              imageReason = 'the rewritten stream failed its round-trip guard';
+            }
+          }
+          const rewritten = attempt.rewritten ?? new Map<string, Uint8Array>();
+          // An older saved list over drawn dots keeps its patch: without it the
+          // old dots would show next to the redrawn ones (double dots).
+          const oldDots = pageEdits.some((edit) => edit.kind === 'cover' && isOldListCover(edit, pageEdits))
+            ? shapeMarkerRegionsFromOperatorList(operatorList, viewport, originalPageIndex).map((region) => region.rect)
+            : [];
+          const keepsOldDots = (cover: CoverEdit) => isOldListCover(cover, pageEdits)
+            && oldDots.some((rect) => insideRect(rect, cover.rect));
+          if (!attempt.failedKey && !textReason && !imageReason) {
             removedImageRefs.push(...tree.apply(rewritten, imagePlan?.removedResources));
             removedItems += textPlan?.removedItems ?? 0;
+            removedShapes += shapeReason ? 0 : shapePlan?.removedShapes ?? 0;
             // A cover that also replaces pictures - a list whose markers are images -
             // leaves no hole only when every picture named on this page was found and
             // taken out. If one was not, its patch stays.
@@ -288,9 +363,14 @@ async function removeCoveredContent(
               && imagePlan.outsideCoverImages === 0;
             textPlan?.satisfied.forEach((satisfied, index) => {
               const cover = textCoverEdits[index];
-              if (satisfied && cover && (cover.replacesImages === undefined || picturesGone)) {
+              const shapesGone = !cover?.replacesShapes?.length
+                || (!shapeReason && shapePlan?.satisfied[shapeCoverEdits.indexOf(cover)] === true);
+              if (satisfied && cover && (cover.replacesImages === undefined || picturesGone) && shapesGone && !keepsOldDots(cover)) {
                 satisfiedTextCovers.add(cover);
               }
+            });
+            shapeCoverEdits.forEach((cover,index) => {
+              if (!shapeReason && !cover.replaces?.length && !cover.replacesImages?.length && cover.replacesShapes?.length && shapePlan?.satisfied[index]) satisfiedTextCovers.add(cover);
             });
             removedImages += imagePlan?.removedImages ?? 0;
           } else if (!textReason && textPlan) {
@@ -312,7 +392,7 @@ async function removeCoveredContent(
               textPlan.satisfied.forEach((satisfied, index) => {
                 const cover = textCoverEdits[index];
                 // The pictures were not removed here, so a cover naming any keeps its patch.
-                if (satisfied && cover && cover.replacesImages === undefined) {
+                if (satisfied && cover && cover.replacesImages === undefined && !cover.replacesShapes?.length && !keepsOldDots(cover)) {
                   satisfiedTextCovers.add(cover);
                 }
               });
@@ -343,6 +423,7 @@ async function removeCoveredContent(
         const reason = error instanceof Error ? error.message : 'the page could not be processed safely';
         if (removeText) textReason = reason;
         if (removeImages) imageReason = reason;
+        if (removeShapes) shapeReason = reason;
       }
       if (textReason) {
         skippedPages += 1;
@@ -356,6 +437,7 @@ async function removeCoveredContent(
           `Old images on page ${pageIndex + 1} could not be removed; they stay hidden under the cover. (${imageReason})`,
         );
       }
+      if (shapeReason) warnings.push(`Old drawn bullets on page ${pageIndex + 1} could not be removed; they stay hidden under the cover. (${shapeReason})`);
     }
   } finally {
     if (!sharedReader) await reader?.destroy();
@@ -368,6 +450,7 @@ async function removeCoveredContent(
     unmatchedImages,
     outsideCoverImages,
     imageSkippedPages,
+    ...(shapePages.length ? { removedShapes, unmatchedShapes } : {}),
   };
 }
 
@@ -420,6 +503,7 @@ export async function writePageEdits(
     internal.removeCoveredText ?? REMOVE_COVERED_TEXT,
     internal.removeCoveredImages ?? REMOVE_COVERED_IMAGES,
     internal.reader,
+    internal.removeCoveredShapes ?? true,
   );
 
   for (const [pageIndex, pageEdits] of editsByPage) {
