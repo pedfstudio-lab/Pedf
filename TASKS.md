@@ -14353,7 +14353,7 @@ is identical, and the user's six checks pass.
 
 ---
 
-### Task 76 — One dot per bullet, and a symbol bullet never stops the save  🟡 PARTS A/B BUILT — automated and PDF-render checks pass; live browser/user checks pending; no commit or merge → branch `bullet-fixes` **from `main`** (`4deeeb9`)   *(Medium · 1–2 days)*
+### Task 76 — One dot per bullet, and a symbol bullet never stops the save  ✅ DONE → merged to `main` and live (`ebb9ab7`, 2026-10-12) — Parts A/B plus four code-review fixes; the user checked NMAT, Green, Rahul and Word lists in Chrome → branch `bullet-fixes` **from `main`** (`4deeeb9`)   *(Medium · 1–2 days)*
 
 *Number 76, not 75: Task 75 was the typing task that was reverted and removed from this file.*
 
@@ -14445,6 +14445,34 @@ guards **142 passed**; frozen grouping/table sweeps unchanged (**151 lists, 507 
 Safety: **335/335 covers omitted**, **40/49 clean previews**, pixel parity, **121 round trips / zero failures**.
 Typecheck/lint/build pass (existing bundle advisory). Rendered PDFs were inspected. **Live browser verification
 could not run: its Windows sandbox setup fails. The user's six checks below remain pending. No commit or merge.**
+
+**Code-review fixes — 2026-10-10 (Claude, before merging; the user said "do it yourself").** An independent review
+found one high and three medium bugs. All four were fixed with tests that fail on the old code:
+
+| # | What the user saw | Cause | Fix |
+|---|---|---|---|
+| 1 | Green p7: move the ➢ list → Done → reopen → Done → it **jumped back** to its source spot (measured 318.87 → 337.87) | Task 10N's "where is a saved list now" read only `•` markers; arrow lists save `➢` | `savedBulletListBase()` (in `buildTextEdits.ts`, used by `OverlayLayer`) recognises both; permanent move → reopen → Done test for `•` and `➢` lists |
+| 2 | Possible double dots on unusual PDFs | A dot counted as removed when one matching fill was found, even if an outline (`S`), a second copy (`B`), a clipped or reused-Form copy still painted inside it | Strokes are recorded (never removed); anything else still painting inside a dot's rect leaves it unsatisfied → patch |
+| 3 | A dot-planning failure (a damaged page or Form anywhere in the file, an extra `Q`, huge paths) also stopped the page's **words** being removed | The failure set the text and image reasons too | Only the dots fall back to the patch; a dot stream that fails its guard is retried without the dots; extra `Q` tolerated as viewers do; bounds without spread arguments |
+| 4 | Lists edited **before** Task 76 exported double dots | Their covers record no dots, so "dots gone" was assumed | On export, an old list cover (no `replacesShapes`, followed by a redrawn marker) over drawn dots keeps its patch — the user's choice: a rectangle at worst, never two dots |
+
+- Checks on the combined `main` (Task 76 + Task 77): full suite **1,508 passed, 0 failed**; every real-PDF switch
+  **1,553 passed** with all frozen numbers unchanged (749/758, 335/335, 4/2 lists, 121/0, 85/402, 40/49, 0
+  unexplained); a clean checkout typechecks and builds. Browser: NMAT one dot per item after edit, add and move;
+  Green p7 opens as a 6-item ➢ list; a moved ➢ list stays put on reopen. Pushed `97e7bc4`; Cloudflare built.
+- **Not done (review's low items):** symbols can shift in mixed ➢/• lists when a marker-only line exists; Enter
+  with a selection inserts `•` in an arrow list; bold lost in ➢ boxes once edited; the first preview re-parses the
+  whole PDF for the Form count (slow on big files); a page `/Contents` array shared between pages.
+- **Found while testing, not fixed:**
+  - *Bullet tails* — a bullet's last line(s) can open as a separate box (Green pp6/8/9/11/12/16; the travel
+    terms page "…other natural | factors."; Ziro p4 "…magical sunset | performances."). Cause: inside an item the
+    grouping's short-line rule ends the paragraph although the next first word did not fit (Green p9: 60 pt room,
+    "enough" ≈ 66 pt), and lists are frozen so the spacing join cannot repair it. Measured fix — join when the next
+    first word would not have fit — changed only those 14 pages of 423 (boxes 3,677 → 3,651; lists 151 → 158 in the
+    corpus check; Green p8 becomes one 4-item list); everything else identical. **The user chose to leave it.**
+  - *A dash vanishes on screen* after moving the NMAT list ("October – mid-December"); the exported file keeps it
+    (text and an independent renderer). Cause not found.
+  - *A list or paragraph grows after Done* when the substitute font is wider (Green p7: "project" wraps). Font work.
 
 **Part A — drawn dots are removed like picture dots.**
 1. `bulletList.ts`: when an item's marker is a drawn shape (`detectBulletMarkers(…, 'shape')`), record it on the item
@@ -14543,5 +14571,38 @@ come back plain in the bullet editor (Problem 2, parked by the user — re-boldi
 **Land:** branch `bullet-fixes` from `main`. Commit: `One dot per bullet, and a symbol bullet never stops the save
 (Task 76)`. Merge only after Change 0's report is reviewed, every grouping change is a symbol-bullet line, and the
 user's six checks pass.
+
+---
+
+### Task 77 — A second move starts from where the text is now  ✅ DONE → merged to `main` and live (`97e7bc4`, 2026-10-12) — built by Claude on branch `move-fix` from `main`; the user checked headings and paragraphs in Chrome   *(Easy · half a day)*
+
+**What the user hit.** Six headings (Rahul's name, the Green Technologies title, …) and Ladakh's DAY paragraphs: the
+first move lands right; on the second move a small nudge sends the box far away — "move left → it goes up",
+"move a little down → it goes to the extreme down".
+
+**Why, measured.** Done keeps unchanged lines in place (`preservedTextLinePositions`), but measured "in place" from
+the **source PDF**: `source line + this move`. A box moved before, reopened and moved again therefore restarted from
+its original spot and forgot the first move. A big first move followed by a small second one looks like a jump.
+
+| Case | 1st move | 2nd move (same drag) | Expected |
+|---|---|---|---|
+| Green title (centred), x | 192.1 → 218.1 | stays **218.1**; the frame moved, the text did not | 244.1 |
+| Ladakh DAY-2, first line y | 490.0 | stays **490.0** | 477.0 |
+
+The same flaw sat in Step 5c.2's review fix that keeps untouched lines above a changed line count in place.
+
+**Fix.** `buildTextBlockEdits` takes the box's lines **as saved now** (`PlacedTextLine[]`: text, x, y, width), which
+`OverlayLayer` passes from the existing edit; a first edit still uses the source lines. Unchanged lines keep their
+current position plus this move, in both the normal and the changed-line-count path. Each move now adds to the last.
+
+**Checks.** `moveTwice.test.ts`: a heading, a centred title (192.1 → 218.1 → 244.1), a three-line paragraph (every
+line), and Done without a move on a moved box (stays exactly put); the three move cases fail on the old code.
+Browser: Ladakh DAY-2 490.0 → 477.0 on the second drag; on the combined `main`, the Green title 192.1 → 204.1 →
+216.1. Full suite and every real-PDF switch pass with all frozen numbers unchanged (see Task 76's checks).
+
+**Files:** `src/lib/edit/buildTextEdits.ts`, `src/components/OverlayLayer.tsx`, new `src/lib/edit/moveTwice.test.ts`.
+
+**Known limit:** after the second Done a paragraph can re-wrap a word differently (the substitute font is wider);
+its position is right. That is the font work.
 
 ---
