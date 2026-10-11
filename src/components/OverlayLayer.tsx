@@ -1306,6 +1306,10 @@ export function OverlayLayer({
               topBaselineY: Math.max(...existing.texts.map((edit) => edit.rect.y)),
             }
           : undefined;
+        // Where the box's lines are saved now, so a second move adds to the first.
+        const currentLines = !activeBulletList && existing && existing.texts.length > 0
+          ? existing.texts.map((edit) => ({ text: edit.text, x: edit.rect.x, y: edit.rect.y, width: edit.rect.w }))
+          : undefined;
         const bulletBase = activeBulletList && existing && existing.texts.length > 0
           ? savedBulletListBase(existing.texts)
           : undefined;
@@ -1410,6 +1414,7 @@ export function OverlayLayer({
                   wrappedLines,
                   nextZ,
                   base,
+                  currentLines,
                 );
                 const covers = built.covers.map((cover, index) => (
                   extendCoverToSourceInk(

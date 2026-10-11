@@ -212,33 +212,49 @@ function modelLineStep(block: TextBlock, next: NextTextEdit, upper: string | Wra
   return below + size(lower) * (ratio + k) / 2;
 }
 
+/** A line where it is drawn now: the source line, or a saved edit's line. */
+export interface PlacedTextLine {
+  readonly text: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+}
+
+function sourcePlacedLines(block: TextBlock): PlacedTextLine[] {
+  return block.lines.map((line) => ({ text: line.text, x: line.rect.x, y: line.baselineY, width: line.rect.w }));
+}
+
 function preservedTextLinePositions(
   block: TextBlock,
   next: NextTextEdit,
   wrappedLines: readonly (string | WrappedTextLine)[],
   fullPositions: readonly TextLinePosition[],
+  // Unchanged lines stay where they are NOW: for a box edited (or moved) before,
+  // that is its saved edit, not the source PDF. Measuring from the source made
+  // every later move restart from the original spot and forget the earlier ones.
+  current: readonly PlacedTextLine[],
 ): readonly TextLinePosition[] {
-  if (block.lines.length === 0 || wrappedLines.length === 0) return fullPositions;
+  if (current.length === 0 || wrappedLines.length === 0) return fullPositions;
   // A changed line count must reflow the following paragraphs, not strand them
   // at old baselines with an enlarged gap or overlapping new lines. Untouched
   // lines above the change stay where they are.
-  const reflowTail = Boolean(next.paragraphs) && wrappedLines.length !== block.lines.length;
+  const reflowTail = Boolean(next.paragraphs) && wrappedLines.length !== current.length;
   const nextTexts = wrappedLines.map(wrappedText);
   let prefixLength = 0;
   while (
-    prefixLength < block.lines.length
+    prefixLength < current.length
     && prefixLength < nextTexts.length
-    && block.lines[prefixLength]?.text === nextTexts[prefixLength]
+    && current[prefixLength]?.text === nextTexts[prefixLength]
   ) {
     prefixLength += 1;
   }
-  if (reflowTail) return reflowedTextLinePositions(block, next, wrappedLines, fullPositions, prefixLength);
+  if (reflowTail) return reflowedTextLinePositions(block, next, wrappedLines, fullPositions, prefixLength, current);
 
   let suffixLength = 0;
   while (
-    suffixLength < block.lines.length - prefixLength
+    suffixLength < current.length - prefixLength
     && suffixLength < nextTexts.length - prefixLength
-    && block.lines[block.lines.length - 1 - suffixLength]?.text
+    && current[current.length - 1 - suffixLength]?.text
       === nextTexts[nextTexts.length - 1 - suffixLength]
   ) {
     suffixLength += 1;
@@ -246,18 +262,18 @@ function preservedTextLinePositions(
   if (prefixLength === 0 && suffixLength === 0 && !wrappedLines.some(line => typeof line !== 'string' && line.sourcePosition)) return fullPositions;
 
   const positions = fullPositions.map((position) => ({ ...position }));
-  const preserve = (nextIndex: number, sourceIndex: number) => {
-    const source = block.lines[sourceIndex];
-    if (!source) return;
+  const preserve = (nextIndex: number, currentIndex: number) => {
+    const placed = current[currentIndex];
+    if (!placed) return;
     positions[nextIndex] = {
-      x: source.rect.x + next.dx,
-      y: source.baselineY + next.dy,
-      width: source.rect.w,
+      x: placed.x + next.dx,
+      y: placed.y + next.dy,
+      width: placed.width,
     };
   };
   for (let index = 0; index < prefixLength; index += 1) preserve(index, index);
   for (let offset = 0; offset < suffixLength; offset += 1) {
-    preserve(nextTexts.length - 1 - offset, block.lines.length - 1 - offset);
+    preserve(nextTexts.length - 1 - offset, current.length - 1 - offset);
   }
   wrappedLines.forEach((line, index) => {
     if (typeof line !== 'string' && line.sourcePosition) positions[index] = {
@@ -288,12 +304,13 @@ function reflowedTextLinePositions(
   wrappedLines: readonly (string | WrappedTextLine)[],
   fullPositions: readonly TextLinePosition[],
   prefixLength: number,
+  current: readonly PlacedTextLine[],
 ): readonly TextLinePosition[] {
   if (prefixLength === 0) return fullPositions;
   const positions = fullPositions.map((position) => ({ ...position }));
   for (let index = 0; index < prefixLength; index += 1) {
-    const source = block.lines[index]!;
-    positions[index] = { x: source.rect.x + next.dx, y: source.baselineY + next.dy, width: source.rect.w };
+    const placed = current[index]!;
+    positions[index] = { x: placed.x + next.dx, y: placed.y + next.dy, width: placed.width };
   }
   for (let index = prefixLength; index < wrappedLines.length; index += 1) {
     const previous = wrappedLines[index - 1]!, current = wrappedLines[index]!;
@@ -378,6 +395,8 @@ export function buildTextBlockEdits(
   wrappedLines: readonly (string | WrappedTextLine)[],
   z: number,
   base: TextBlockBase = { x: block.rect.x, topBaselineY: block.topBaselineY },
+  /** The box's lines as saved now, when it was edited before; the source lines otherwise. */
+  current: readonly PlacedTextLine[] = sourcePlacedLines(block),
 ): { readonly covers: readonly CoverEdit[]; readonly texts: readonly TextEdit[] } {
   const covers = coverRectsForTextBlock(block).map<CoverEdit>((rect, index) => {
     const runs = block.lines[index]?.runs ?? block.lines.flatMap((line) => line.runs);
@@ -408,7 +427,7 @@ export function buildTextBlockEdits(
     y: baselines[index] ?? firstBaseline,
     width: Math.max(1, textWidth - (typeof line !== 'string' && line.paragraphStart ? paragraphLayout(line, next)?.firstIndentPt ?? 0 : paragraphLayout(line, next)?.restIndentPt ?? 0)),
   }));
-  const positions = preservedTextLinePositions(block, next, wrappedLines, fullPositions);
+  const positions = preservedTextLinePositions(block, next, wrappedLines, fullPositions, current);
   const paragraphHeight = next.paragraphs ? Math.max(next.height, ...positions.map((position, index) => (
     firstBaseline - position.y + wrappedLineFontSize(wrappedLines[index]!, next.style)
   ))) : next.height;
