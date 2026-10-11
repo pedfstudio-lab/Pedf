@@ -14213,7 +14213,7 @@ unchanged, and the user's checks pass. Do not commit or merge without the user's
 
 ---
 
-#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`, after Step 5c.2 is merged** — the position, the spacing and the baseline are ours, not the browser's   *(Large · ~1 week)*
+#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`** (Step 5c.2 is merged: `4deeeb9`; Tasks 76/77 too: `97e7bc4`) — the position, the spacing and the baseline are ours, not the browser's; justified paragraphs stay justified   *(Large · ~1 week)*
 
 *Steps 5a to 5c make editing look right. This step makes it land right. Without it they will look much better and
 occasional movement and spacing differences will remain, because the DOM — not our model — still decides where the
@@ -14244,7 +14244,8 @@ fix five. Two different things produce a wide gap and no width threshold can sep
 | The positions are already in hand | every `TextLine` carries `runs`, each with its own x and width; `lineText` reads them, decides yes/no on a space, and discards the numbers |
 
 **What the user gets:** a letter-spaced heading keeps its spacing; pressing Done moves nothing; re-opening an edit
-finds it exactly where it was; and the exported page matches the screen.
+finds it exactly where it was; the exported page matches the screen; and an edited justified paragraph keeps its
+straight right edge (Change 4).
 
 **The rule.** The **DOM collects keystrokes. Our model decides the committed PDF position.** Nothing about where
 text lands may be read back out of a browser layout.
@@ -14255,6 +14256,10 @@ each supported zoom, and export. Do it for a centred heading, a right-aligned he
 cell and a bullet item. **For text the user did not change, every one of those numbers must already be 0**; any
 that is not is a defect this step must name and fix. Publish the table — it is the baseline the rest of the step is
 measured against.
+
+Also count the **justified paragraphs** for Change 4: across the 45 baseline files plus Ladakh, list every box the
+detection rule below calls justified, with its lines' right edges and word gaps, and print the near misses (boxes
+just outside the rule) so the user can review both. Report how many and on which files before Change 4 is built.
 
 **Change 1 — keep what the PDF measured.**
 Carry, per run and per line, the values we currently throw away: the text matrix, the baseline in PDF space, the
@@ -14284,6 +14289,37 @@ user sees while typing is deliberate: native caret, selection, spellcheck, acces
 IME composition for Devanagari and the other supported Indian scripts come free from it, and re-earning them is not
 a cost this step should take on. The model owns the committed result; the browser owns the typing experience.
 
+**Change 4 — justified paragraphs stay justified.**
+*What the user hit.* Ladakh p2 ("Ladakh, for us, isn't just a destination…"), Corporate Governance and most reports
+are **justified**: every line except a paragraph's last ends at the same right edge, because the PDF stretches the
+spaces between words. After an edit we redraw with normal spaces, so the right edge goes **ragged**. Change 2 must
+not copy those stretched gaps (a re-flow invalidates them), so without this change 5d keeps them ragged.
+
+| | Before | After |
+|---|---|---|
+| Change one word in a justified paragraph | `of the window at the birds flying` — ragged | `of  the  window  at  the  birds  flying` — reaches the right edge |
+| Add words, lines re-flow | every line ragged | every line except the paragraph's last reaches the right edge |
+| A paragraph's last line, or a line before a hard break | normal | normal — **never stretched** |
+| While typing in the editor | ragged | justified, matching what is saved |
+| Left, centred, right boxes | unchanged | unchanged |
+
+1. *Recognise it.* A left-aligned box of two or more lines is justified when its lines other than each paragraph's
+   last end within about 1 pt of the same right edge **and** their gaps between words are wider than the font's
+   normal space. Change 0 confirms the exact thresholds against the corpus; a box that fits neither way stays left.
+2. *Remember it.* Store it as a fourth alignment, `justify`, beside left, centre and right. It is optional, so older
+   projects open unchanged. `projectState.ts` must accept the new value — an unknown alignment rejects the whole
+   saved project today.
+3. *Show it while typing.* The editor's paragraphs use `text-align: justify` with `text-align-last: left`, so the
+   screen matches the save.
+4. *Save it.* For each line except a paragraph's last (and a line before a hard break), spread the leftover width
+   **evenly across that line's word gaps**, so it ends exactly at the right edge. Place each word at its computed x —
+   this works for every font, unlike the PDF's word-spacing operator, which only affects a single-byte space and
+   does nothing for most embedded and CID fonts. The width comes from Change 3's one layout result.
+5. *Lines the user did not touch* keep their original glyph positions exactly (Change 2), so a one-word edit
+   changes only the lines it re-flows.
+6. *Never squeeze.* A line whose words are already wider than the column is not compressed; a line with no word gap
+   (one word) stays at the left.
+
 **Checks**
 - *Nothing moves*: Change 0's table, re-run, is **0 pt** for every unchanged case at every zoom; a changed case
   moves only in the direction and amount the edit implies.
@@ -14296,8 +14332,12 @@ a cost this step should take on. The model owns the committed result; the browse
 - *A retyped piece*: replacing `N E W` with a wider word shifts the following pieces by the width difference and
   keeps both gaps at their measured size; nothing overlaps.
 - *Centred and right-aligned*: a heading whose piece changes width stays anchored to its alignment region.
-- *Prose is untouched*: a justified paragraph re-flows exactly as it does after Step 5c — its stretched spaces are
-  **not** reproduced, because a re-flow invalidates them.
+- *Justified prose*: a justified paragraph's stretched gaps are **not copied** (a re-flow invalidates them); they
+  are **recomputed** (Change 4). After an edit, every line except a paragraph's last ends within **0.5 pt** of the
+  right edge; the last line keeps normal spacing; untouched lines keep their exact glyph positions. Ladakh p2 and
+  a Corporate Governance paragraph are checked in pixels against the original outside the edited lines.
+- *Not justified stays as it is*: left, centred and right boxes produce identical exports with and without
+  Change 4, asserted across the corpus.
 - *Extraction is untouched*: the text of all 9,208 lines across the 45 files is identical before and after, asserted
   as a whole-corpus comparison. A single changed line fails the step.
 - *Old projects*: a project saved before this change opens, exports and re-edits identically.
@@ -14321,10 +14361,12 @@ a cost this step should take on. The model owns the committed result; the browse
 | `src/lib/export/types.ts` | Optional per-run metrics, backwards compatible |
 | `src/lib/edit/buildTextEdits.ts` + test | Committed geometry from the model, not from the DOM |
 | `src/lib/edit/textLayout.ts` + test | One layout result, shared with the export |
-| `src/lib/export/handlers/text.ts` + test | Draw a line from its pieces and gaps |
-| `src/components/TextEditOverlay.tsx` + test | Stop contributing positions to the commit |
+| `src/lib/export/handlers/text.ts` + test | Draw a line from its pieces and gaps; justified lines word by word |
+| `src/components/TextEditOverlay.tsx` + test | Stop contributing positions to the commit; justified paragraphs shown justified |
+| `src/lib/pdf/textUnits.ts` (alignment detection only) + test | Recognise `justify` (Change 4); grouping rules unchanged |
+| `src/lib/projects/projectState.ts` + test | Accept the `justify` alignment; older saves unchanged |
 
-**Files that must not change:** `textUnits.ts` grouping; `ruleLines.ts`; `bulletList.ts` and everything
+**Files that must not change:** `textUnits.ts` grouping (only its alignment detection gains `justify`); `ruleLines.ts`; `bulletList.ts` and everything
 bullet-shaped; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and every image patch; `embeddedFont.ts` and
 export font selection; the extracted text of any line; edit-history semantics; autosave and project restoration;
 all tools; `PagePlan`.
@@ -14338,18 +14380,22 @@ line that cannot be composed from its pieces falls back and says so.
 1. Bhutan page 1 → change `TRIP` to `TRIPS` → the gaps between `N E W`, `Y E A R ’ S` and `T R I P S` are as wide as
    they were.
 2. Any heading → press Done → nothing shifts, at any zoom.
-3. A justified paragraph → edit it → it re-flows as before, with no odd spacing.
+3. Ladakh p2 "Ladakh, for us, isn't just a destination…" (justified) → change a word → **Done** → the right edge is
+   still straight, the last line is normal. Add a few words so lines re-flow → still straight. Export → the same.
+   A left-aligned paragraph (e.g. a résumé line) → edit → stays left-aligned, nothing stretched.
 4. Re-open every edit above → each is exactly where you left it.
 5. Export → the page matches the screen.
 6. Open anything, press Done without typing → nothing changes at all.
 
 **Known limits:** a line the user retypes entirely cannot keep gaps that belonged to text that no longer exists, and
 re-typesets; changing a heading's font size scales its gaps by the size ratio rather than preserving them exactly;
-the substituted typeface is the font work's business, not this step's.
+the substituted typeface is the font work's business, not this step's. Justified lines can show wider gaps than the
+original where the substitute font is narrower or a short line re-flows — the edge is straight, the gaps are as
+even as that line allows; hyphenation is not added.
 
 **Land:** branch `text-position` from `main`. Commit: `The position, the spacing and the baseline are ours (Task 74,
 Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case, the whole-corpus text comparison
-is identical, and the user's six checks pass.
+is identical, the user has reviewed Change 0's justified-paragraph list, and the user's six checks pass.
 
 ---
 
