@@ -1,5 +1,6 @@
 import type { PageGeometry } from '@/lib/pdf/types';
 import type { PagePlan } from '@/state/pagePlan';
+import type { SourceTextMetrics } from '@/lib/pdf/textMetrics';
 
 /** An sRGB color with channels normalized to the inclusive range 0..1. */
 export interface Rgb {
@@ -69,6 +70,32 @@ export interface TextParagraphLayout {
   readonly restIndentPt: number;
 }
 
+export interface PositionedTextPiece {
+  readonly text: string;
+  readonly x: number;
+  readonly baselineY: number;
+  readonly widthPt: number;
+  readonly style: TextStyle;
+  readonly source?: SourceTextMetrics;
+  /** Single-line typing calibration; never copied from a justified paragraph. */
+  readonly advanceScale?: number;
+  readonly advanceTrackingPt?: number;
+  readonly sourceRect?: PdfRect;
+  /** Already present in the pristine page at exactly this position/appearance. */
+  readonly sourceVisible?: boolean;
+}
+
+/** Immutable, serializable geometry shared by the committed preview and export. */
+export interface TextComposition {
+  readonly version: 1;
+  readonly text: string;
+  readonly pieces: readonly PositionedTextPiece[];
+  readonly alignment: TextAlignment;
+  readonly alignmentLeftPt: number;
+  readonly alignmentWidthPt: number;
+  readonly style: TextStyle;
+}
+
 export interface TextEdit extends BaseEdit {
   readonly kind: 'text';
   readonly text: string;
@@ -97,6 +124,9 @@ export interface TextEdit extends BaseEdit {
   readonly alignLeftPt?: number;
   /** Width of the alignment column in PDF points. */
   readonly alignWidthPt?: number;
+  readonly composition?: TextComposition;
+  /** Why the normal re-typesetting path was needed; absent on old projects. */
+  readonly compositionFallback?: string;
 }
 
 export interface ReplacedText {

@@ -14244,8 +14244,9 @@ fix five. Two different things produce a wide gap and no width threshold can sep
 | The positions are already in hand | every `TextLine` carries `runs`, each with its own x and width; `lineText` reads them, decides yes/no on a space, and discards the numbers |
 
 **What the user gets:** a letter-spaced heading keeps its spacing; pressing Done moves nothing; re-opening an edit
-finds it exactly where it was; the exported page matches the screen; and an edited justified paragraph keeps its
-straight right edge (Change 4).
+finds it exactly where it was; the exported page matches the screen; an edited justified paragraph keeps its
+straight right edge (Change 4); and a paragraph opens with the page's own lines, never wider than its column
+(Change 5).
 
 **The rule.** The **DOM collects keystrokes. Our model decides the committed PDF position.** Nothing about where
 text lands may be read back out of a browser layout.
@@ -14260,6 +14261,17 @@ measured against.
 Also count the **justified paragraphs** for Change 4: across the 45 baseline files plus Ladakh, list every box the
 detection rule below calls justified, with its lines' right edges and word gaps, and print the near misses (boxes
 just outside the rule) so the user can review both. Report how many and on which files before Change 4 is built.
+
+**Change 0 progress — 2026-10-12 (Codex, uncommitted).** Published `TASK74_5D_CHANGE0_REPORT.md` on
+`text-position`. Actual browser checks: five fixtures × eleven zooms = 55 no-op cycles; all create zero edits/history
+changes. Five no-op exports preserve exact numeric run geometry and pixel-identical rendered pages. Separate real
+changed-save/reopen/export checks at 75% name the heading wrap, lost justified gaps, bullet preview offset and an
+existing inline-emphasis loss; these are baseline findings, not fixed production code. The 45-file / 368-page
+current text freeze has 9,315 lines, versus historical 9,208 (26 changed pages), explicitly recorded rather than
+silently accepted. The first-pass survey has 98 provisional candidates / 921 rejected-or-uncertain boxes; it is
+**not an approved detector**: short labels give false positives and the known Ladakh p2 paragraph has incomplete
+gap evidence. Refine and visually review that list before Change 4. At this baseline snapshot Changes 1–4 were
+unimplemented; see the subsequent scoped progress below. 5d is not done.
 
 **Change 1 — keep what the PDF measured.**
 Carry, per run and per line, the values we currently throw away: the text matrix, the baseline in PDF space, the
@@ -14289,11 +14301,31 @@ user sees while typing is deliberate: native caret, selection, spellcheck, acces
 IME composition for Devanagari and the other supported Indian scripts come free from it, and re-earning them is not
 a cost this step should take on. The model owns the committed result; the browser owns the typing experience.
 
+**Changes 1–3 progress — 2026-10-12 (Codex, uncommitted on `text-position`).** Optional source metrics and saved
+piece compositions are implemented; commit/export use the stored model positions, and Done no longer measures
+DOM font ascent/descent. Unchanged stationary source glyphs are retained rather than redrawn. Native caret/IME
+remain in charge, with measured inline heading gaps. Actual Bhutan caption save/reopen/export retains both 50 pt
+gaps and all untouched glyph rectangles; pixel comparison outside the edited piece is identical. Ladakh p2's
+local final-piece edit retains 156 untouched pieces exactly and also changes zero pixels outside the edited piece.
+Source audit: 45 files / 368 pages / 9,315 identical lines; 8,972 composable, 343 named `unmatched-run-spacing`
+fallbacks. Enabled-guard suite: 1,557 passed; later targeted baseline/gap corrections: 129 / 120 passed; final default
+suite: 1,524 passed, zero failed. Post-change
+browser coverage is 15 no-op cycles (heading at eleven zooms; four other cases at 75%), not the earlier 55-cycle
+baseline. Full post-change zoom acceptance remains to be completed; existing bullet preview offset/emphasis and
+font-substitution limits are not claimed fixed. Details: `TASK74_5D_CHANGES1_3_REPORT.md`. **Change 4 has not been
+built, whole 5d is not done, and nothing is committed or merged.**
+
 **Change 4 — justified paragraphs stay justified.**
 *What the user hit.* Ladakh p2 ("Ladakh, for us, isn't just a destination…"), Corporate Governance and most reports
 are **justified**: every line except a paragraph's last ends at the same right edge, because the PDF stretches the
 spaces between words. After an edit we redraw with normal spaces, so the right edge goes **ragged**. Change 2 must
 not copy those stretched gaps (a re-flow invalidates them), so without this change 5d keeps them ragged.
+
+The user's screenshot (2026-10-12), Ladakh p2 "And then there are the nights…": on the page, lines 1 ("…turns into
+a") and 4 ("…sunsets, long") are stretched to the edge, line 3 reaches it, and lines 2 ("…but feel.", before a hard
+break) and 5 (last) are normal. Clicking Edit shows every line with normal gaps — ragged. After this change, lines
+1, 3 and 4 end on the edge both while typing and after Done; 2 and 5 stay normal. The real font would **not** fix
+this on its own: the same font, with normal gaps, still leaves lines 1 and 4 short — the stretch is in the spaces.
 
 | | Before | After |
 |---|---|---|
@@ -14303,9 +14335,31 @@ not copy those stretched gaps (a re-flow invalidates them), so without this chan
 | While typing in the editor | ragged | justified, matching what is saved |
 | Left, centred, right boxes | unchanged | unchanged |
 
-1. *Recognise it.* A left-aligned box of two or more lines is justified when its lines other than each paragraph's
-   last end within about 1 pt of the same right edge **and** their gaps between words are wider than the font's
-   normal space. Change 0 confirms the exact thresholds against the corpus; a box that fits neither way stays left.
+1. *Recognise it.* A left-aligned box is justified when **at least two** of its lines (not a paragraph's last line)
+   end within about 1 pt of the same right edge **and** most of the word gaps that can be measured on those lines are
+   wider than the font's normal space. Change 0 confirms the exact thresholds against the corpus; a box that fits
+   neither way stays left.
+
+   **Revision — 2026-10-12, after Change 0's survey.** The first rule failed in two ways:
+   - *Two-line labels passed.* With one non-final line, "same right edge" proves nothing: 66 of the 98 candidates
+     were labels such as `June (Including` / `GST)` (Ladakh p21/p22) and `Travelmite | Oct'25 - Jan'26` / `HR Intern`.
+     → Require **two or more non-final lines** on the shared edge, so three or more lines in total.
+   - *Real paragraphs failed.* Ladakh p2 ("Ladakh, for us…", "And then there are the nights…") was rejected because
+     some Type3 gaps cannot be measured. → Judge only the gaps that **can** be measured; skip the rest, never count
+     them as failures. Require enough measured gaps to decide (Codex proposes the minimum from the survey).
+
+   | Box | First rule | Revised rule |
+   |---|---|---|
+   | `June (Including` / `GST)` | justified ❌ | left ✅ |
+   | Ladakh p2 "And then there are the nights…" | left ❌ | justified ✅ |
+   | A ragged left-aligned paragraph | left ✅ | left ✅ |
+
+   *Accepted cost:* a genuinely justified **two-line** paragraph (e.g. Ladakh p8 "Spend your evening soaking in the /
+   stillness of this magical place.") stays left; after an edit its first line ends a little short.
+
+   *Before Change 4 is built:* re-run the survey with the revised rule and publish the list (accepted, rejected and
+   near misses, with each one's text and page) for the user to review. Ladakh p2's paragraphs must be accepted and
+   the two-line labels rejected.
 2. *Remember it.* Store it as a fourth alignment, `justify`, beside left, centre and right. It is optional, so older
    projects open unchanged. `projectState.ts` must accept the new value — an unknown alignment rejects the whole
    saved project today.
@@ -14317,8 +14371,61 @@ not copy those stretched gaps (a re-flow invalidates them), so without this chan
    does nothing for most embedded and CID fonts. The width comes from Change 3's one layout result.
 5. *Lines the user did not touch* keep their original glyph positions exactly (Change 2), so a one-word edit
    changes only the lines it re-flows.
-6. *Never squeeze.* A line whose words are already wider than the column is not compressed; a line with no word gap
+6. *Squeeze no more than the PDF did* (revised 2026-10-12 with Change 5; was "never squeeze"). Many justified PDFs
+   narrow the spaces on some lines as well as widening them on others. A re-flowed line may narrow its gaps down to
+   the tightest gap the same paragraph uses on the page, so lines keep breaking where the original did; beyond that
+   the last word moves to the next line. A paragraph with no narrowed line is never squeezed. A line with no word gap
    (one word) stays at the left.
+
+**Change 5 — the editor shows each line as the page does, and never grows past the column.** *(added 2026-10-12;
+build together with Change 4 — both set the spacing between words inside a paragraph's lines. Changes 1–3 are built
+and stay as they are.)*
+
+*What the user hit.* Corporate Governance (`tmp/text-doubling/corporate-edited-3.pdf`) page 18, the paragraph
+"Common stockholders have the right…" (24 lines, column 405.9 pt, a vertical rule just to its right). Clicking Edit
+opens a box about 16 pt **wider** than the column; lines re-break ("…empowered in **setting**", but the page has
+"…empowered in" / "setting direction…") and six or more lines cross the vertical rule. If that paragraph is edited,
+Done re-flows it at the wider width and saves it crossing the rule.
+
+*Why — measured, not the font and not the size.* Every line is 9.94 pt on the page and in the editor, and the
+editor's letters have the same advances as the PDF's (plain glyph widths 378.7 / 404.1 / 420.8 pt against the editor
+face's 378.3 / 404.5 / 420.8 pt). The page fits every line to 405.9 pt by **widening** the spaces on some lines and
+**narrowing** them on others: "wealth are assumed to be communicated…" is 420.8 pt with normal spaces and 405.8 pt on
+the page — about 0.9 pt less per space. The editor uses normal spaces, so the narrowed lines are too long; Task 72
+Revision 1's rule ("the box is as wide as the widest displayed line") then makes the box 16 pt wider than the column;
+and the browser, wrapping the whole paragraph at that width, pulls words up into the other lines. Task 72 Revision 1
+fixed the large version of this (the box reaching the page edge); this is the remainder. The notes in Tasks 76 and 77
+that called this "the substitute font is wider" were wrong for this file.
+
+*Scope* (`src/lib/edit/squeezedScope.local.test.ts`, `SQUEEZE_SCOPE=1`, 2026-10-12): of 2,038 multi-line,
+left-aligned, non-bullet boxes in 47 files, **738** have at least one line that is more than 0.5 pt wider than its box
+with normal spaces — in **15 files / 6 documents**: Corporate Governance (336 of 658 boxes), Ziro (20 of 48), the
+Utkarsh CV (4 of 7), the Rishi CV (3 of 3), Goa (3 of 75), the Rahul résumé (1 of 11). Codex confirms these counts
+and the method (lines whose measured ratio exceeds 1.2 were excluded as measurement artefacts) before building.
+
+| Corporate p18 | Before | After |
+|---|---|---|
+| Text size | 9.94 pt | 9.94 pt — **unchanged**; letters keep their size and shape |
+| Box width | about 16 pt past the column, over the rule | exactly the column |
+| Line 3 when opened | "…empowered in **setting**" | "…empowered in" — as on the page |
+| Spaces between words | always normal | as on the page: narrower or wider, line by line |
+| Edit the paragraph → Done | saved wider than its column | stays inside its column |
+
+1. *The box is the column.* A multi-line, left-aligned paragraph box opens at its column width (`block.rect.w`, or
+   the saved edit's width on re-edit), not "widest displayed line + padding". A single line and centred/right boxes
+   keep today's rule.
+2. *Open with the page's lines.* Until the user types in a paragraph, show each of its lines with the PDF's own line
+   break and with its word gaps set so the line has its **measured PDF width** (Change 1) — narrower or wider than
+   normal, exactly as the page has them. Use the same measured-piece display Changes 2–3 already use for headings
+   (positioned pieces / per-line spacing); it is extended here to paragraph mode, which Changes 2–3 left out.
+   Change 10's gaps and indents and 5c.1's baseline correction stay as they are.
+3. *Typing re-flows only that paragraph, inside the column.* The first keystroke in a paragraph turns that paragraph
+   back into normal flowing text at the column width; the other paragraphs keep their page lines. Caret, selection,
+   undo and IME composition (Devanagari and the other supported scripts) must keep working — this is the delicate part.
+4. *Done.* The edited paragraph wraps at the column width, never wider; with Change 4 its lines are spaced by Change
+   4 point 6's rule. Untouched lines keep their original glyphs (Change 2), as today.
+5. *Fallback.* If a paragraph's lines cannot be shown from their pieces (no source metrics, unsupported matrix, Indic
+   text), it opens as today but at the column width, and the reason is recorded.
 
 **Checks**
 - *Nothing moves*: Change 0's table, re-run, is **0 pt** for every unchanged case at every zoom; a changed case
@@ -14338,6 +14445,10 @@ not copy those stretched gaps (a re-flow invalidates them), so without this chan
   a Corporate Governance paragraph are checked in pixels against the original outside the edited lines.
 - *Not justified stays as it is*: left, centred and right boxes produce identical exports with and without
   Change 4, asserted across the corpus.
+- *Squeezed lines* (Change 5): Corporate p18 opens at the column width with every line breaking where the page does
+  and nothing past the vertical rule; each displayed line's width is within **0.5 px** of its PDF width at 100% and
+  200%; the font size is unchanged. Editing it and pressing Done keeps every line inside the column. Across the 738
+  boxes, none opens wider than its column; boxes with no narrowed line open exactly as they do today.
 - *Extraction is untouched*: the text of all 9,208 lines across the 45 files is identical before and after, asserted
   as a whole-corpus comparison. A single changed line fails the step.
 - *Old projects*: a project saved before this change opens, exports and re-edits identically.
@@ -14365,6 +14476,9 @@ not copy those stretched gaps (a re-flow invalidates them), so without this chan
 | `src/components/TextEditOverlay.tsx` + test | Stop contributing positions to the commit; justified paragraphs shown justified |
 | `src/lib/pdf/textUnits.ts` (alignment detection only) + test | Recognise `justify` (Change 4); grouping rules unchanged |
 | `src/lib/projects/projectState.ts` + test | Accept the `justify` alignment; older saves unchanged |
+| `src/lib/edit/textEditSession.ts` + test | Change 5: a multi-line left-aligned paragraph opens at its column width |
+| `src/lib/edit/paragraphLayout.ts` + test | Change 5: an edited paragraph wraps at the column width; Change 4 point 6's squeeze rule |
+| `src/lib/edit/squeezedScope.local.test.ts` (local, `SQUEEZE_SCOPE=1`) | Change 5's scope count, re-run after the change |
 
 **Files that must not change:** `textUnits.ts` grouping (only its alignment detection gains `justify`); `ruleLines.ts`; `bulletList.ts` and everything
 bullet-shaped; `coveredGlyphs.ts` and its matching; `coveredImages.ts` and every image patch; `embeddedFont.ts` and
@@ -14386,6 +14500,10 @@ line that cannot be composed from its pieces falls back and says so.
 4. Re-open every edit above → each is exactly where you left it.
 5. Export → the page matches the screen.
 6. Open anything, press Done without typing → nothing changes at all.
+7. Corporate Governance page 18, "Common stockholders have the right…" → **Edit** → the box is the column's width,
+   nothing crosses the vertical line, every line breaks where it does on the page, the text is the same size. Change
+   a word and type a few more → the paragraph re-flows inside the column → **Done** → still inside it → Export → the
+   same.
 
 **Known limits:** a line the user retypes entirely cannot keep gaps that belonged to text that no longer exists, and
 re-typesets; changing a heading's font size scales its gaps by the size ratio rather than preserving them exactly;
@@ -14395,7 +14513,7 @@ even as that line allows; hyphenation is not added.
 
 **Land:** branch `text-position` from `main`. Commit: `The position, the spacing and the baseline are ours (Task 74,
 Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case, the whole-corpus text comparison
-is identical, the user has reviewed Change 0's justified-paragraph list, and the user's six checks pass.
+is identical, the user has reviewed Change 0's justified-paragraph list, and the user's seven checks pass.
 
 ---
 
@@ -14519,6 +14637,8 @@ found one high and three medium bugs. All four were fixed with tests that fail o
   - *A dash vanishes on screen* after moving the NMAT list ("October – mid-December"); the exported file keeps it
     (text and an independent renderer). Cause not found.
   - *A list or paragraph grows after Done* when the substitute font is wider (Green p7: "project" wraps). Font work.
+    **Correction 2026-10-12:** on Corporate Governance p18 the editor's letters measure the same width as the PDF's;
+    the cause there is lines the PDF squeezed (narrower spaces) — Step 5d Change 5. Green p7 has not been re-measured.
 
 **Part A — drawn dots are removed like picture dots.**
 1. `bulletList.ts`: when an item's marker is a drawn shape (`detectBulletMarkers(…, 'shape')`), record it on the item
@@ -14649,6 +14769,7 @@ Browser: Ladakh DAY-2 490.0 → 477.0 on the second drag; on the combined `main`
 **Files:** `src/lib/edit/buildTextEdits.ts`, `src/components/OverlayLayer.tsx`, new `src/lib/edit/moveTwice.test.ts`.
 
 **Known limit:** after the second Done a paragraph can re-wrap a word differently (the substitute font is wider);
-its position is right. That is the font work.
+its position is right. That is the font work. *(Correction 2026-10-12: where the PDF squeezed a line, the cause is
+the narrower spaces, not the font — Step 5d Change 5.)*
 
 ---

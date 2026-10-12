@@ -357,6 +357,26 @@ describe('TextEditOverlay first-line placement', () => {
 });
 
 describe('TextEditOverlay paragraph seed', () => {
+  it('restores measured heading gaps when an unmatched edit is undone while typing', () => {
+    const text = 'N E W Y E A R';
+    const runs = [{ text: 'N E W', x: 40, width: 50 }, { text: 'Y E A R', x: 140, width: 70 }].map(piece => ({
+      pageIndex: 0, text: piece.text, style,
+      rect: { x: piece.x, y: 680, w: piece.width, h: 20 },
+      metrics: { matrix: [20, 0, 0, 20, piece.x, 680] as const, x: piece.x, baselineY: 680, widthPt: piece.width },
+    }));
+    renderEditor({ ...block(text, 24), lines: [{ pageIndex: 0, text, style, runs, baselineY: 680, rect: { x: 40, y: 680, w: 170, h: 20 } }] });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    const wrappers = editor.querySelectorAll<HTMLElement>('[data-pdf-source-piece]');
+    const first = wrappers[0]!.querySelector<HTMLElement>('[data-pdf-piece-content]')!;
+    const second = wrappers[1]!.querySelector<HTMLElement>('[data-pdf-piece-content]')!;
+    expect(wrappers[1]!.style.marginLeft).toBe('40px');
+    first.textContent = 'X'; second.textContent = 'Z'; fireEvent.input(editor);
+    expect(wrappers[1]!.style.marginLeft).toBe('0px');
+    first.textContent = 'N E W'; second.textContent = 'Y E A R'; fireEvent.input(editor);
+    expect(wrappers[1]!.style.marginLeft).toBe('40px');
+    expect(editor.querySelectorAll('[data-pdf-source-piece]')[1]).toBe(wrappers[1]);
+  });
+
   it.each(['right', 'center'] as const)('keeps three %s display lines at their own width', (align) => {
     const onDone = vi.fn();
     const onCancel = vi.fn();

@@ -1,4 +1,4 @@
-import { rgb } from 'pdf-lib';
+import { concatTransformationMatrix, popGraphicsState, pushGraphicsState, rgb, setCharacterSpacing, setCharacterSqueeze, setTextRenderingMode, setWordSpacing, TextRenderingMode } from 'pdf-lib';
 import type { PDFFont } from 'pdf-lib';
 import { isIndicRun } from '../scriptRouting';
 import { drawIndicTextPatch } from '../pathA';
@@ -10,6 +10,7 @@ import { effectiveTextSpanStyle } from '@/lib/edit/richText';
 import { isArrowBullet } from '@/lib/pdf/symbolBullets';
 import { drawArrowMarker, markerShapeWidth } from '../markerShapes';
 import type { PageExportContext } from '../context';
+import { positionedComposition } from '@/lib/edit/textLayout';
 
 function alignedTextX(edit: TextEdit, textWidth: number): number {
   const align = edit.align ?? 'left';
@@ -66,6 +67,45 @@ export const drawText: EditHandler<TextEdit> = async (edit, context) => {
   if (isIndicRun(edit.text)) {
     await drawIndicTextPatch(edit, context);
     return;
+  }
+
+  if (edit.composition?.version === 1 && edit.composition.text === edit.text) {
+    const pieces = positionedComposition(edit.composition);
+    if (pieces.every(piece => [piece.x, piece.y, piece.width].every(Number.isFinite) && piece.width >= 0)) {
+      for (const [index, piece] of pieces.entries()) {
+        if (piece.sourceVisible) continue;
+        const glyphs = edit.composition.pieces[index]?.source?.glyphs;
+        let pen = 0;
+        const ordinaryAdvances = glyphs?.every(glyph => { const same = Math.abs(glyph.offsetPt - pen) < 1e-8; pen += glyph.widthPt; return same; });
+        const segments = glyphs?.length && !ordinaryAdvances ? glyphs.map(glyph => ({ text: glyph.text, x: piece.x + glyph.offsetPt, width: glyph.widthPt })) : [{ text: piece.text, x: piece.x, width: piece.width }];
+        for (const segment of segments) {
+          const prepared = await prepareText(segment.text, exportStyle(piece.style), context);
+          // Standard-font widthOfTextAtSize includes kerning, whereas drawText
+          // emits a plain Tj. Measure the actual emitted advances for this path.
+          const advances = prepared.map(item => item.font ? [...item.text].reduce((sum, character) => sum + item.font!.widthOfTextAtSize(character, item.style.fontSizePt), 0) : item.width);
+          const actualWidth = advances.reduce((sum, width) => sum + width, 0);
+          if (actualWidth <= 0) continue;
+          const scale = Math.abs(segment.width - actualWidth) < 1e-8 ? 1 : segment.width / actualWidth;
+          // Keep the model's measured advance even when the existing font policy
+          // selects a substitute. Font selection/reuse rules remain untouched.
+          context.page.pushOperators(pushGraphicsState(), concatTransformationMatrix(scale, 0, 0, 1, segment.x, 0),
+            setCharacterSpacing(0), setWordSpacing(0), setCharacterSqueeze(100), setTextRenderingMode(TextRenderingMode.Fill));
+          let x = 0;
+          for (const [preparedIndex, item] of prepared.entries()) {
+            if (item.arrow) drawArrowMarker(item.style, x, piece.y, context);
+            else {
+              const advance = drawSpanWithPageFont(item.text, item.style, x, piece.y, syntheticBold(item.style), item.style.italic, context);
+              if (advance === null && item.font) context.page.drawText(item.text, { x, y: piece.y, size: item.style.fontSizePt, font: item.font,
+                color: rgb(item.style.color.r, item.style.color.g, item.style.color.b) });
+            }
+            x += advances[preparedIndex]!;
+          }
+          context.page.pushOperators(popGraphicsState());
+        }
+      }
+      return;
+    }
+    context.warnings.push(`Invalid positioned text on page ${context.geometry.pageIndex + 1}; used normal text layout.`);
   }
 
   const measured = edit.spans

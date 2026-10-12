@@ -64,6 +64,23 @@ async function makeResumeContext() {
 }
 
 describe('drawText rich spans', () => {
+  it('draws committed piece positions verbatim, retaining measured air and raw baselines', async () => {
+    const context = await makeContext();
+    const style = { fontName: 'Helvetica', fontSizePt: 12, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
+    const edit: TextEdit = { id: 'pieces', kind: 'text', pageIndex: 0, z: 1, rect: { x: 10, y: 301.123456789, w: 250, h: 12 }, text: 'NEW YEAR TRIPS', style,
+      composition: { version: 1, text: 'NEW YEAR TRIPS', style, alignment: 'left', alignmentLeftPt: 10, alignmentWidthPt: 250,
+        pieces: [{ text: 'NEW', x: 10, baselineY: 301.123456789, widthPt: 30, style },
+          { text: 'YEAR', x: 90, baselineY: 301.123456789, widthPt: 40, style },
+          { text: 'TRIPS', x: 180, baselineY: 301.123456789, widthPt: 50, style }] } };
+    await drawText(edit, context);
+    const reader = await getDocument({ data: await context.pdf.save(), verbosity: 0 }).promise;
+    openDocuments.push(reader);
+    const items = (await (await reader.getPage(1)).getTextContent()).items.filter(item => 'str' in item && item.str.trim());
+    expect(items.map(item => 'str' in item && item.str)).toEqual(['NEW', 'YEAR', 'TRIPS']);
+    expect(items.map(item => 'str' in item && item.transform[4])).toEqual([expect.closeTo(10, 9), expect.closeTo(90, 9), expect.closeTo(180, 9)]);
+    expect(items.map(item => 'str' in item && item.transform[5])).toEqual([301.123456789, 301.123456789, 301.123456789]);
+    expect(items.map(item => 'str' in item && item.width)).toEqual([expect.closeTo(30, 9), expect.closeTo(40, 9), expect.closeTo(50, 9)]);
+  });
   it('draws only the measured arrow as vectors, retains its Unicode, and warns instead of throwing for other unsupported characters',async()=>{
     const context=await makeContext();
     await drawText({id:'symbols',kind:'text',pageIndex:0,z:1,rect:{x:20,y:300,w:200,h:12},text:'A\uF0D8B➢C✓漢D',style:{fontName:'Helvetica',fontSizePt:12,bold:false,italic:false,color:{r:0,g:0,b:0}}},context);

@@ -116,6 +116,20 @@ function history(edits = allEditKinds()): HistoryState {
 }
 
 describe('project state serialization', () => {
+  it('round-trips and deep-clones optional positioned pieces while old text edits stay valid', () => {
+    const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), composition: { version: 1, text: 'Saved text', style,
+      alignment: 'left', alignmentLeftPt: 30, alignmentWidthPt: 120,
+      pieces: [{ text: 'Saved text', x: 30.123456789, baselineY: 280.987654321, widthPt: 100, style,
+        source: { matrix: [12, 0, 0, 12, 30.123456789, 280.987654321], x: 30.123456789, baselineY: 280.987654321, widthPt: 100 } }] } };
+    const saved = serializeProject(history([edit]), 0, 1), restored = deserializeProject(saved, 3);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    const copy = restored.value.history.present.edits[0] as TextEdit;
+    expect(copy.composition).toEqual(edit.composition);
+    expect(copy.composition).not.toBe(edit.composition);
+    expect(copy.composition!.pieces[0]!.source!.matrix).not.toBe(edit.composition!.pieces[0]!.source!.matrix);
+    expect(deserializeProject(serializeProject(history(allEditKinds()), 0, 1), 3).ok).toBe(true);
+  });
   it('round-trips and deep-clones paragraph spacing, retaining older saves without it', () => {
     const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), boxText: 'First\nSecond',
       boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }, { gapBeforePt: 3, firstIndentPt: 28.8, restIndentPt: 0 }] };

@@ -7,6 +7,7 @@ import type {
   TextEdit,
   TextSpan,
   TextStyle,
+  TextComposition,
 } from '@/lib/export/types';
 import type { DocPresent, HistoryState } from '@/state/editsStore';
 import type { PagePlan } from '@/state/pagePlan';
@@ -56,6 +57,11 @@ function cloneEdit(edit: Edit): Edit {
       ...(edit.spans ? { spans: edit.spans.map((span) => ({ ...span })) } : {}),
       ...(edit.boxSpans ? { boxSpans: edit.boxSpans.map((span) => ({ ...span })) } : {}),
       ...(boxParagraphs && matchingBoxParagraphs(edit) ? { boxParagraphs: boxParagraphs.map(paragraph => ({ ...paragraph })) } : {}),
+      ...(edit.composition ? { composition: { ...edit.composition, style: { ...edit.composition.style, color: { ...edit.composition.style.color } },
+        pieces: edit.composition.pieces.map(piece => ({ ...piece, style: { ...piece.style, color: { ...piece.style.color } },
+          ...(piece.sourceRect ? { sourceRect: { ...piece.sourceRect } } : {}),
+          ...(piece.source ? { source: { ...piece.source, matrix: [...piece.source.matrix] as typeof piece.source.matrix,
+            ...(piece.source.glyphs ? { glyphs: piece.source.glyphs.map(glyph => ({ ...glyph })) } : {}) } } : {}) })) } } : {}),
     };
   }
   return {
@@ -196,6 +202,27 @@ function isSpan(value: unknown): value is TextSpan {
     && (value.fontRef === undefined || typeof value.fontRef === 'string');
 }
 
+function isComposition(value: unknown): value is TextComposition {
+  if (!isRecord(value) || value.version !== 1 || typeof value.text !== 'string' || !isStyle(value.style)
+    || !['left', 'center', 'right'].includes(value.alignment as string)
+    || !isFiniteNumber(value.alignmentLeftPt) || !isFiniteNumber(value.alignmentWidthPt) || value.alignmentWidthPt < 0 || !Array.isArray(value.pieces)) return false;
+  return value.pieces.every(piece => {
+    if (!isRecord(piece) || typeof piece.text !== 'string' || !isStyle(piece.style)
+      || !['x', 'baselineY', 'widthPt'].every(key => isFiniteNumber(piece[key])) || (piece.widthPt as number) < 0
+      || (piece.advanceScale !== undefined && (!isFiniteNumber(piece.advanceScale) || piece.advanceScale <= 0))
+      || (piece.advanceTrackingPt !== undefined && !isFiniteNumber(piece.advanceTrackingPt))
+      || (piece.sourceRect !== undefined && !isRect(piece.sourceRect))
+      || (piece.sourceVisible !== undefined && typeof piece.sourceVisible !== 'boolean')) return false;
+    if (piece.source === undefined) return true;
+    const source = piece.source;
+    return isRecord(source) && Array.isArray(source.matrix) && source.matrix.length === 6 && source.matrix.every(isFiniteNumber)
+      && ['x', 'baselineY', 'widthPt'].every(key => isFiniteNumber(source[key]))
+      && ['ascent', 'descent', 'characterSpacing', 'wordSpacing', 'leading', 'horizontalScale'].every(key => source[key] === undefined || isFiniteNumber(source[key]))
+      && (source.glyphs === undefined || (Array.isArray(source.glyphs) && source.glyphs.every(glyph => isRecord(glyph)
+        && typeof glyph.text === 'string' && isFiniteNumber(glyph.offsetPt) && isFiniteNumber(glyph.widthPt) && glyph.widthPt >= 0)));
+  });
+}
+
 function hasValidBaseEdit(value: Record<string, unknown>, livePageCount: number): boolean {
   return typeof value.id === 'string'
     && Number.isInteger(value.pageIndex)
@@ -234,6 +261,8 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
     && isStyle(value.style)
     && spansValid(value.spans)
     && spansValid(value.boxSpans)
+    && (value.composition === undefined || isComposition(value.composition))
+    && (value.compositionFallback === undefined || typeof value.compositionFallback === 'string')
     // A layout count that disagrees with the box text is dropped on restore
     // (cloneEdit), never a reason to refuse the whole saved file.
     && (value.boxParagraphs === undefined || (Array.isArray(value.boxParagraphs)

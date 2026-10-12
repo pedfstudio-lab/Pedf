@@ -1,4 +1,10 @@
 import type { TextSpan } from '@/lib/export/types';
+import type { TextComposition } from '@/lib/export/types';
+
+/** Shared immutable positions, consumed verbatim by committed rendering/export. */
+export function positionedComposition(composition: TextComposition) {
+  return composition.pieces.map(piece => ({ text: piece.text, style: piece.style, x: piece.x, y: piece.baselineY, width: piece.widthPt, sourceVisible: piece.sourceVisible }));
+}
 
 export type MeasureText = (text: string) => number;
 export type MeasureTextSpan = (text: string, span: TextSpan) => number;

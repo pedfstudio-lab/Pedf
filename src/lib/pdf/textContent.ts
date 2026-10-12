@@ -9,6 +9,8 @@ import { resolveTextPaint, textPaintForItems } from './textPaint';
 import type { RuleLine } from './ruleLines';
 import type { DrawnMarker } from './textUnits';
 import { biggerParagraphGap, inRuledColumn, pageLinePitches } from './paragraphPitch';
+import { sourceTextMetrics, textStatesForItems } from './textMetrics';
+import type { SourceLineMetrics, SourceTextMetrics } from './textMetrics';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
@@ -31,6 +33,7 @@ export interface TextRun {
   /** Glyph-weighted advances normalized to this run's measured width; grouping only. */
   readonly characterWidthsPt?: readonly number[];
   readonly spaceWidthPt?: number;
+  readonly metrics?: SourceTextMetrics;
 }
 
 export interface TextLine {
@@ -43,6 +46,7 @@ export interface TextLine {
   readonly align?: TextAlignment;
   readonly alignLeftPt?: number;
   readonly alignWidthPt?: number;
+  readonly metrics?: SourceLineMetrics;
 }
 
 export interface TextBlock {
@@ -127,6 +131,7 @@ function makeLine(runs: readonly TextRun[]): TextLine {
     baselineY: runs.reduce((sum, run) => sum + run.rect.y, 0) / Math.max(1, runs.length),
     style,
     runs,
+    ...(runs[0]?.metrics ? { metrics: { x: runs[0].metrics.x, baselineY: runs[0].metrics.baselineY } } : {}),
   };
 }
 
@@ -269,13 +274,18 @@ export function mergeRunsIntoLines(
       ),
       alignLeftPt: bounds.left,
       alignWidthPt: Math.max(0, bounds.right - bounds.left),
+      ...(line.metrics ? { metrics: { ...line.metrics, alignmentLeftPt: bounds.left, alignmentWidthPt: Math.max(0, bounds.right - bounds.left) } } : {}),
     };
   }).sort(
     (left, right) =>
       left.pageIndex - right.pageIndex ||
       right.baselineY - left.baselineY ||
       left.rect.x - right.rect.x,
-  );
+  ).map((line, index, lines) => {
+    const next = lines.slice(index + 1).find(candidate => candidate.pageIndex === line.pageIndex && candidate.baselineY < line.baselineY
+      && candidate.rect.x < line.rect.x + line.rect.w && candidate.rect.x + candidate.rect.w > line.rect.x);
+    return line.metrics && next ? { ...line, metrics: { ...line.metrics, lineSpacingPt: line.baselineY - next.baselineY } } : line;
+  });
 }
 
 function median(values: readonly number[]): number {
@@ -696,6 +706,7 @@ export async function extractTextRuns(
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const paintByItem = operatorList ? textPaintForItems(content.items, operatorList) : null;
   const glyphWidths = operatorList ? glyphWidthsByFont(operatorList) : new Map<string, Map<string, number>>();
+  const sourceStates = operatorList ? textStatesForItems(content.items, operatorList) : [];
   const runs: TextRun[] = [];
   const itemIndexes: number[] = [];
 
@@ -756,6 +767,7 @@ export async function extractTextRuns(
       // editor path can redraw it as an unknown-glyph box.
       text: isWordSymbolBullet ? STANDARD_BULLET : item.str,
       rect,
+      metrics: sourceTextMetrics(item, content.styles[fontRef], sourceStates[itemIndex]),
       ...(characterWidthsPt ? { characterWidthsPt } : {}),
       ...(spaceWidthPt !== undefined ? { spaceWidthPt } : {}),
       style: {

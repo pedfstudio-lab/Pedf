@@ -5,6 +5,7 @@ import type {
   TextSpan,
   TextStyle,
   TextParagraphLayout,
+  TextComposition,
 } from '@/lib/export/types';
 import type { PdfRect } from '@/lib/export/types';
 import type { TextRun } from '@/lib/pdf/textContent';
@@ -14,6 +15,8 @@ import { formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { isArrowBullet, visibleBulletSymbol } from '@/lib/pdf/symbolBullets';
 import type { WrappedTextLine } from './textLayout';
 import { sourceParagraphLineHeight } from './paragraphSeed';
+import { composeTextLine, compositionWidth, sourceLineComposition } from './lineComposition';
+import type { MeasurePiece } from './lineComposition';
 
 let fallbackId = 0;
 
@@ -47,6 +50,10 @@ export interface NextTextEdit {
   readonly boxWidthPt?: number;
   /** The editor font's ascent and descent as fractions of its size (paragraph mode). */
   readonly fontMetrics?: FontMetrics;
+  /** Already-saved piece geometry on re-edit; no source reset after a move. */
+  readonly sourceCompositions?: readonly (TextComposition | undefined)[];
+  /** Glyph width measurement only, never a DOM position or line rectangle. */
+  readonly measurePiece?: MeasurePiece;
 }
 
 export interface FontMetrics {
@@ -398,6 +405,20 @@ export function buildTextBlockEdits(
   /** The box's lines as saved now, when it was edited before; the source lines otherwise. */
   current: readonly PlacedTextLine[] = sourcePlacedLines(block),
 ): { readonly covers: readonly CoverEdit[]; readonly texts: readonly TextEdit[] } {
+  const sources = next.sourceCompositions ?? block.lines.map(line => {
+    const source = sourceLineComposition(line, block.align ?? 'left', block.alignLeftPt, block.alignWidthPt);
+    return source ? { ...source, style: block.style } : undefined;
+  });
+  const measure = next.measurePiece ?? (() => NaN);
+  let singleCompositionFallback: string | undefined;
+  // The model may retain a matched single source line even when the substitute
+  // typing face wrapped it. This does not alter native editable line breaking.
+  if (sources.length === 1 && !next.paragraphs && !next.text.includes('\n')) {
+    const result = composeTextLine(sources[0], next.text, next.style, measure, { spans: next.spans });
+    if ('composition' in result && compositionWidth(result.composition) <= Math.min(next.width, next.alignWidthPt ?? block.alignWidthPt ?? next.width)) {
+      wrappedLines = [{ text: next.text, ...(next.spans ? { spans: next.spans } : {}) }];
+    } else singleCompositionFallback = 'reason' in result ? result.reason : 'piece-layout-exceeds-column';
+  }
   const covers = coverRectsForTextBlock(block).map<CoverEdit>((rect, index) => {
     const runs = block.lines[index]?.runs ?? block.lines.flatMap((line) => line.runs);
     return {
@@ -440,19 +461,31 @@ export function buildTextBlockEdits(
       y: firstBaseline,
       width: textWidth,
     };
+    const sourceIndex = sources.length === wrappedLines.length ? index : sources.findIndex(source => source?.text === text);
+    const source = sources[sourceIndex];
+    const placed = current[sourceIndex];
+    const composition = composeTextLine(source, text, next.style, measure, {
+      dx: next.dx,
+      // A successfully matched local edit on an existing line keeps that
+      // line's raw baseline. Re-subtracting the pitch introduces a final-bit
+      // drift even when the line count and font size did not change.
+      dy: sources.length === wrappedLines.length ? next.dy : position.y - (placed?.y ?? position.y),
+      spans,
+    });
     return {
       id: id(),
       kind: 'text',
       pageIndex: block.pageIndex,
       rect: {
         x: position.x,
-        y: position.y,
+        y: 'composition' in composition ? composition.composition.pieces[0]?.baselineY ?? position.y : position.y,
         w: position.width,
         h: fontSizePt,
       },
       z: z + covers.length + index,
       text,
       style: next.style,
+      ...('composition' in composition ? { composition: composition.composition } : { compositionFallback: singleCompositionFallback ?? composition.reason }),
       ...(spans && spans.length > 0 ? { spans } : {}),
       boxText: next.text,
       ...(next.spans ? { boxSpans: next.spans } : {}),
@@ -468,6 +501,21 @@ export function buildTextBlockEdits(
     };
   });
 
+  if (next.measurePiece && texts.some(edit => edit.composition)) {
+    const key = (text: string, rect: PdfRect) => JSON.stringify([text, rect.x, rect.y, rect.w, rect.h]);
+    const stationary = new Set(texts.flatMap(edit => edit.composition?.pieces.flatMap(piece => piece.source && piece.sourceRect
+      && piece.x === piece.source.x && piece.baselineY === piece.source.baselineY
+      ? [key(piece.text, piece.sourceRect)] : []) ?? []));
+    const dirtyRuns = block.lines.flatMap(line => line.runs).filter(run => !stationary.has(key(run.text, run.rect)));
+    if (dirtyRuns.length && stationary.size) return {
+      // Each existing line anchor owns the same explicit replacement intent.
+      // The redactor already matches those named runs independently of patch
+      // bounds. Keep all anchors/z slots, so re-edit/history ownership is unchanged.
+      covers: covers.map(cover => ({ ...cover, replaces: replacedText(dirtyRuns) })),
+      texts: texts.map(edit => edit.composition ? { ...edit, composition: { ...edit.composition,
+        pieces: edit.composition.pieces.map(piece => ({ ...piece, sourceVisible: Boolean(piece.sourceRect && stationary.has(key(piece.text, piece.sourceRect))) })) } } : edit),
+    };
+  }
   return { covers, texts };
 }
 

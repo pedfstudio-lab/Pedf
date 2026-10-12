@@ -16,7 +16,10 @@ export function textPreviewSelection(
   const covers = existing?.covers ?? (list
     ? buildBulletListEdits(list, next, [], 0, Number.POSITIVE_INFINITY).covers
     : buildTextBlockEdits(block, next, [], 0).covers);
-  const transientEdits = existing ? [] : covers.map((cover, index) => extendCover(
+  const retained = existing?.texts.flatMap(edit => edit.composition?.pieces.filter(piece => piece.sourceVisible && piece.sourceRect) ?? []) ?? [];
+  const retainedCover: CoverEdit[] = retained.length ? [{ id: `preview-retained-${key}`, kind: 'cover', pageIndex: block.pageIndex, rect: block.rect,
+    z: 0, sampleBackground: true, replaces: retained.map(piece => ({ text: piece.text, rect: piece.sourceRect! })) }] : [];
+  const transientEdits = existing ? retainedCover : covers.map((cover, index) => extendCover(
     { ...cover, id: `preview-${key}-${index}` },
     list?.block.style.fontSizePt ?? block.lines[index]?.style.fontSizePt ?? block.style.fontSizePt,
   ));
@@ -26,7 +29,7 @@ export function textPreviewSelection(
   return {
     key, transientEdits,
     omitTextIds: existing?.texts.map((edit) => edit.id) ?? [],
-    coverIds: (existing?.covers ?? transientEdits).map((cover) => cover.id),
+    coverIds: [...(existing?.covers ?? []), ...transientEdits].map((cover) => cover.id),
     paintSupported: sourceStyles.every((style) => style.colorKnown !== false),
     ...(list?.items.some((item) => !item.markerRun && !item.markerImage && !item.markerShape)
       ? { unsafeReason: 'This list uses vector markers that the text-removal path cannot remove.' }

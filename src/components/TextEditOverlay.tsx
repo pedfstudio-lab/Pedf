@@ -3,11 +3,11 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { PdfRect, Rgb, TextEdit, TextStyle } from '@/lib/export/types';
+import type { PdfRect, Rgb, TextEdit, TextStyle, PositionedTextPiece } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
-import type { FontMetrics, NextTextEdit } from '@/lib/edit/buildTextEdits';
+import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
 import {
   calculateBulletRoomPt,
   calculateInitialEditorWidth,
@@ -23,6 +23,7 @@ import {
   richTextToHtml,
   serializeRichText,
   sourceSpansForTextBlock,
+  splitParagraphSpans,
 } from '@/lib/edit/richText';
 import {
   SNAP_THRESHOLD_PX,
@@ -47,6 +48,25 @@ import {
 } from '@/lib/edit/paragraphDom';
 import { wrapSelectionWithStyle } from '@/lib/edit/styleSelection';
 import { FontSizeCombobox } from './FontSizeCombobox';
+import { composeTextLine, compositionWidth, sourceLineComposition } from '@/lib/edit/lineComposition';
+
+/** Widths are measured at 1 PDF point per CSS pixel, independent of zoom/layout. */
+function measurePieceWithCanvas(text: string, style: TextStyle, source?: PositionedTextPiece): number {
+  const context = window.document.createElement('canvas').getContext('2d');
+  if (!context) return NaN;
+  context.font = textStyleToCanvasFont(style);
+  const width = context.measureText(text).width;
+  if (source?.advanceTrackingPt !== undefined) return width + [...text].length * source.advanceTrackingPt;
+  if (source?.advanceScale !== undefined) return width * source.advanceScale;
+  if (!source || (source.source && !source.source.glyphs?.length)) return width;
+  const intrinsicWidth = source.source?.glyphs?.reduce((sum, glyph) => sum + glyph.widthPt, 0) ?? source.widthPt;
+  const originalWidth = context.measureText(source.text).width;
+  return originalWidth > 0 ? width * intrinsicWidth / originalWidth : width;
+}
+
+function canvasWidth(text: string, style: TextStyle): number {
+  return measurePieceWithCanvas(text, style);
+}
 
 const FAMILY_KEYWORD = {
   sans: 'Arial',
@@ -250,20 +270,6 @@ function elementAtRangeStart(range: Range, root: HTMLElement): HTMLElement {
   return node.parentElement ?? root;
 }
 
-/** The root face's CSS ascent and descent, so saved lines are spaced as the editor shows them. */
-function measureFontMetrics(style: TextStyle, zoom: number): FontMetrics | undefined {
-  if (typeof TextMetrics === 'undefined' || !('fontBoundingBoxAscent' in TextMetrics.prototype)) return undefined;
-  const context = window.document.createElement('canvas').getContext('2d');
-  if (!context) return undefined;
-  const sizePx = style.fontSizePt * zoom;
-  context.font = textStyleToCanvasFont({ ...style, fontSizePt: sizePx });
-  const metrics = context.measureText('M');
-  const ascent = metrics.fontBoundingBoxAscent / sizePx;
-  const descent = metrics.fontBoundingBoxDescent / sizePx;
-  return Number.isFinite(ascent) && Number.isFinite(descent) && ascent > 0 && ascent < 3 && descent >= 0 && descent < 2
-    ? { ascent, descent } : undefined;
-}
-
 function measureWidestInitialLine(
   text: string,
   style: TextStyle,
@@ -379,10 +385,13 @@ export function TextEditOverlay({
 }: TextEditOverlayProps) {
   const markerList = !bulletMode
     && block.lines.some((line) => startsWithBulletMarker(line.text));
+  const measuredHeading = !bulletMode && !markerList
+    && block.lines.some(line => line.runs.some(run => /^(?:\S\s+){2,}\S$/u.test(run.text.trim())))
+    && (!existing?.length || existing.every(edit => edit.composition));
   const initialText = existing?.[0]?.boxText ??
     (bulletMode ? formatBulletEditorText(bulletMode.items, bulletMode.symbols) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
-    ((block.align ?? 'left') === 'left'
+    (measuredHeading ? block.text : (block.align ?? 'left') === 'left'
       ? (markerList ? listSeedText(block) : paragraphSeedText(block))
       : block.text);
   // Re-opening a bullet list must seed its font from a body line, not the "•" marker
@@ -400,7 +409,7 @@ export function TextEditOverlay({
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
   const usesAlignmentColumn = initialAlign !== 'left';
-  const paragraphMode = !bulletMode && !markerList && !usesAlignmentColumn
+  const paragraphMode = !bulletMode && !markerList && !measuredHeading && !usesAlignmentColumn
     && (existing?.length ? existing[0]?.boxParagraphs !== undefined : block.lines.length > 0);
   const initialParagraphs = paragraphMode ? existing?.[0]?.boxParagraphs ?? sourceParagraphs(block).layouts : undefined;
   const paragraphCacheRef = useRef(new Map(initialParagraphs?.map((layout, index) => [`source-${index}`, layout] as const) ?? []));
@@ -426,7 +435,42 @@ export function TextEditOverlay({
   // screenRect starts at the committed alignment region. Move only the visible box.
   const boxScreenLeft = screenRect.left + (usesAlignmentColumn
     ? (boxLeftPt - initialAlignLeftPt) * zoom : 0);
-  const initialHtmlRef = useRef(richTextToHtml(initialText, initialStyle, initialSpans, zoom, initialParagraphs));
+  const initialCompositions = !bulletMode && !markerList && !paragraphMode
+    ? existing?.length ? existing.map(edit => edit.composition) : block.lines.map(line => sourceLineComposition(line, initialAlign, initialAlignLeftPt, initialAlignWidthPt)) : [];
+  const sourceCompositionsRef = useRef(initialCompositions.map(composition => composition ? { ...composition, style: initialStyle, pieces: composition.pieces.map(piece => {
+    const natural = canvasWidth(piece.text, piece.style);
+    return natural > 0 ? initialCompositions.length > 1 || composition.pieces.length > 1
+      ? { ...piece, advanceTrackingPt: (piece.widthPt - natural) / Math.max(1, [...piece.text].length) }
+      : { ...piece, advanceScale: piece.widthPt / natural } : piece;
+  }) } : undefined));
+  const initialComposition = sourceCompositionsRef.current[0];
+  const compositionRef = useRef(initialComposition);
+  const [compositionPreviewActive, setCompositionPreviewActive] = useState(Boolean(initialComposition));
+  const [initialScaleX] = useState(() => {
+    const piece = initialCompositions.length === 1 && initialComposition?.pieces.length === 1 ? initialComposition.pieces[0] : undefined;
+    const natural = piece ? canvasWidth(piece.text, piece.style) : 0;
+    return piece && natural > 0 ? piece.widthPt / natural : 1;
+  });
+  const initialHtmlRef = useRef((() => {
+    if (!initialComposition || sourceCompositionsRef.current.some(composition => !composition)
+      || (initialCompositions.length === 1 && initialComposition.pieces.length < 2)) return richTextToHtml(initialText, initialStyle, initialSpans, zoom, initialParagraphs);
+    return sourceCompositionsRef.current.map((composition, lineIndex) => {
+      if (!composition) return '';
+      let cursor = 0;
+      const content = composition.pieces.map((piece, index) => {
+      const start = composition.text.indexOf(piece.text, cursor), separator = composition.text.slice(cursor, start);
+      cursor = start + piece.text.length;
+      const previous = composition.pieces[index - 1];
+      const gap = previous ? piece.x - previous.x - previous.widthPt - canvasWidth(separator, initialStyle) : 0;
+      const tracking = piece.advanceTrackingPt ?? 0;
+      const html = richTextToHtml(piece.text, initialStyle, [{ text: piece.text, ...piece.style }], zoom);
+      return richTextToHtml(separator, initialStyle) + `<span data-pdf-source-line="${lineIndex}" data-pdf-source-piece="${index}" style="margin-left:${gap * zoom}px"><span data-pdf-piece-content="true" style="letter-spacing:${tracking * zoom}px">${html}</span></span>`;
+      }).join('') + richTextToHtml(composition.text.slice(cursor), initialStyle);
+      const layout = initialParagraphs?.[lineIndex];
+      const paragraphAttributes = layout ? ` data-pdf-paragraph="true" data-paragraph-id="source-${lineIndex}" data-gap-before-pt="${layout.gapBeforePt}" data-first-indent-pt="${layout.firstIndentPt}" data-rest-indent-pt="${layout.restIndentPt}" style="margin-top:${layout.gapBeforePt * zoom}px;padding-left:${layout.restIndentPt * zoom}px;text-indent:${(layout.firstIndentPt - layout.restIndentPt) * zoom}px"` : '';
+      return initialCompositions.length > 1 ? `<div data-pdf-composition-line="${lineIndex}"${paragraphAttributes}>${content}</div>` : content;
+    }).join('');
+  })());
   const [style, setStyle] = useState<TextStyle>(initialStyle);
   const [selectionStyle, setSelectionStyle] = useState({
     bold: initialStyle.bold,
@@ -440,11 +484,15 @@ export function TextEditOverlay({
   const [appearanceError, setAppearanceError] = useState<string>();
   const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
   const widthMeasurementText = editorWidthMeasurementText(block, existing);
+  const measuredHeadingWidth = measuredHeading && !existing?.length ? neighbourBoxWidth({
+    pageIndex: block.pageIndex, rect: editingRect, align: 'right', alignLeftPt: editingRect.x,
+    alignWidthPt: Math.max(editingRect.w, pageWidthPt - editingRect.x - Math.max(2, initialStyle.fontSizePt * 0.25)),
+  }, blocks.filter(candidate => candidate !== block)).width : 0;
   const [initialWidth] = useState(() => bulletMode
     ? Math.max(naturalWidth, existing?.[0]?.rect.w ?? 0)
     : usesAlignmentColumn
       ? Math.max(MIN_BOX_WIDTH, boxWidthPt)
-      : calculateInitialEditorWidth({
+      : Math.max(measuredHeadingWidth, calculateInitialEditorWidth({
         blockWidthPt: naturalWidth,
         blockXPt: block.rect.x,
         existingWidthPt: existing?.[0]?.rect.w,
@@ -455,7 +503,7 @@ export function TextEditOverlay({
           measureTextWidth,
         ),
         pageWidthPt,
-      }));
+      })));
   const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);
   const [width, setWidth] = useState(initialWidth);
   const [height, setHeight] = useState(initialHeight);
@@ -474,6 +522,7 @@ export function TextEditOverlay({
   const capturedInitialHeightRef = useRef(false);
   const initializedRef = useRef(false);
   const composingRef = useRef(false);
+  const initialPresentedValueRef = useRef<ReturnType<typeof serializeRichText>>();
 
   const beginWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -565,13 +614,20 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     if (!editable) return;
     const serialized = serializeRichText(editable, style, zoom);
-    const fontMetrics = paragraphMode ? measureFontMetrics(style, zoom) : undefined;
+    const sourceMetrics = existing?.[0]?.composition?.pieces[0]?.source ?? block.lines[0]?.runs[0]?.metrics;
+    const fontMetrics = paragraphMode && sourceMetrics?.ascent !== undefined && sourceMetrics.descent !== undefined
+      ? { ascent: sourceMetrics.ascent, descent: Math.abs(sourceMetrics.descent) } : undefined;
     const next: NextTextEdit = {
       text: serialized.text,
       style: serialized.style,
       ...(serialized.spans ? { spans: serialized.spans } : {}),
       ...(paragraphMode ? { paragraphs: serialized.paragraphs } : {}),
       ...(fontMetrics ? { fontMetrics } : {}),
+      ...(!bulletMode && !markerList && block.lines.length ? {
+        ...(compositionRef.current ? { sourceCompositions: sourceCompositionsRef.current }
+          : existing?.length ? { sourceCompositions: existing.map(edit => edit.composition) } : {}),
+        measurePiece: measureTextWidth ?? measurePieceWithCanvas,
+      } : {}),
       ...(paragraphMode && !existing?.length && width === initialWidth ? { preserveSourceWrapping: true } : {}),
       width,
       height,
@@ -586,11 +642,12 @@ export function TextEditOverlay({
       } : {}),
     };
     if (bulletOverflow) return;
+    const presented = initialPresentedValueRef.current;
     const initial = {
-        text: initialText,
-        style: initialStyle,
-        ...(initialSpans ? { spans: initialSpans } : {}),
-        ...(initialParagraphs ? { paragraphs: initialParagraphs } : {}),
+        text: presented ? presented.text : initialText,
+        style: presented ? presented.style : initialStyle,
+        ...((presented ? presented.spans : initialSpans) ? { spans: presented ? presented.spans : initialSpans } : {}),
+        ...((presented ? presented.paragraphs : initialParagraphs) ? { paragraphs: presented ? presented.paragraphs : initialParagraphs } : {}),
         width: initialWidth,
         height: initialRenderedHeightRef.current,
         dx: 0,
@@ -672,6 +729,11 @@ export function TextEditOverlay({
   // such a box always has empty room before its own text.
   const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -8, top: -8 };
   const lineHeight = textBlockLineHeight(block, style, paragraphMode);
+  const previewScaleX = compositionPreviewActive && sourceCompositionsRef.current.length === 1 && compositionRef.current?.pieces.length === 1 ? initialScaleX : 1;
+  const initialMeasuredWidth = compositionRef.current ? compositionWidth(compositionRef.current) : 0;
+  const sourceXCorrectionPt = compositionPreviewActive && compositionRef.current
+    ? compositionRef.current.pieces[0]!.x - boxLeftPt - (initialAlign === 'center' ? (width - initialMeasuredWidth) / 2 : initialAlign === 'right' ? width - initialMeasuredWidth : 0)
+    : 0;
   const firstLineOffsetPx = editorFirstLineOffsetPx(lineHeight, style.fontSizePt, zoom) - topCorrectionPx;
   const baselineCorrection = baselineCorrectionPx(
     expectedBaselinePx === undefined ? undefined
@@ -691,8 +753,8 @@ export function TextEditOverlay({
     if (sample && editable) {
       sample.replaceChildren(...Array.from(editable.childNodes, (node) => node.cloneNode(true)));
       if (!sample.hasChildNodes()) sample.textContent = 'M';
-      if (paragraphMode && marker) {
-        const first = sample.querySelector<HTMLElement>('[data-pdf-paragraph]');
+      if ((paragraphMode || compositionRef.current) && marker) {
+        const first = sample.querySelector<HTMLElement>('[data-pdf-paragraph], [data-pdf-composition-line]');
         if (first && !hasRootParagraphText(editable)) first.prepend(marker);
         else probe?.insertBefore(marker, sample);
       }
@@ -739,23 +801,57 @@ export function TextEditOverlay({
       normalizeParagraphDom(editable, paragraphCacheRef.current, paragraphGap, zoom);
     }
   }, [paragraphMode, paragraphGap, zoom]);
-  const handleInput = useCallback(() => { normalizeParagraphs(); resizeToContent(); }, [normalizeParagraphs, resizeToContent]);
+  const updatePiecePresentation = useCallback(() => {
+    const editable = editableRef.current, source = compositionRef.current;
+    if (!editable || !source || composingRef.current) return;
+    const value = serializeRichText(editable, style, zoom);
+    const parts = value.text.split('\n'), spans = value.spans ? splitParagraphSpans(value.spans) : undefined;
+    const active = parts.length === sourceCompositionsRef.current.length && sourceCompositionsRef.current.every((composition, index) => composition
+      && 'composition' in composeTextLine({ ...composition, style: initialStyle }, parts[index]!, value.style, measureTextWidth ?? measurePieceWithCanvas, { spans: spans?.[index] }));
+    setCompositionPreviewActive(active);
+    editable.querySelectorAll<HTMLElement>('[data-pdf-composition-line]').forEach(wrapper => {
+      const line = sourceCompositionsRef.current[Number(wrapper.dataset.pdfCompositionLine)];
+      if (!line) return;
+      wrapper.style.position = 'relative';
+      const offset = line.pieces[0]!.x - boxLeftPt - (initialAlign === 'center' ? (width - compositionWidth(line)) / 2 : initialAlign === 'right' ? width - compositionWidth(line) : 0) - sourceXCorrectionPt - (initialParagraphs?.[Number(wrapper.dataset.pdfCompositionLine)]?.firstIndentPt ?? 0);
+      wrapper.style.left = `${active ? offset * zoom : 0}px`;
+    });
+    editable.querySelectorAll<HTMLElement>('[data-pdf-source-piece]').forEach(wrapper => {
+      const index = Number(wrapper.dataset.pdfSourcePiece), line = sourceCompositionsRef.current[Number(wrapper.dataset.pdfSourceLine ?? 0)], piece = line?.pieces[index], content = wrapper.querySelector<HTMLElement>('[data-pdf-piece-content]');
+      if (!piece || !content) return;
+      if (!active) { wrapper.style.marginLeft = '0px'; content.style.letterSpacing = 'normal'; return; }
+      const previous = line?.pieces[index - 1];
+      if (previous && line) {
+        let cursor = 0, separator = '';
+        for (const member of line.pieces.slice(0, index + 1)) {
+          const start = line.text.indexOf(member.text, cursor);
+          separator = line.text.slice(cursor, start); cursor = start + member.text.length;
+        }
+        wrapper.style.marginLeft = `${(piece.x - previous.x - previous.widthPt - canvasWidth(separator, initialStyle)) * zoom}px`;
+      } else wrapper.style.marginLeft = '0px';
+      content.style.letterSpacing = `${(piece.advanceTrackingPt ?? 0) * zoom}px`;
+    });
+  }, [boxLeftPt, initialAlign, initialParagraphs, initialStyle, measureTextWidth, sourceXCorrectionPt, style, width, zoom]);
+  const handleInput = useCallback(() => { normalizeParagraphs(); updatePiecePresentation(); resizeToContent(); }, [normalizeParagraphs, updatePiecePresentation, resizeToContent]);
 
   useLayoutEffect(() => {
     const editable = editableRef.current;
     if (!editable) return;
     if (!initializedRef.current) {
       editable.innerHTML = initialHtmlRef.current;
+      if (compositionRef.current && sourceCompositionsRef.current.length > 1) initialPresentedValueRef.current = serializeRichText(editable, initialStyle, zoom);
       initializedRef.current = true;
       editable.focus({ preventScroll: true });
       placeCaretAtEnd(editable);
     }
     resizeToContent();
-  }, [resizeToContent, width, style, previewMode, baselineCorrection]);
+  }, [resizeToContent, width, style, previewMode, baselineCorrection, initialStyle, zoom]);
 
   useLayoutEffect(() => {
     measureBaseline();
   }, [measureBaseline, style, lineHeight, firstLineOffsetPx, zoom]);
+
+  useLayoutEffect(() => { updatePiecePresentation(); }, [updatePiecePresentation]);
 
   useEffect(() => {
     let disposed = false;
@@ -1152,6 +1248,8 @@ export function TextEditOverlay({
           lineHeight: lineHeight / style.fontSizePt,
           top: firstLineOffsetPx + baselineCorrection,
           textAlign: initialAlign,
+          ...(compositionPreviewActive ? { width: `${width * zoom / previewScaleX}px`, left: sourceXCorrectionPt * zoom,
+            transform: `scaleX(${previewScaleX})`, transformOrigin: 'left top' } : {}),
         }}
       />
       <div
