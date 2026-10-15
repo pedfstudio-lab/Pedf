@@ -14881,3 +14881,123 @@ its position is right. That is the font work. *(Correction 2026-10-12: where the
 the narrower spaces, not the font — Step 5d Change 5.)*
 
 ---
+
+### Task 78 — Edited text uses the PDF's own font, or a twin with the same widths, and never grows  🔲 TODO → branch `font-match` **from `main`** (Step 5d is merged: `39970ab`)   *(Large · 1–2 weeks)*
+
+**What the user hit.** Edited text does not look like the page and can take more room than the original:
+- *Letters look different* — Ladakh p2 is a narrow, condensed face; edited text comes out in wider, rounder Arial.
+- *Text grows* — the look-alike is wider, so a line no longer fits: Green p7 "project" drops to a new line after
+  Done and the list gets taller.
+- *Untouched lines change* — after a justified edit, the paragraph's other lines are redrawn in the look-alike
+  (Step 5d, accepted item 1: Ladakh 0 of 177 original pieces kept).
+- *Mixed letters* — a typed letter the PDF's font does not contain is drawn in another face than its neighbours.
+
+**How fonts work today** (read from the code, 2026-10-15 — the starting point; this task adds to it):
+
+| Where | Today |
+|---|---|
+| Editor (screen) | `textStyleCss.ts`: the pdf.js-loaded face (`fontRef`, e.g. `g_d0_f3`), then `"Times New Roman"` / `Arial` / `"Courier New"` by `classifyFontFamily`. A letter missing from the PDF's subset falls back to Times/Arial on its own |
+| Export | `handlers/text.ts` `prepareText`: (1) the page's own font through `embeddedFont.ts`, only when it is TrueType or Type1, WinAnsi, embedded, not Type3, and every character has a `/Widths` entry — with synthetic bold/italic; (2) otherwise a pdf-lib **standard** font (`englishFont.ts`: Helvetica / Times / Courier, not embedded, WinAnsi only; a warning for unknown names; characters it cannot encode are skipped with a warning); (3) Indic text → `pathA.ts` |
+| Measuring | Editor wrapping and Step 5d's compositions measure on a canvas with the editor's face; the export scales a redrawn piece to its measured width (5d Changes 1–3) |
+| Never reused | Type0/CID fonts (most Canva, Google Docs and recent Word PDFs) and Type3 (Ladakh) |
+| Fonts shipped | None — there is no `public/fonts` (the Noto loader in `notoFonts.ts` points at files that are not in the repo) |
+
+**The rule.** One face per word; the **same face on screen and in the PDF**; a word's width equals the original's.
+This task only **adds a better fallback after today's page-font reuse** — the reuse path itself is unchanged.
+
+**Change 0 — measure first (no app change).** Across the 47 test files, for every font that draws text: its name
+(subset prefix stripped), type (TrueType / Type1 / Type0 / Type3), whether it is embedded, its encoding, and whether
+today's reuse path accepts it. Then, per font family: how much wider or narrower today's fallback is than the original
+(average and worst, over the corpus's lines), and a simulated edit — one extra word in every paragraph — counting the
+paragraphs that gain a line today. Publish the table before building; the twins in Change 1 are chosen from it.
+
+**Change 1 — twin fonts with the same widths.** Ship open-licence faces whose letters have the same widths as common
+fonts: Liberation Sans / Serif / Mono (Arial–Helvetica, Times New Roman–Times, Courier New–Courier), Carlito (Calibri),
+Caladea (Cambria) — regular, bold, italic, bold-italic — with their licence files, in `public/fonts/twins/`, served by
+our own site and loaded only when a page needs them (the PDF never leaves the device). A name table maps a PDF font to
+its twin (strip `ABCDEF+`, `PSMT`, `MT`, `-Bold`, `,Bold`, …). The export embeds the twin as a **subset** through
+`@pdf-lib/fontkit` (a new dependency, loaded lazily so the first page load is not heavier). Codex confirms each
+licence (SIL OFL 1.1) and reports the added download size and the exported-file size change.
+
+**Change 2 — the same face on screen.** Register the twin as a browser font and put it right after the PDF's own face
+in the CSS list, before Times/Arial. The canvas measuring used for wrapping and Step 5d's compositions
+(`measurePieceWithCanvas`, `textStyleToCanvasFont`) uses the same list, so the editor and the saved PDF break lines in
+the same places.
+
+**Change 3 — one face per word.** If any character of a word is missing from the PDF's own font, the whole word uses
+the twin — never mixed letters. When every character is present, the page font is reused exactly as today, including
+its synthetic bold/italic and the `sourceBold` / `sourceStrokeBold` rules (Task 10Q).
+
+**Change 4 — no twin: match the widths.** For a font with no twin (Type3, decorative, Type0 without a match), use
+the nearest generic (serif / sans / mono; a condensed face when the original runs narrow) and scale it horizontally so
+its widths match the original's `/Widths` for the letters the PDF has (median ratio) — on screen and in the export
+(the existing per-piece scale in `handlers/text.ts`). Ladakh p2 goes here.
+
+**Change 5 — untouched lines stay original.** In a re-flowed paragraph, a line whose text and position did not change
+keeps its original glyphs (`sourceVisible`), as Step 5d already does for one-line edits. Closes 5d's accepted item 1.
+
+**Compatibility.** Saved edits keep their stored widths (Step 5d compositions), so old edits export at the same
+positions, now in a closer face. Projects saved before this task open unchanged; any new field is optional.
+
+**Checks**
+- Change 0's table published and reviewed by the user before Change 1 is built.
+- *Green p7 list*: add a word → Done → the list keeps its height; "project" stays on its line.
+- *Résumé (Calibri)*: change a word → export → the PDF names Carlito for the new text; each word's width within
+  **0.5 %** of the original's.
+- *Corporate (Times)*: change a word in a full line → the page font or Liberation Serif → the line still fits.
+- *Ladakh p2*: add a word at the end → untouched lines keep their original glyphs (Change 5); edited lines are within
+  **1 %** of the original font's widths.
+- *A letter the subset lacks* (e.g. a capital Q): the whole word in one face, proved in pixels.
+- *Screen = PDF*: across the corpus sweep, the editor's line breaks equal the exported line breaks.
+- *Bold / italic*: switching them on and off behaves exactly as Task 10Q made it.
+- *Privacy*: in the browser's network list, the only new requests are our own `/fonts/twins/…` files.
+- *Unchanged elsewhere*: tests that expect Helvetica/Times/Courier names or the "substituted with Helvetica" warning
+  are updated with the reason; everything else as before — full suite; every real-PDF switch; typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `public/fonts/twins/*` + licence files | The twin faces (Change 1) |
+| `src/lib/fonts/fontMatch.ts` + test | PDF font name → twin, or the nearest generic and its width ratio (Changes 1, 4) |
+| `src/lib/fonts/twinFonts.ts` + test | Load a twin for the screen; fetch its bytes for embedding (Changes 1, 2) |
+| a local `TASK78_FONTS` test | Change 0's table and the corpus checks |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/export/englishFont.ts` + test | The twin first; a standard font only as the last resort |
+| `src/lib/export/handlers/text.ts` + test | One face per word; width matching for fonts without a twin |
+| `src/lib/edit/textStyleCss.ts` + test | The twin in the CSS font list, after the PDF's own face |
+| `src/components/TextEditOverlay.tsx` + test | Canvas measuring with the same font list |
+| `src/lib/edit/buildTextEdits.ts` + test | Change 5: unchanged lines in a re-flowed paragraph stay original |
+| `package.json` | `@pdf-lib/fontkit` |
+
+**Files that must not change:** `embeddedFont.ts`'s reuse rules (this task only adds a fallback after them); text
+grouping, `justification.ts` and Step 5d's layout rules; bullet algorithms; `coveredGlyphs.ts`, image and shape
+matching and redaction; the Indic route (`isIndicRun` → `pathA.ts`) — a separate task; the watermark and sign tools
+(their standard fonts stay); compress tools; the saved-project format beyond optional fields.
+
+**Verify (user):**
+1. Résumé → change a word → **Done** → **Export** → open in Chrome → same look and width as the words around it.
+2. Green p7 list → add a word → **Done** → the list does not grow.
+3. Ladakh p2 → add a word at the end → **Done** → at 300 % the other lines look exactly as before.
+4. Type a capital letter that the page never uses (Q, Z) → it matches the letters around it.
+5. Bold and italic on and off → as before.
+6. Corporate p18 → add "ordinary" → see whether it still grows a line (5d accepted item 2 — this task may help, it
+   does not promise to).
+
+**Known limits:** decorative and one-off fonts (logos, fancy headings like Bhutan's) get the nearest generic — closer,
+not identical; Type0/CID page fonts are not reused yet (they get a twin or a width-matched generic) — reusing them is a
+later step; Indic scripts are out of scope.
+
+**Found while checking, not part of this task (2026-10-15):** exporting an edit that contains **Hindi or any other
+Indian script fails** — `pathA.ts` still holds the Task 13 placeholder (`notImplemented('Indic text export / Path A
+(Task 13)')`), which throws, and the Noto fonts it would use are not in the repo. Typing Hindi in the editor works;
+saving it into the PDF does not. This needs its own task.
+
+**Land:** branch `font-match` from `main`. Commit: `Edited text uses the PDF's own font or a twin with the same widths
+(Task 78)`. Merge after Change 0's table is reviewed, the checks pass and the user's six steps pass.
+
+---
