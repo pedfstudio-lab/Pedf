@@ -114,10 +114,12 @@ export interface InitialEditorWidthOptions {
   readonly measuredLineWidthPt: number;
   readonly pageWidthPt: number;
   readonly marginPt?: number;
+  readonly paragraphColumnWidthPt?: number;
 }
 
 /** Keep original lines intact when the standard replacement font is slightly wider. */
 export function calculateInitialEditorWidth(options: InitialEditorWidthOptions): number {
+  if (options.paragraphColumnWidthPt !== undefined) return Math.max(1, options.paragraphColumnWidthPt);
   const pad = options.fontSizePt * 0.15;
   const margin = options.marginPt ?? Math.max(2, options.fontSizePt * 0.25);
   const pageBound = Math.max(

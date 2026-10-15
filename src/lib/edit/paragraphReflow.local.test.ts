@@ -314,7 +314,8 @@ describe.skipIf(!task74Enabled)('Task 74 Step 2 real text units', () => {
 
     const crane = page8.blocks.find((block) => /Black-Necked\s*\n?Crane Centre/.test(block.text));
     expect(crane, 'Bhutan page 8 crane paragraph').toBeDefined();
-    expect(crane).toMatchObject({ align: 'left' });
+    // Included in the user's approved Change 4 list; geometry is unchanged.
+    expect(crane).toMatchObject({ align: 'justify' });
     expect(crane?.lines).toHaveLength(4);
     expect(crane?.rect.w).toBeCloseTo(340.1, 0);
     expect(crane?.alignLeftPt).toBeUndefined();

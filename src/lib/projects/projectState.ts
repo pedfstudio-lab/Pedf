@@ -204,7 +204,7 @@ function isSpan(value: unknown): value is TextSpan {
 
 function isComposition(value: unknown): value is TextComposition {
   if (!isRecord(value) || value.version !== 1 || typeof value.text !== 'string' || !isStyle(value.style)
-    || !['left', 'center', 'right'].includes(value.alignment as string)
+    || !['left', 'center', 'right', 'justify'].includes(value.alignment as string)
     || !isFiniteNumber(value.alignmentLeftPt) || !isFiniteNumber(value.alignmentWidthPt) || value.alignmentWidthPt < 0 || !Array.isArray(value.pieces)) return false;
   return value.pieces.every(piece => {
     if (!isRecord(piece) || typeof piece.text !== 'string' || !isStyle(piece.style)
@@ -267,12 +267,13 @@ function isEdit(value: unknown, livePageCount: number): value is Edit {
     // (cloneEdit), never a reason to refuse the whole saved file.
     && (value.boxParagraphs === undefined || (Array.isArray(value.boxParagraphs)
       && value.boxParagraphs.every(paragraph => isRecord(paragraph)
-        && ['gapBeforePt', 'firstIndentPt', 'restIndentPt'].every(key => isFiniteNumber(paragraph[key]) && (paragraph[key] as number) >= 0))))
+        && ['gapBeforePt', 'firstIndentPt', 'restIndentPt'].every(key => isFiniteNumber(paragraph[key]) && (paragraph[key] as number) >= 0)
+        && (paragraph.minimumWordGapEm === undefined || (isFiniteNumber(paragraph.minimumWordGapEm) && paragraph.minimumWordGapEm >= 0)))))
     && (value.origin === undefined || value.origin === 'free')
     && (value.boxId === undefined || typeof value.boxId === 'string')
     && (value.boxText === undefined || typeof value.boxText === 'string')
     && (value.boxHeight === undefined || (isFiniteNumber(value.boxHeight) && value.boxHeight > 0))
-    && (value.align === undefined || value.align === 'left' || value.align === 'center' || value.align === 'right')
+    && (value.align === undefined || value.align === 'left' || value.align === 'center' || value.align === 'right' || value.align === 'justify')
     && (value.alignLeftPt === undefined || isFiniteNumber(value.alignLeftPt))
     && (value.alignWidthPt === undefined || (isFiniteNumber(value.alignWidthPt) && value.alignWidthPt > 0));
 }

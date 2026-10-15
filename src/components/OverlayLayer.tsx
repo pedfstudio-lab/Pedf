@@ -227,7 +227,7 @@ function alignmentEditorRect(
 ): PdfRect {
   const base = texts && texts.length > 0 ? textBoxRect(texts) : fallback;
   const align = texts?.[0]?.align ?? block.align ?? 'left';
-  if (align === 'left') return base;
+  if (align === 'left' || align === 'justify') return base;
   return {
     ...base,
     x: texts?.[0]?.alignLeftPt ?? block.alignLeftPt ?? base.x,

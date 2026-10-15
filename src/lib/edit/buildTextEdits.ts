@@ -17,6 +17,9 @@ import type { WrappedTextLine } from './textLayout';
 import { sourceParagraphLineHeight } from './paragraphSeed';
 import { composeTextLine, compositionWidth, sourceLineComposition } from './lineComposition';
 import type { MeasurePiece } from './lineComposition';
+import { wrapTextParagraphs } from './paragraphLayout';
+import { effectiveTextSpanStyle } from './richText';
+import { justifiedComposition } from './justifiedLayout';
 
 let fallbackId = 0;
 
@@ -54,6 +57,7 @@ export interface NextTextEdit {
   readonly sourceCompositions?: readonly (TextComposition | undefined)[];
   /** Glyph width measurement only, never a DOM position or line rectangle. */
   readonly measurePiece?: MeasurePiece;
+  readonly sourceParagraphLines?: readonly (readonly WrappedTextLine[])[];
 }
 
 export interface FontMetrics {
@@ -410,6 +414,17 @@ export function buildTextBlockEdits(
     return source ? { ...source, style: block.style } : undefined;
   });
   const measure = next.measurePiece ?? (() => NaN);
+  if (next.align !== 'justify' && next.paragraphs && next.measurePiece) {
+    const affected = new Set<number>();
+    wrappedLines.forEach((line, index) => {
+      const text = wrappedText(line), source = sources.length === wrappedLines.length ? sources[index] : sources.find(value => value?.text === text);
+      const result = composeTextLine(source, text, next.style, measure, { spans: typeof line === 'string' ? undefined : line.spans });
+      const layout = paragraphLayout(line, next), available = next.width - (typeof line !== 'string' && line.paragraphStart ? layout?.firstIndentPt ?? 0 : layout?.restIndentPt ?? 0);
+      if ('composition' in result && compositionWidth(result.composition) > available + 0.5) affected.add(typeof line === 'string' ? 0 : line.paragraphIndex ?? 0);
+    });
+    if (affected.size) wrappedLines = wrapTextParagraphs(next, (text, span) => measure(text, effectiveTextSpanStyle(next.style, span)), block)
+      .map(line => affected.has(line.paragraphIndex ?? 0) ? { ...line, sourcePosition: undefined, compositionFallback: 'piece-layout-exceeds-column' } : line);
+  }
   let singleCompositionFallback: string | undefined;
   // The model may retain a matched single source line even when the substitute
   // typing face wrapped it. This does not alter native editable line breaking.
@@ -438,7 +453,7 @@ export function buildTextBlockEdits(
     (upper, lower) => modelLineStep(block, next, upper, lower) + paragraphGap(lower, next),
   );
   const align = next.align ?? block.align ?? 'left';
-  const usesAlignmentColumn = align !== 'left';
+  const usesAlignmentColumn = align === 'center' || align === 'right';
   const alignLeftPt = next.alignLeftPt ?? block.alignLeftPt ?? base.x;
   const alignWidthPt = next.alignWidthPt ?? block.alignWidthPt ?? next.width;
   const textLeft = usesAlignmentColumn ? alignLeftPt + next.dx : base.x + next.dx;
@@ -448,7 +463,12 @@ export function buildTextBlockEdits(
     y: baselines[index] ?? firstBaseline,
     width: Math.max(1, textWidth - (typeof line !== 'string' && line.paragraphStart ? paragraphLayout(line, next)?.firstIndentPt ?? 0 : paragraphLayout(line, next)?.restIndentPt ?? 0)),
   }));
-  const positions = preservedTextLinePositions(block, next, wrappedLines, fullPositions, current);
+  const envelopeChangedAt = next.paragraphs && sources.length === wrappedLines.length ? wrappedLines.findIndex((line, index) => {
+    const old = sources[index];
+    return old && Math.abs(Math.max(old.style.fontSizePt, ...old.pieces.map(piece => piece.style.fontSizePt)) - Math.max(next.style.fontSizePt, wrappedLineFontSize(line, next.style))) > 1e-8;
+  }) : -1;
+  const positions = envelopeChangedAt >= 0 ? reflowedTextLinePositions(block, next, wrappedLines, fullPositions, envelopeChangedAt, current)
+    : preservedTextLinePositions(block, next, wrappedLines, fullPositions, current);
   const paragraphHeight = next.paragraphs ? Math.max(next.height, ...positions.map((position, index) => (
     firstBaseline - position.y + wrappedLineFontSize(wrappedLines[index]!, next.style)
   ))) : next.height;
@@ -464,14 +484,25 @@ export function buildTextBlockEdits(
     const sourceIndex = sources.length === wrappedLines.length ? index : sources.findIndex(source => source?.text === text);
     const source = sources[sourceIndex];
     const placed = current[sourceIndex];
-    const composition = composeTextLine(source, text, next.style, measure, {
+    const fixedPosition = placed && position.y === placed.y + next.dy
+      || typeof line !== 'string' && line.sourcePosition && position.y === line.sourcePosition.y + next.dy;
+    let composition = composeTextLine(source, text, next.style, measure, {
       dx: next.dx,
       // A successfully matched local edit on an existing line keeps that
       // line's raw baseline. Re-subtracting the pitch introduces a final-bit
       // drift even when the line count and font size did not change.
-      dy: sources.length === wrappedLines.length ? next.dy : position.y - (placed?.y ?? position.y),
+      dy: envelopeChangedAt < 0 && (sources.length === wrappedLines.length || fixedPosition) ? next.dy
+        : position.y - (source?.pieces[0]?.baselineY ?? placed?.y ?? position.y),
       spans,
     });
+    if (typeof line !== 'string' && line.compositionFallback) composition = { reason: line.compositionFallback };
+    if (align === 'justify' && typeof line !== 'string' && !line.sourcePosition && next.measurePiece) {
+      const following = wrappedLines[index + 1];
+      const last = !following || typeof following === 'string' || following.paragraphStart === true;
+      composition = { composition: justifiedComposition(line, next.style, position.x, position.y, position.width, last,
+        (text, span) => measure(text, effectiveTextSpanStyle(next.style, span))) };
+    }
+    if ('composition' in composition && compositionWidth(composition.composition) > position.width + 0.5) composition = { reason: 'piece-layout-exceeds-column' };
     return {
       id: id(),
       kind: 'text',
@@ -493,7 +524,7 @@ export function buildTextBlockEdits(
       ...(index === 0 && next.paragraphs ? { boxParagraphs: next.paragraphs } : {}),
       ...(next.boxLeftPt !== undefined ? { boxLeftPt: next.boxLeftPt } : {}),
       ...(next.boxWidthPt !== undefined ? { boxWidthPt: next.boxWidthPt } : {}),
-      ...(usesAlignmentColumn ? {
+      ...(usesAlignmentColumn || align === 'justify' ? {
         align,
         alignLeftPt: position.x,
         alignWidthPt: position.width,

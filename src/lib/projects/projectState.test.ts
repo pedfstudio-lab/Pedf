@@ -130,6 +130,20 @@ describe('project state serialization', () => {
     expect(copy.composition!.pieces[0]!.source!.matrix).not.toBe(edit.composition!.pieces[0]!.source!.matrix);
     expect(deserializeProject(serializeProject(history(allEditKinds()), 0, 1), 3).ok).toBe(true);
   });
+  it('round-trips justified alignment, positioned words and the source squeeze limit', () => {
+    const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), align: 'justify', boxText: 'Saved text',
+      boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0, minimumWordGapEm: 0.15 }],
+      composition: { version: 1, text: 'Saved text', style, alignment: 'justify', alignmentLeftPt: 30, alignmentWidthPt: 120,
+        pieces: [{ text: 'Saved', x: 30, baselineY: 280, widthPt: 40, style }, { text: 'text', x: 110, baselineY: 280, widthPt: 40, style }] } };
+    const restored = deserializeProject(serializeProject(history([edit]), 0, 1), 3);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.value.history.present.edits[0]).toEqual(edit);
+    for (const invalid of [-1, NaN, Infinity, 'tight']) {
+      const broken = { ...edit, boxParagraphs: [{ ...edit.boxParagraphs![0]!, minimumWordGapEm: invalid as number }] };
+      expect(deserializeProject(serializeProject(history([broken]), 0, 1), 3).ok).toBe(false);
+    }
+  });
   it('round-trips and deep-clones paragraph spacing, retaining older saves without it', () => {
     const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), boxText: 'First\nSecond',
       boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }, { gapBeforePt: 3, firstIndentPt: 28.8, restIndentPt: 0 }] };

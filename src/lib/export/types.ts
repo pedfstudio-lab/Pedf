@@ -52,7 +52,7 @@ export interface TextSpan {
   readonly colorKnown?: boolean;
 }
 
-export type TextAlignment = 'left' | 'center' | 'right';
+export type TextAlignment = 'left' | 'center' | 'right' | 'justify';
 
 export type EditKind = 'text' | 'cover' | 'image' | 'line';
 
@@ -68,6 +68,8 @@ export interface TextParagraphLayout {
   readonly gapBeforePt: number;
   readonly firstIndentPt: number;
   readonly restIndentPt: number;
+  /** Source-measured minimum word gap relative to the source font size. */
+  readonly minimumWordGapEm?: number;
 }
 
 export interface PositionedTextPiece {

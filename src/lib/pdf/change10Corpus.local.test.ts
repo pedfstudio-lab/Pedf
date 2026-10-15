@@ -35,7 +35,9 @@ describe.runIf(enabled)('Change 10 live corpus', () => {
           expect([...newPairs.keys()].filter(pair => !oldPairs.has(pair)), `${file} p${pageIndex + 1}: no new joins`).toEqual([]);
           for (const [pair, [upper, lower]] of oldPairs) if (!newPairs.has(pair)) {
             const owner = before.find(block => block.lines.includes(upper))!;
-            expect(owner.align).toBe('left'); expect(inRuledColumn(owner, ruleLines)).toBe(false);
+            // Change 4 annotates the completed partition; justify retains the
+            // exact same paragraph-gap splitting rules and frozen digest.
+            expect(['left', 'justify']).toContain(owner.align); expect(inRuledColumn(owner, ruleLines)).toBe(false);
             expect(biggerParagraphGap(upper, lower, pitches), `${file} p${pageIndex + 1}: measured pitch`).toBe(true);
             splits.push({ file, page: pageIndex + 1, upper: upper.text, lower: lower.text,
               gap: upper.baselineY - lower.baselineY, pitch: Math.max(pitches.get(upper) ?? 0, pitches.get(lower) ?? 0),
@@ -44,12 +46,12 @@ describe.runIf(enabled)('Change 10 live corpus', () => {
           const items = (blocks: readonly TextBlock[]) => blocks.map(block => detectBulletListFromRegions(block, regions.imageRegions, regions.shapeMarkerRegions)).filter(list => list !== null).map(list => list.items.map(item => item.text));
           const oldItems = items(before); lists += oldItems.length;
           expect(items(after), `${file} p${pageIndex + 1}: all list items`).toEqual(oldItems);
-          for (const block of before.filter(block => block.align !== 'left' || inRuledColumn(block, ruleLines))) {
+          for (const block of before.filter(block => block.align === 'center' || block.align === 'right' || inRuledColumn(block, ruleLines))) {
             if (inRuledColumn(block, ruleLines)) cells += 1;
             expect(after.some(next => next.text === block.text && JSON.stringify(next.rect) === JSON.stringify(block.rect)), `${file}: protected box`).toBe(true);
           }
           expect(after.flatMap(block => block.lines).map(key).sort(), `${file}: no text/geometry loss`).toEqual(before.flatMap(block => block.lines).map(key).sort());
-          for (const block of after.filter(block => block.align === 'left')) {
+          for (const block of after.filter(block => block.align === 'left' || block.align === 'justify')) {
             const seed = sourceParagraphs(block);
             const source = sourceSpansForTextBlock(block, block.text, true);
             if (source) expect(sourceSpansForTextBlock(block, seed.text, true)?.map(span => span.text).join(''), `${file}: rich paragraph seed`).toBe(seed.text);

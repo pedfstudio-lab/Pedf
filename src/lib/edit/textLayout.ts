@@ -15,6 +15,8 @@ export interface WrappedTextLine {
   readonly paragraphIndex?: number;
   readonly paragraphStart?: boolean;
   readonly sourcePosition?: { readonly x: number; readonly y: number; readonly width: number };
+  readonly sourceComposition?: TextComposition;
+  readonly compositionFallback?: string;
 }
 
 export interface FittedTextLayout {

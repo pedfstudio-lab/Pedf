@@ -13,7 +13,7 @@ import { exportPdf } from '@/lib/export/exportPdf';
 
 interface RawSpacing {normalSpacePt:number|null;charSpacingPt:number;spaces:{left:string;right:string;gapPt:number;normalSpacePt:number|null;excessPt:number|null}[];unmeasured:number}
 function runKey(font:string,text:string,x:number,y:number) {return JSON.stringify([font,text,x.toFixed(4),y.toFixed(4)]);}
-async function rawSpacing(page:PDFPageProxy):Promise<Map<string,RawSpacing>> {
+export async function rawSpacing(page:PDFPageProxy):Promise<Map<string,RawSpacing>> {
   const [content,operators] = await Promise.all([page.getTextContent(),page.getOperatorList()]);
   let state = {font:'',size:1,tc:0,tw:0}; const stack:typeof state[] = [];
   const glyphs:{char:string;font:string;beforeEm:number;tcEm:number;widthEm:number;valid:boolean}[] = [];
@@ -77,7 +77,7 @@ async function rawSpacing(page:PDFPageProxy):Promise<Map<string,RawSpacing>> {
   }
   return result;
 }
-function wordGaps(line: TextLine,raw:ReadonlyMap<string,RawSpacing>) {
+export function wordGaps(line: TextLine,raw:ReadonlyMap<string,RawSpacing>) {
   const ordered = [...line.runs].sort((a,b) => a.rect.x - b.rect.x);
   const measured: {left:string;right:string;gapPt:number;normalSpacePt:number|null;excessPt:number|null}[] = [];
   let internalSpaces = 0,unmeasuredInternalSpaces=0,charSpacingPt=0;

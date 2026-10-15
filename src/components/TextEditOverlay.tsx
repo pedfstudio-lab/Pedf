@@ -7,7 +7,7 @@ import type { PdfRect, Rgb, TextEdit, TextStyle, PositionedTextPiece } from '@/l
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
-import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
+import type { FontMetrics, NextTextEdit } from '@/lib/edit/buildTextEdits';
 import {
   calculateBulletRoomPt,
   calculateInitialEditorWidth,
@@ -49,6 +49,12 @@ import {
 import { wrapSelectionWithStyle } from '@/lib/edit/styleSelection';
 import { FontSizeCombobox } from './FontSizeCombobox';
 import { composeTextLine, compositionWidth, sourceLineComposition } from '@/lib/edit/lineComposition';
+import { flowSelectedParagraphs, paragraphPresentation, recalibrateParagraphRows, refreshParagraphPresentation, snapshotParagraphs } from '@/lib/edit/paragraphPresentation';
+import { wrapTextParagraphs } from '@/lib/edit/paragraphLayout';
+import { minimumWordSpacing } from '@/lib/edit/justifiedLayout';
+import { hasLetterSpacedHeading } from '@/lib/edit/letterSpacedHeading';
+import { effectiveTextSpans } from '@/lib/edit/richText';
+import { readParagraphLayout } from '@/lib/edit/paragraphDom';
 
 /** Widths are measured at 1 PDF point per CSS pixel, independent of zoom/layout. */
 function measurePieceWithCanvas(text: string, style: TextStyle, source?: PositionedTextPiece): number {
@@ -66,6 +72,17 @@ function measurePieceWithCanvas(text: string, style: TextStyle, source?: Positio
 
 function canvasWidth(text: string, style: TextStyle): number {
   return measurePieceWithCanvas(text, style);
+}
+
+/** Face metrics, not DOM positions: mixed-size CSS line boxes use this face. */
+function measureFontMetrics(style: TextStyle, zoom: number): FontMetrics | undefined {
+  const context = window.document.createElement('canvas').getContext('2d');
+  if (!context) return undefined;
+  const size = style.fontSizePt * zoom;
+  context.font = textStyleToCanvasFont({ ...style, fontSizePt: size });
+  const metrics = context.measureText('M');
+  const ascent = metrics.fontBoundingBoxAscent / size, descent = metrics.fontBoundingBoxDescent / size;
+  return Number.isFinite(ascent) && Number.isFinite(descent) && ascent > 0 && descent >= 0 ? { ascent, descent } : undefined;
 }
 
 const FAMILY_KEYWORD = {
@@ -307,7 +324,7 @@ function savedEditingRect(
   alignWidthPt: number,
 ): PdfRect {
   const saved = savedTextBoxRect(texts);
-  if (align === 'left') return saved;
+  if (align === 'left' || align === 'justify') return saved;
   const storesOnlyAlignmentRegion = Math.abs(saved.x - alignLeftPt) <= 0.01
     && Math.abs(saved.w - alignWidthPt) <= 0.01
     && alignWidthPt >= block.rect.w - 0.01;
@@ -386,12 +403,12 @@ export function TextEditOverlay({
   const markerList = !bulletMode
     && block.lines.some((line) => startsWithBulletMarker(line.text));
   const measuredHeading = !bulletMode && !markerList
-    && block.lines.some(line => line.runs.some(run => /^(?:\S\s+){2,}\S$/u.test(run.text.trim())))
+    && hasLetterSpacedHeading(block)
     && (!existing?.length || existing.every(edit => edit.composition));
   const initialText = existing?.[0]?.boxText ??
     (bulletMode ? formatBulletEditorText(bulletMode.items, bulletMode.symbols) : undefined) ??
     existing?.map((edit) => edit.text).join('\n') ??
-    (measuredHeading ? block.text : (block.align ?? 'left') === 'left'
+    (measuredHeading ? block.text : ((block.align ?? 'left') === 'left' || block.align === 'justify')
       ? (markerList ? listSeedText(block) : paragraphSeedText(block))
       : block.text);
   // Re-opening a bullet list must seed its font from a body line, not the "•" marker
@@ -405,10 +422,10 @@ export function TextEditOverlay({
   const initialSpans = existing?.[0]?.boxSpans
     ?? (existing?.length === 1 ? existing[0]?.spans : undefined)
     ?? sourceSpansForTextBlock(block, initialText);
-  const initialAlign = bulletMode ? 'left' : (existing?.[0]?.align ?? block.align ?? 'left');
+  const initialAlign = bulletMode ? 'left' : existing?.length ? existing[0]?.align ?? 'left' : block.align ?? 'left';
   const initialAlignLeftPt = existing?.[0]?.alignLeftPt ?? block.alignLeftPt ?? block.rect.x;
   const initialAlignWidthPt = existing?.[0]?.alignWidthPt ?? block.alignWidthPt ?? block.rect.w;
-  const usesAlignmentColumn = initialAlign !== 'left';
+  const usesAlignmentColumn = initialAlign === 'center' || initialAlign === 'right';
   const paragraphMode = !bulletMode && !markerList && !measuredHeading && !usesAlignmentColumn
     && (existing?.length ? existing[0]?.boxParagraphs !== undefined : block.lines.length > 0);
   const initialParagraphs = paragraphMode ? existing?.[0]?.boxParagraphs ?? sourceParagraphs(block).layouts : undefined;
@@ -444,6 +461,10 @@ export function TextEditOverlay({
       : { ...piece, advanceScale: piece.widthPt / natural } : piece;
   }) } : undefined));
   const initialComposition = sourceCompositionsRef.current[0];
+  const [paragraphPresentationModel] = useState(() => paragraphMode && block.lines.length > 1
+    ? paragraphPresentation(block, initialText, initialStyle, zoom, measureTextWidth ?? measurePieceWithCanvas, existing) : undefined);
+  const paragraphPresentationRef = useRef(paragraphPresentationModel);
+  const paragraphSnapshotsRef = useRef<ReadonlyMap<string, string>>(new Map());
   const compositionRef = useRef(initialComposition);
   const [compositionPreviewActive, setCompositionPreviewActive] = useState(Boolean(initialComposition));
   const [initialScaleX] = useState(() => {
@@ -452,6 +473,7 @@ export function TextEditOverlay({
     return piece && natural > 0 ? piece.widthPt / natural : 1;
   });
   const initialHtmlRef = useRef((() => {
+    if (paragraphPresentationRef.current) return paragraphPresentationRef.current.html;
     if (!initialComposition || sourceCompositionsRef.current.some(composition => !composition)
       || (initialCompositions.length === 1 && initialComposition.pieces.length < 2)) return richTextToHtml(initialText, initialStyle, initialSpans, zoom, initialParagraphs);
     return sourceCompositionsRef.current.map((composition, lineIndex) => {
@@ -494,6 +516,9 @@ export function TextEditOverlay({
       ? Math.max(MIN_BOX_WIDTH, boxWidthPt)
       : Math.max(measuredHeadingWidth, calculateInitialEditorWidth({
         blockWidthPt: naturalWidth,
+        ...(paragraphMode && (block.lines.length > 1 || (existing?.length ?? 0) > 1) ? {
+          paragraphColumnWidthPt: existing?.[0]?.boxWidthPt ?? existing?.[0]?.rect.w ?? block.rect.w,
+        } : {}),
         blockXPt: block.rect.x,
         existingWidthPt: existing?.[0]?.rect.w,
         fontSizePt: initialStyle.fontSizePt,
@@ -614,15 +639,14 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     if (!editable) return;
     const serialized = serializeRichText(editable, style, zoom);
-    const sourceMetrics = existing?.[0]?.composition?.pieces[0]?.source ?? block.lines[0]?.runs[0]?.metrics;
-    const fontMetrics = paragraphMode && sourceMetrics?.ascent !== undefined && sourceMetrics.descent !== undefined
-      ? { ascent: sourceMetrics.ascent, descent: Math.abs(sourceMetrics.descent) } : undefined;
+    const fontMetrics = paragraphMode ? measureFontMetrics(style, zoom) : undefined;
     const next: NextTextEdit = {
       text: serialized.text,
       style: serialized.style,
       ...(serialized.spans ? { spans: serialized.spans } : {}),
       ...(paragraphMode ? { paragraphs: serialized.paragraphs } : {}),
       ...(fontMetrics ? { fontMetrics } : {}),
+      ...(paragraphPresentationRef.current ? { sourceParagraphLines: paragraphPresentationRef.current.lines } : {}),
       ...(!bulletMode && !markerList && block.lines.length ? {
         ...(compositionRef.current ? { sourceCompositions: sourceCompositionsRef.current }
           : existing?.length ? { sourceCompositions: existing.map(edit => edit.composition) } : {}),
@@ -640,6 +664,7 @@ export function TextEditOverlay({
         alignLeftPt: initialAlignLeftPt,
         alignWidthPt: initialAlignWidthPt,
       } : {}),
+      ...(initialAlign === 'justify' || (existing?.length && block.align === 'justify') ? { align: initialAlign } : {}),
     };
     if (bulletOverflow) return;
     const presented = initialPresentedValueRef.current;
@@ -657,6 +682,7 @@ export function TextEditOverlay({
           alignLeftPt: initialAlignLeftPt,
           alignWidthPt: initialAlignWidthPt,
         } : {}),
+        ...(initialAlign === 'justify' || (existing?.length && block.align === 'justify') ? { align: initialAlign } : {}),
       };
     const sessionUnchanged = sameTextEditSession(initial, next);
     const appearanceUnchanged = sameAppearanceMetadata(initial, next);
@@ -832,14 +858,42 @@ export function TextEditOverlay({
       content.style.letterSpacing = `${(piece.advanceTrackingPt ?? 0) * zoom}px`;
     });
   }, [boxLeftPt, initialAlign, initialParagraphs, initialStyle, measureTextWidth, sourceXCorrectionPt, style, width, zoom]);
-  const handleInput = useCallback(() => { normalizeParagraphs(); updatePiecePresentation(); resizeToContent(); }, [normalizeParagraphs, updatePiecePresentation, resizeToContent]);
+  const updateParagraphPresentation = useCallback(() => {
+    const editable = editableRef.current;
+    if (editable && !composingRef.current) refreshParagraphPresentation(editable, paragraphSnapshotsRef.current, style, zoom);
+    if (!editable || initialAlign !== 'justify' || composingRef.current) return;
+    const measure = (text: string, span: import('@/lib/export/types').TextSpan) => (measureTextWidth ?? measurePieceWithCanvas)(text, effectiveTextSpanStyle(style, span));
+    editable.querySelectorAll<HTMLElement>('[data-pdf-paragraph]').forEach(paragraph => {
+      paragraph.style.textAlign = 'justify'; paragraph.style.textAlignLast = 'left';
+      delete paragraph.dataset.pdfJustifyTail;
+      paragraph.style.wordSpacing = 'normal';
+      if (paragraph.dataset.pdfFlowing !== 'true') return;
+      const value = serializeRichText(paragraph, style, zoom), layout = readParagraphLayout(paragraph);
+      const spans = effectiveTextSpans(value.text, value.style, value.spans);
+      const spacing = minimumWordSpacing(spans, value.style, measure, layout.minimumWordGapEm);
+      paragraph.style.wordSpacing = `${spacing * zoom}px`;
+      paragraph.style.setProperty('--pdf-word-space', `${spacing * zoom}px`);
+      const lines = wrapTextParagraphs({ text: value.text, style: value.style, spans: value.spans, paragraphs: [layout],
+        width, height: 0, dx: 0, dy: 0, align: 'justify' }, measure);
+      const last = lines.at(-1), natural = last ? effectiveTextSpans(last.text, value.style, last.spans).reduce((sum, span) => sum + measure(span.text, span), 0) : 0;
+      const tail = Math.max(0, width - (lines.length === 1 ? layout.firstIndentPt : layout.restIndentPt) - natural);
+      // A generated WORD JOINER keeps the invisible tail with the last word.
+      // Last-line justification then restores NORMAL visible gaps, not a full
+      // stretched last line. Nothing is added to the editable/serialized text.
+      paragraph.dataset.pdfJustifyTail = spacing < 0 ? 'true' : 'false';
+      paragraph.style.setProperty('--pdf-justify-tail-width', `${tail * zoom}px`);
+      if (spacing < 0) paragraph.style.textAlignLast = 'justify';
+    });
+  }, [initialAlign, measureTextWidth, style, width, zoom]);
+  const handleInput = useCallback(() => { normalizeParagraphs(); updateParagraphPresentation(); updatePiecePresentation(); resizeToContent(); }, [normalizeParagraphs, updateParagraphPresentation, updatePiecePresentation, resizeToContent]);
 
   useLayoutEffect(() => {
     const editable = editableRef.current;
     if (!editable) return;
     if (!initializedRef.current) {
       editable.innerHTML = initialHtmlRef.current;
-      if (compositionRef.current && sourceCompositionsRef.current.length > 1) initialPresentedValueRef.current = serializeRichText(editable, initialStyle, zoom);
+      if (paragraphPresentationRef.current || (compositionRef.current && sourceCompositionsRef.current.length > 1)) initialPresentedValueRef.current = serializeRichText(editable, initialStyle, zoom);
+      paragraphSnapshotsRef.current = snapshotParagraphs(editable, initialStyle, zoom);
       initializedRef.current = true;
       editable.focus({ preventScroll: true });
       placeCaretAtEnd(editable);
@@ -852,10 +906,15 @@ export function TextEditOverlay({
   }, [measureBaseline, style, lineHeight, firstLineOffsetPx, zoom]);
 
   useLayoutEffect(() => { updatePiecePresentation(); }, [updatePiecePresentation]);
+  useLayoutEffect(() => { updateParagraphPresentation(); }, [updateParagraphPresentation]);
 
   useEffect(() => {
     let disposed = false;
-    const measure = () => { if (!disposed) measureBaseline(); };
+    const measure = () => {
+      if (disposed) return;
+      if (editableRef.current && !composingRef.current) recalibrateParagraphRows(editableRef.current, style, zoom, measureTextWidth ?? measurePieceWithCanvas);
+      measureBaseline();
+    };
     const fonts = document.fonts;
     void fonts?.ready.then(measure);
     fonts?.addEventListener('loadingdone', measure);
@@ -869,7 +928,7 @@ export function TextEditOverlay({
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [measureBaseline]);
+  }, [measureBaseline, measureTextWidth, style, zoom]);
 
   useEffect(() => {
     const editable = editableRef.current;
@@ -962,6 +1021,7 @@ export function TextEditOverlay({
       return;
     }
     window.document.execCommand(command, false);
+    updateParagraphPresentation();
     measureBaseline();
     refreshSelectionStyle();
     resizeToContent();
@@ -1003,6 +1063,7 @@ export function TextEditOverlay({
     selectionRangeRef.current = selected.cloneRange();
     editable.focus({ preventScroll: true });
     refreshSelectionStyle();
+    updateParagraphPresentation();
     measureBaseline();
     resizeToContent();
   };
@@ -1031,6 +1092,7 @@ export function TextEditOverlay({
     );
     selectionRangeRef.current = selected.cloneRange();
     refreshSelectionStyle();
+    updateParagraphPresentation();
     measureBaseline();
     resizeToContent();
   };
@@ -1058,12 +1120,15 @@ export function TextEditOverlay({
     setSelectionStyle((value) => ({ ...value, color, colorKnown: true }));
     setColorPanelOpen(false);
     refreshSelectionStyle();
+    updateParagraphPresentation();
+    resizeToContent();
   };
 
   const pastePlainText = (event: ReactClipboardEvent<HTMLDivElement>) => {
     const editable = editableRef.current;
     if (!editable) return;
     event.preventDefault();
+    flowSelectedParagraphs(editable);
     if (paragraphMode) insertParagraphText(editable, event.clipboardData.getData('text/plain'));
     else insertPlainText(editable, event.clipboardData.getData('text/plain'));
     handleInput();
@@ -1085,6 +1150,7 @@ export function TextEditOverlay({
         backgroundColor: previewMode === 'legacy' ? backgroundColor : 'transparent',
       }}
     >
+      <style>{'[data-pdf-justify-tail="true"]::after{content:"\\2060";font-size:0;letter-spacing:0;word-spacing:0;padding-right:var(--pdf-justify-tail-width,0px)}'}</style>
       <div
         ref={toolbarRef}
         className="absolute z-20 flex flex-wrap items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
@@ -1210,8 +1276,11 @@ export function TextEditOverlay({
         suppressContentEditableWarning
         spellCheck={false}
         data-pdf-paragraph-editor={paragraphMode ? 'true' : undefined}
+        onBeforeInput={(event) => {
+          if (!(event.nativeEvent as InputEvent).inputType?.startsWith('history') && editableRef.current) flowSelectedParagraphs(editableRef.current);
+        }}
         onInput={handleInput}
-        onCompositionStart={()=>{composingRef.current=true;}}
+        onCompositionStart={()=>{if (editableRef.current) flowSelectedParagraphs(editableRef.current);composingRef.current=true;}}
         onCompositionUpdate={resizeToContent}
         onCompositionEnd={()=>{composingRef.current=false;handleInput();}}
         onPaste={pastePlainText}
@@ -1227,6 +1296,7 @@ export function TextEditOverlay({
             event.preventDefault();
             const editable = editableRef.current;
             if (editable && paragraphMode) {
+              flowSelectedParagraphs(editable);
               insertParagraphBreak(editable); handleInput(); return;
             }
             if (editable) {

@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { describe, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
 import { startsWithBulletMarker } from '@/lib/pdf/textUnits';
+import { calculateInitialEditorWidth } from './textEditSession';
 
 // Probe: how many multi-line, left-aligned boxes have a line the PDF squeezed, i.e. whose
 // plain glyph advances (normal spaces, no TJ/Tc/Tw) are wider than the box itself. Such a
@@ -14,7 +15,7 @@ describe.runIf(process.env.SQUEEZE_SCOPE === '1')('squeezed lines scope', () => 
   it('corpus', { timeout: 3_600_000 }, async () => {
     const frozen = JSON.parse(await readFile('tmp/5d/source-text-before.json', 'utf8')) as Record<string, { pageIndex: number }[]>;
     const files = [...Object.keys(frozen), "tmp/paragraphs/Bhutan December'26.pdf", 'tmp/paragraphs/Corporate-Governance-edited (25).pdf'];
-    let boxes = 0, squeezedBoxes = 0, squeezedLines = 0, measuredLines = 0;
+    let boxes = 0, squeezedBoxes = 0, squeezedLines = 0, measuredLines = 0, columnFailures = 0;
     const byFile: Record<string, { boxes: number; squeezed: number; worstPt: number; example?: string }> = {};
     const buckets = { '0.5-2pt': 0, '2-5pt': 0, '5-10pt': 0, '10pt+': 0 };
     for (const file of files) {
@@ -26,8 +27,11 @@ describe.runIf(process.env.SQUEEZE_SCOPE === '1')('squeezed lines scope', () => 
         const [runs, ruleLines, regions] = await Promise.all([extractTextRuns(page, pageIndex), detectRuleLines(page, pageIndex), detectPageGraphicRegions(page, pageIndex)]);
         const blocks = groupRunsIntoBlocks(runs, { ruleLines, markers: [...regions.imageRegions, ...regions.shapeMarkerRegions] });
         for (const block of blocks) {
-          if (block.lines.length < 2 || (block.align ?? 'left') !== 'left' || block.lines.some((line) => startsWithBulletMarker(line.text))) continue;
+          if (block.lines.length < 2 || ((block.align ?? 'left') !== 'left' && block.align !== 'justify') || block.lines.some((line) => startsWithBulletMarker(line.text))) continue;
           boxes++; entry.boxes++;
+          const column = calculateInitialEditorWidth({ blockWidthPt: block.rect.w, blockXPt: block.rect.x, fontSizePt: block.style.fontSizePt,
+            measuredLineWidthPt: block.rect.w + 100, pageWidthPt: page.view[2]! - page.view[0]!, paragraphColumnWidthPt: block.rect.w });
+          if (column !== block.rect.w) columnFailures++;
           let worst = 0, worstText = '';
           for (const line of block.lines) {
             const glyphs = line.runs.flatMap((run) => run.metrics?.glyphs ?? []);
@@ -50,10 +54,11 @@ describe.runIf(process.env.SQUEEZE_SCOPE === '1')('squeezed lines scope', () => 
       await document.destroy();
     }
     const withSqueeze = Object.entries(byFile).filter(([, value]) => value.squeezed > 0);
-    const summary = { files: Object.keys(byFile).length, filesWithSqueeze: withSqueeze.length, boxes, squeezedBoxes, measuredLines, squeezedLines, buckets,
+    const summary = { files: Object.keys(byFile).length, filesWithSqueeze: withSqueeze.length, boxes, squeezedBoxes, measuredLines, squeezedLines, columnFailures, buckets,
       byFile: Object.fromEntries(withSqueeze.sort((a, b) => b[1].squeezed - a[1].squeezed)) };
     await writeFile('tmp/5d-review/squeezed-scope.json', JSON.stringify(summary, null, 2));
     process.stdout.write(`\nSQUEEZE ${JSON.stringify({ ...summary, byFile: undefined })}\n`);
     for (const [file, value] of withSqueeze) process.stdout.write(`  ${file}: ${value.squeezed}/${value.boxes} boxes, worst ${value.worstPt} pt ${value.example}\n`);
+    expect(squeezedBoxes).toBe(738); expect(withSqueeze).toHaveLength(15); expect(columnFailures).toBe(0);
   });
 });

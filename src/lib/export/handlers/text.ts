@@ -14,7 +14,7 @@ import { positionedComposition } from '@/lib/edit/textLayout';
 
 function alignedTextX(edit: TextEdit, textWidth: number): number {
   const align = edit.align ?? 'left';
-  if (align === 'left') return edit.rect.x;
+  if (align === 'left' || align === 'justify') return edit.rect.x;
   const left = edit.alignLeftPt ?? edit.rect.x;
   const width = edit.alignWidthPt ?? edit.rect.w;
   return align === 'center'

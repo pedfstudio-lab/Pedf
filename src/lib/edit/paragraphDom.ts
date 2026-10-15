@@ -3,7 +3,8 @@ import type { TextParagraphLayout } from '@/lib/export/types';
 export const ZERO_PARAGRAPH: TextParagraphLayout = { gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 };
 export function readParagraphLayout(element: HTMLElement): TextParagraphLayout {
   const number = (key: string) => Math.max(0, Number(element.dataset[key]) || 0);
-  return { gapBeforePt: number('gapBeforePt'), firstIndentPt: number('firstIndentPt'), restIndentPt: number('restIndentPt') };
+  return { gapBeforePt: number('gapBeforePt'), firstIndentPt: number('firstIndentPt'), restIndentPt: number('restIndentPt'),
+    ...(element.dataset.minimumWordGapEm !== undefined ? { minimumWordGapEm: number('minimumWordGapEm') } : {}) };
 }
 export function hasRootParagraphText(root: HTMLElement): boolean {
   return [...root.childNodes].some(node => node.nodeType === 3 ? !!node.textContent
@@ -12,7 +13,8 @@ export function hasRootParagraphText(root: HTMLElement): boolean {
 }
 /** A line break inside a paragraph: same block, so no gap and no first-line indent. */
 export function continuationParagraph(layout: TextParagraphLayout | undefined): TextParagraphLayout {
-  return layout ? { gapBeforePt: 0, firstIndentPt: layout.restIndentPt, restIndentPt: layout.restIndentPt } : ZERO_PARAGRAPH;
+  return layout ? { gapBeforePt: 0, firstIndentPt: layout.restIndentPt, restIndentPt: layout.restIndentPt,
+    ...(layout.minimumWordGapEm !== undefined ? { minimumWordGapEm: layout.minimumWordGapEm } : {}) } : ZERO_PARAGRAPH;
 }
 /** One layout per text line, always: a saved edit whose counts differ cannot be reopened. */
 export function alignParagraphLayouts(text: string, layouts: readonly TextParagraphLayout[]): TextParagraphLayout[] {
@@ -67,6 +69,8 @@ export function normalizeParagraphDom(root: HTMLElement, cache: Map<string, Text
     element.dataset.gapBeforePt = String(current.gapBeforePt);
     element.dataset.firstIndentPt = String(current.firstIndentPt);
     element.dataset.restIndentPt = String(current.restIndentPt);
+    if (current.minimumWordGapEm !== undefined) element.dataset.minimumWordGapEm = String(current.minimumWordGapEm);
+    else delete element.dataset.minimumWordGapEm;
     element.style.marginTop = `${current.gapBeforePt * zoom}px`;
     element.style.paddingLeft = `${current.restIndentPt * zoom}px`;
     element.style.textIndent = `${(current.firstIndentPt - current.restIndentPt) * zoom}px`;

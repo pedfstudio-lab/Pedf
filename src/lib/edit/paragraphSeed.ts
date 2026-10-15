@@ -40,7 +40,7 @@ export function sourceParagraphLineHeight(block: TextBlock): number {
 }
 
 export function sourceParagraphs(block: TextBlock): { text: string; layouts: readonly TextParagraphLayout[]; lines: readonly (readonly TextBlock['lines'][number][])[] } {
-  if (block.lines.length <= 1 || (block.align ?? 'left') !== 'left') return {
+  if (block.lines.length <= 1 || ((block.align ?? 'left') !== 'left' && block.align !== 'justify')) return {
     text: block.text, layouts: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }], lines: [block.lines],
   };
   const lines = block.lines.map((line) => normalizedLine(line.text));
@@ -70,6 +70,7 @@ export function sourceParagraphs(block: TextBlock): { text: string; layouts: rea
     const gap = previous ? previous.baselineY - first.baselineY - normal : 0;
     const rest = group.slice(1).map(line => line.rect.x - block.rect.x).sort((a, b) => a - b);
     return { gapBeforePt: gap > 0.5 ? gap : 0,
+      ...(block.paragraphMinimumWordGapsEm?.[index] !== undefined ? { minimumWordGapEm: block.paragraphMinimumWordGapsEm[index] } : {}),
       firstIndentPt: Math.max(0, first.rect.x - block.rect.x),
       restIndentPt: Math.max(0, rest.length ? rest[Math.floor(rest.length / 2)]! : first.rect.x - block.rect.x) };
   }) };

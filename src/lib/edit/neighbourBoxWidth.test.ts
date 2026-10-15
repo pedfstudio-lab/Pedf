@@ -102,8 +102,9 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
           ]);
           const blocks = groupRunsIntoBlocks(runs, { ruleLines });
           const priorBlocks = groupRunsIntoBlocks(runs, { ruleLines, preserveParagraphGaps: true });
-          const priorNonLeft = priorBlocks.filter((block) => block.align !== 'left');
-          const currentNonLeft = blocks.filter((block) => block.align !== 'left');
+          // Justify is a paragraph alignment, not a centred/right anchor region.
+          const priorNonLeft = priorBlocks.filter((block) => block.align === 'center' || block.align === 'right');
+          const currentNonLeft = blocks.filter((block) => block.align === 'center' || block.align === 'right');
           if (priorNonLeft.length !== currentNonLeft.length) {
             process.stdout.write(`STEP5C.2 NEIGHBOUR DELTA ${file} p${expectedPage.pageIndex + 1}: ${priorNonLeft.length} -> ${currentNonLeft.length}\n`);
             for (const old of priorNonLeft.filter((old) => !blocks.some((block) => block.text === old.text))) {
@@ -115,7 +116,7 @@ describe.skipIf(!reachEnabled)('Task 74 Revision 2 neighbour reach', () => {
           }
           for (const candidate of blocks) {
             const align = candidate.align ?? 'left';
-            if (align === 'left') continue;
+            if (align === 'left' || align === 'justify') continue;
             nonLeft += 1;
             const input = {
               pageIndex: candidate.pageIndex,

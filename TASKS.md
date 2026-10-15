@@ -14213,7 +14213,21 @@ unchanged, and the user's checks pass. Do not commit or merge without the user's
 
 ---
 
-#### Task 74 — Step 5d  🔲 TODO → branch `text-position` **from `main`** (Step 5c.2 is merged: `4deeeb9`; Tasks 76/77 too: `97e7bc4`) — the position, the spacing and the baseline are ours, not the browser's; justified paragraphs stay justified   *(Large · ~1 week)*
+#### Task 74 — Step 5d  🟡 IN PROGRESS — Changes 1–3 ✅ committed on `text-position` (`6d342d2`, not merged); Change 5 and review fixes A–B implemented, uncommitted; Change 4's 314-box list approved and implementation in progress, Corporate 24-line acceptance failing → branch `text-position` **from `main`** (Step 5c.2 is merged: `4deeeb9`; Tasks 76/77 too: `97e7bc4`) — the position, the spacing and the baseline are ours, not the browser's; justified paragraphs stay justified   *(Large · ~1 week)*
+
+> **Next run for Codex (2026-10-13) — in this order, on `text-position`:**
+> 1. **Measure first.** Re-run the justified-paragraph check with the **revised** rule (Change 4 point 1) and publish
+>    the list: accepted, rejected and near misses, each with file, page and text. Ladakh p2's paragraphs must be
+>    accepted and two-line labels such as `June (Including` / `GST)` rejected. In the same report, confirm Change 5's
+>    squeezed-line count (738 boxes / 15 files) and its method.
+> 2. **Build Change 5** and **review fixes A and B** (below Change 5).
+> 3. **Stop before Change 4.** The user reviews and approves the list from step 1; only then build Change 4.
+> 4. Then the checks, the full suite with every real-PDF switch, and a report. **Do not commit or merge.**
+>
+> *Note (2026-10-12):* "This saved file can't be opened" appeared once while testing Changes 1–3; the saved files
+> open again with the dev server running. The likely cause is that the dev server had stopped (the PDF worker could
+> not load — the same failure Change 0 recorded during an export), not the saved data. If it returns with the server
+> running, record which files fail and why `deserializeProject` or `loadDocument` refused them.
 
 *Steps 5a to 5c make editing look right. This step makes it land right. Without it they will look much better and
 occasional movement and spacing differences will remain, because the DOM — not our model — still decides where the
@@ -14427,6 +14441,62 @@ and the method (lines whose measured ratio exceeds 1.2 were excluded as measurem
 5. *Fallback.* If a paragraph's lines cannot be shown from their pieces (no source metrics, unsupported matrix, Indic
    text), it opens as today but at the column width, and the reason is recorded.
 
+**Review fixes for Changes 1–3** *(found reading the code, 2026-10-12, after `6d342d2`; neither has been seen
+happening yet. Build with Changes 4–5 — same code.)*
+
+*Fix A — a changed paragraph line must fit its column.*
+- *What can happen:* changing a word redraws that piece and the pieces after it on the line, at widths estimated
+  from the PDF's own letters. The decision whether the line still fits (and so whether a word moves down) is made
+  with the editor's look-alike letters. If those are narrower than the PDF's, the editor keeps the line, but the
+  saved line is longer and ends past the right edge: `…shared golden sunsets, long|` in the editor,
+  `…shared golden sunsets, long  |→` after Done.
+- *Why:* `buildTextBlockEdits` checks `compositionWidth(…) <= column` only for a **single-line** box
+  (`sources.length === 1`); a composed line inside a multi-line box has no such check.
+- *Fix:* apply the same check to every composed line. If a changed line would end more than 0.5 pt past its column,
+  do not compose it: that paragraph re-flows the normal way (a word moves to the next line), with the reason
+  recorded (`piece-layout-exceeds-column`).
+- *Check:* a unit test where the editor measure is narrower than the piece estimate — the line re-flows instead of
+  overrunning; across the corpus sweep, no committed line ends more than 0.5 pt past its column.
+
+*Fix B — Done spaces mixed-size paragraphs as the editor shows them.*
+- *What can happen:* a box with different sizes, e.g. "(i) Transparency" made 14 pt while the rest stays 10 pt
+  (Corporate p11). After Done, the lines after the bigger paragraph can land about 1 pt higher or lower than in the
+  editor. A box with one size is not affected — the font's heights cancel out.
+- *Why:* the CSS line-box model on Done (`modelLineStep`) needs the ascent and descent of the face **the editor
+  displays**. Changes 1–3 replaced the editor face's measured ascent/descent (`measureFontMetrics`, canvas
+  `fontBoundingBoxAscent/Descent`) with the **PDF font's** (`sourceMetrics.ascent/descent`). When the two faces
+  differ, the editor and Done compute different steps — a small return of the 5c.2 "size across paragraphs" jump.
+- *Fix:* for this calculation use the displayed face's ascent and descent again. It is a font measurement, not a
+  position read from the DOM layout, so 5d's rule ("Done never consults the DOM for a position") still holds. If the
+  editor displays the PDF's own embedded face, the two agree anyway.
+- *Check:* Corporate p11 → make "(i) Transparency" 14 pt → Done → every line within **0.5 px** of where the editor
+  showed it, at 100% and 200%; same-size boxes unchanged.
+
+**Change 5 / A–B progress — 2026-10-13 (Codex, uncommitted).** Followed the ordered run at the top: published the
+revised survey before production edits (`TASK74_5D_JUSTIFICATION_REVIEW.md`: 314 proposed accepted, 785 rejected,
+318 near misses), and independently confirmed 738 squeezed boxes / 15 files. The two named Ladakh p2 cases pass;
+two-line June/GST labels fail. The separate “It’s the kind of place…” paragraph remains a near miss and is explicitly
+listed for review. Implemented paragraph column widths, source-row/per-line spacing presentation, paragraph-local
+flow with unchanged live text nodes, conservative reflow on composed overflow, displayed-face font metrics and
+same-count mixed-size baseline handling. Full required guard run: 1,571 passed, zero failed; scope column calculation
+failures 0 / 2,038; frozen extraction remains 9,315 identical lines. A later font-ready presentation addition passed
+focused checks. Real Corporate/Ladakh exports have zero horizontal column overruns; changing the second nights
+paragraph retains 54 source pieces in the first exactly. **Native browser access was refused by the browser service**,
+so actual 0.5 px/caret/Undo/IME/zoom acceptance is not claimed. Ordinary-space reflow can add a row until Change 4:
+the Corporate intermediate export reaches the next heading, recorded rather than called visually complete.
+Details: `TASK74_5D_CHANGES4_5_REPORT.md`. **Stop before Change 4 for user review/approval. Full 5d is not done; no
+commit or merge.**
+
+**Change 4 progress — 2026-10-14.** The user approved the revised list as measured. Exactly 314 boxes are now
+classified, with zero missing/extra and all 9,315 frozen strings unchanged. Optional `justify` alignment,
+paragraph-local source gap limits, and model-positioned words are implemented on the same branch, uncommitted.
+Native browser access is working: Corporate opens with 24 rows at the column width at 100%/200%; no-op Done is
+pixel-identical and native Undo restores the source. Ladakh's tested typing/Done right edges agree within 0.02 px.
+**Not complete:** Corporate's “ordinary” edit still saves 25 rows and overlaps Competition. Source evidence shows
+within-word glyph-origin adjustments that the changed paragraph's ordinary word measurements do not reproduce;
+the source minimum gap was not loosened. Squeezed typing's CSS last-line helper is a prototype, not full native
+selection/IME/zoom acceptance. Full findings and test results: `TASK74_5D_CHANGE4_REPORT.md`. No commit or merge.
+
 **Checks**
 - *Nothing moves*: Change 0's table, re-run, is **0 pt** for every unchanged case at every zoom; a changed case
   moves only in the direction and amount the edit implies.
@@ -14504,6 +14574,8 @@ line that cannot be composed from its pieces falls back and says so.
    nothing crosses the vertical line, every line breaks where it does on the page, the text is the same size. Change
    a word and type a few more → the paragraph re-flows inside the column → **Done** → still inside it → Export → the
    same.
+8. Corporate Governance page 11 → click the box → select "(i) Transparency" → make it bigger → **Done** → no line
+   below it moves (review Fix B).
 
 **Known limits:** a line the user retypes entirely cannot keep gaps that belonged to text that no longer exists, and
 re-typesets; changing a heading's font size scales its gaps by the size ratio rather than preserving them exactly;
@@ -14513,7 +14585,7 @@ even as that line allows; hyphenation is not added.
 
 **Land:** branch `text-position` from `main`. Commit: `The position, the spacing and the baseline are ours (Task 74,
 Step 5d)`. Merge only after Change 0's table reads 0 pt for every unchanged case, the whole-corpus text comparison
-is identical, the user has reviewed Change 0's justified-paragraph list, and the user's seven checks pass.
+is identical, the user has reviewed Change 0's justified-paragraph list, and the user's eight checks pass.
 
 ---
 

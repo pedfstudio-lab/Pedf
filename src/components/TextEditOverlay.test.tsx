@@ -177,6 +177,15 @@ afterEach(() => {
 });
 
 describe('native input during preview preparation', () => {
+  it('reopens a saved justified paragraph at its own expanded column width', () => {
+    const value = { ...paragraph('one two', 'three four'), align: 'justify' as const };
+    const existing: TextEdit[] = [{ id: 'justified', kind: 'text', pageIndex: 0, z: 1, text: 'one two three four', style,
+      rect: { x: 40, y: 650, w: 350, h: 20 }, align: 'justify', alignLeftPt: 40, alignWidthPt: 350,
+      boxText: 'one two three four', boxLeftPt: 40, boxWidthPt: 350,
+      boxParagraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }] }];
+    renderEditor(value, 1, 0, { existing });
+    expect(screen.getByRole('textbox', { name: 'Editable text' }).parentElement?.style.width).toBe('350px');
+  });
   it.each(['clean', 'legacy'] as const)('preserves the focused DOM and composition when preparation becomes %s', (mode) => {
     const onDone = vi.fn();
     const make = (previewMode: 'preparing' | 'clean' | 'legacy', committing = false) => (
@@ -357,6 +366,25 @@ describe('TextEditOverlay first-line placement', () => {
 });
 
 describe('TextEditOverlay paragraph seed', () => {
+  it.each([1, 2])('uses displayed-face metrics, not source-face heights, at zoom %s', zoom => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue({
+      font: '', measureText(this: { font: string }, text: string) {
+        const size = Number(this.font.match(/([\d.]+)px/)?.[1]) || 20;
+        return { width: text.length * size / 2, fontBoundingBoxAscent: size * 0.7, fontBoundingBoxDescent: size * 0.2 };
+      },
+    } as unknown as CanvasRenderingContext2D);
+    const original = paragraph('First row', 'Second row');
+    const value = { ...original, lines: original.lines.map(line => ({ ...line, runs: line.runs.map(run => ({ ...run,
+      metrics: { matrix: [20, 0, 0, 20, run.rect.x, run.rect.y] as const, x: run.rect.x, baselineY: run.rect.y, widthPt: run.rect.w, ascent: 0.95, descent: -0.25 } })) })) };
+    const onDone = vi.fn(); renderEditor(value, zoom, 0, { onDone });
+    const editor = screen.getByRole('textbox', { name: 'Editable text' });
+    editor.firstChild!.textContent = 'First row! Second row'; fireEvent.input(editor);
+    vi.spyOn(editor, 'getBoundingClientRect').mockImplementation(() => { throw Error('Done consulted a DOM position'); });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]?.[0].fontMetrics).toEqual({ ascent: 0.7, descent: 0.2 });
+    expect(onDone.mock.calls[0]?.[0].width).toBe(value.rect.w);
+  });
+
   it('restores measured heading gaps when an unmatched edit is undone while typing', () => {
     const text = 'N E W Y E A R';
     const runs = [{ text: 'N E W', x: 40, width: 50 }, { text: 'Y E A R', x: 140, width: 70 }].map(piece => ({

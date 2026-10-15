@@ -11,6 +11,9 @@ import type { DrawnMarker } from './textUnits';
 import { biggerParagraphGap, inRuledColumn, pageLinePitches } from './paragraphPitch';
 import { sourceTextMetrics, textStatesForItems } from './textMetrics';
 import type { SourceLineMetrics, SourceTextMetrics } from './textMetrics';
+import { rawSpacing, runKey } from './wordSpacing';
+import type { RawSpacing } from './wordSpacing';
+import { justifiedBlock } from './justification';
 import {
   canJoinTextBlock,
   canJoinTextBulletList,
@@ -34,6 +37,7 @@ export interface TextRun {
   readonly characterWidthsPt?: readonly number[];
   readonly spaceWidthPt?: number;
   readonly metrics?: SourceTextMetrics;
+  readonly wordSpacing?: RawSpacing;
 }
 
 export interface TextLine {
@@ -59,6 +63,7 @@ export interface TextBlock {
   readonly paragraphLineHeightPt?: number;
   readonly style: TextStyle;
   readonly lines: readonly TextLine[];
+  readonly paragraphMinimumWordGapsEm?: readonly (number | undefined)[];
   readonly align?: TextAlignment;
   readonly alignLeftPt?: number;
   readonly alignWidthPt?: number;
@@ -431,9 +436,10 @@ export function groupRunsIntoBlocks(
     }
   }
   const blocks = lineGroups.map((lines) => textBlockFromLines(lines, Boolean(options)));
-  if (!options || options.preserveParagraphGaps || options.preserveParagraphSplits || options.preserveFillerSplits) return blocks;
+  const aligned = (values: TextBlock[]) => values.map(block => justifiedBlock(block, options?.markers ?? []));
+  if (!options || options.preserveParagraphGaps || options.preserveParagraphSplits || options.preserveFillerSplits) return aligned(blocks);
   const pitches = pageLinePitches(pageLines);
-  return blocks.flatMap(block => {
+  return aligned(blocks.flatMap(block => {
     if (block.align !== 'left' || block.lines.some(line => startsWithBulletMarker(line.text) || lineHasDrawnMarker(line, options.markers ?? []))) return [block];
     const groups: TextLine[][] = [[]];
     const cell = inRuledColumn(block, options.ruleLines);
@@ -450,7 +456,7 @@ export function groupRunsIntoBlocks(
       const normal = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
       return normal === undefined ? next : { ...next, paragraphLineHeightPt: normal };
     });
-  });
+  }));
 }
 
 /** Rebuild a partition from the same source lines, without changing any style. */
@@ -707,6 +713,7 @@ export async function extractTextRuns(
   const paintByItem = operatorList ? textPaintForItems(content.items, operatorList) : null;
   const glyphWidths = operatorList ? glyphWidthsByFont(operatorList) : new Map<string, Map<string, number>>();
   const sourceStates = operatorList ? textStatesForItems(content.items, operatorList) : [];
+  const wordSpacing = operatorList ? await rawSpacing(page) : new Map<string, RawSpacing>();
   const runs: TextRun[] = [];
   const itemIndexes: number[] = [];
 
@@ -768,6 +775,7 @@ export async function extractTextRuns(
       text: isWordSymbolBullet ? STANDARD_BULLET : item.str,
       rect,
       metrics: sourceTextMetrics(item, content.styles[fontRef], sourceStates[itemIndex]),
+      wordSpacing: wordSpacing.get(runKey(fontRef, item.str, item.transform[4]!, item.transform[5]!)),
       ...(characterWidthsPt ? { characterWidthsPt } : {}),
       ...(spaceWidthPt !== undefined ? { spaceWidthPt } : {}),
       style: {

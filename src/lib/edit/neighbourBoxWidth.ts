@@ -15,7 +15,7 @@ export function neighbourBoxWidth(
   blocks: readonly TextBlock[],
 ): { readonly left: number; readonly width: number } {
   const { x, y, w, h } = geometry.rect;
-  if (geometry.align === 'left') return { left: x, width: w };
+  if (geometry.align === 'left' || geometry.align === 'justify') return { left: x, width: w };
 
   const regionLeft = geometry.alignLeftPt;
   const regionRight = regionLeft + geometry.alignWidthPt;
