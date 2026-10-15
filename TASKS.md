@@ -14213,9 +14213,45 @@ unchanged, and the user's checks pass. Do not commit or merge without the user's
 
 ---
 
-#### Task 74 — Step 5d  🟡 IN PROGRESS — Changes 1–3 ✅ committed on `text-position` (`6d342d2`, not merged); Change 5 and review fixes A–B implemented, uncommitted; Change 4's 314-box list approved and implementation in progress, Corporate 24-line acceptance failing → branch `text-position` **from `main`** (Step 5c.2 is merged: `4deeeb9`; Tasks 76/77 too: `97e7bc4`) — the position, the spacing and the baseline are ours, not the browser's; justified paragraphs stay justified   *(Large · ~1 week)*
+#### Task 74 — Step 5d  ✅ DONE → merged to `main` and live (`6d342d2` Changes 1–3, `39970ab` Changes 4–5 and fixes, 2026-10-15) — the position, the spacing and the baseline are ours, not the browser's; justified paragraphs stay justified   *(Large · ~1 week)*
 
-> **Next run for Codex (2026-10-13) — in this order, on `text-position`:**
+> **Shipped — 2026-10-15.** Changes 1–5 and review fixes A–B, built by Codex on `text-position`; the user tested
+> every step in Chrome. Checks before the push: full suite **1,549 passed / 0 failed**; with the real-PDF switches
+> (`TASK74_REAL`, `TASK72_REAL`, `TASK66_SWEEP`, `TASK70_TABLES`, `TASK74_PATCH`, `TASK74_PREVIEW`, `TASK76_REAL`)
+> **1,589 passed / 0 failed**; typecheck, lint, build; the committed files type-checked on their own.
+>
+> **Fixed by Claude during review** (in `39970ab`):
+> - *Rows opened double-spaced* (user report, Corporate "1. Value based corporate culture…"): Change 5 put the
+>   space joining two rows between them, and in the editor's pre-wrap text that space was a blank line of its own
+>   (6 rows took 11 lines). The space now ends the earlier row (`paragraphPresentation.ts`); a test guards it.
+> - *Ladakh p2 "And then there are the nights…" opened in the heading editor* and typing stayed inside line 1 (user
+>   report): the spaced-out-heading test fired on one Type3 piece, `h a b` (from "wit|h a b|unch"). A line now counts
+>   only when more than half of its letters are in `N E W`-style pieces (`letterSpacedHeading.ts` + test). Across
+>   the 47 test files the old rule caught Ladakh p2 (both copies) and Bhutan; the new rule catches only Bhutan's
+>   heading.
+>
+> **Known and accepted for later** (user's decision, 2026-10-15):
+> 1. *Untouched lines of an edited justified paragraph are redrawn in the look-alike face* (Ladakh: 0 of 177
+>    original pieces kept after an edit at the end). Their position and straight edge are right; only the letter
+>    shapes change. → **Font work** (exact or nearest face, drawn at the exact size). For faces that cannot be
+>    reused (Ladakh's Type3), the font work may also keep untouched lines as the original.
+> 2. *A tightly set paragraph can grow one line* — Corporate p18 "Common stockholders…", insert "ordinary": 25 lines
+>    instead of 24, and the last line ("enterprises.") overlaps "1.10.4 Competition". Cause (Codex): the PDF also
+>    tightens spacing *inside* words, which the editor does not reproduce. Codex's `TASK74_JUSTIFY` check for this
+>    still fails by design. Later: reproduce in-word spacing, or warn when a paragraph runs into the text below.
+> 3. *Re-editing a downloaded export* — after Export, opening the downloaded PDF with **Open PDF** and editing the
+>    same paragraph again treats it as left-aligned (each justified word is drawn as its own piece, so the stretched
+>    spaces cannot be measured back). Re-opening from **Saved files** keeps it justified; the user's own test did not
+>    hit this. Look at it if it shows up in real use.
+> 4. *Typing view* — Codex keeps the last line normal while typing with a CSS tail; the user's selection, Bold,
+>    arrow-key and Hindi typing checks passed.
+>
+> Justified-paragraph detection misses some justified paragraphs whose lines are partly squeezed (e.g. Corporate
+> "1. Value based corporate culture…", Ladakh "It's the kind of place…" — 279 Corporate near misses in
+> `TASK74_5D_JUSTIFICATION_REVIEW.md`); they stay left-aligned after an edit, nothing is stretched wrongly. A rule
+> that also counts narrowed gaps would catch them — not written; on the user's call.
+
+> **Codex run of 2026-10-13 (done) — in this order, on `text-position`:**
 > 1. **Measure first.** Re-run the justified-paragraph check with the **revised** rule (Change 4 point 1) and publish
 >    the list: accepted, rejected and near misses, each with file, page and text. Ladakh p2's paragraphs must be
 >    accepted and two-line labels such as `June (Including` / `GST)` rejected. In the same report, confirm Change 5's
