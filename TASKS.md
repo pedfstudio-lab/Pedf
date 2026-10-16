@@ -14882,7 +14882,23 @@ the narrower spaces, not the font — Step 5d Change 5.)*
 
 ---
 
-### Task 78 — Edited text uses the PDF's own font, the real free font, or a twin with the same widths — never a wider look-alike  🟡 IN PROGRESS — Change 0 ✅ measured and reviewed by the user (2026-10-15); Changes 1–5 implemented, acceptance still open → branch `font-match` **from `main`** (Step 5d is merged: `39970ab`)   *(Large · 1–2 weeks)*
+### Task 78 — Edited text uses the PDF's own font, the real free font, or a twin with the same widths — never a wider look-alike  ✅ DONE → merged to `main` and live (`49b8ba9`, 2026-10-16) — Changes 0–5 and Fixes 2–3 built by Codex on `font-match`, checked by Claude in the browser (Healing p3 spaces, résumé Enter) and tested by the user in Chrome   *(Large · 1–2 weeks)*
+
+> **Shipped — 2026-10-16.** Checks before the push: full suite **1,609 passed / 0 failed**; with the real-PDF switches
+> (`TASK74_REAL`, `TASK72_REAL`, `TASK66_SWEEP`, `TASK70_TABLES`, `TASK74_PATCH`, `TASK74_PREVIEW`, `TASK76_REAL`)
+> **1,649 passed / 0 failed**; typecheck, lint, build; the committed files type-checked on their own; Cloudflare build
+> succeeded. 96 font files (35.8 MB, SIL OFL, licence beside each) ship in `public/fonts/`; a page fetches only the
+> faces it uses; fontkit loads only on export. Ladakh p2 + "wonderful" now stays **6 lines** (it grew to 7 before
+> Fix 2).
+>
+> **Open, not part of this task:**
+> - *Résumé bullet lists lose their bold* — opening the Rahul résumé's Firgun list and pressing Done without typing
+>   drops the bold phrases and saves the loss (`TASK78_BROWSER_CHECK.md`: `sourceSpansForTextBlock` refuses the
+>   marker-prefixed list seed). Older than this task, live; needs its own fix.
+> - *Corporate p13 / p18 boxes taller than the page* → **Task 80**.
+> - *Bullet tails* — parked by the user.
+> - *Font size*: trim weights no PDF uses (Light, Medium, Black, …) and consider woff2 — later.
+> - *The image-deletion corpus sweep* exceeds its 30-minute test timeout (test timing, no functional failure found).
 
 **What the user hit.** Edited text does not look like the page and can take more room than the original:
 - *Letters look different* — Ladakh p2 is a narrow, condensed face; edited text comes out in wider, rounder Arial.
@@ -15137,5 +15153,93 @@ this checkpoint is not an all-checks-green or full native-browser acceptance cla
 
 **Land:** branch `font-match` from `main`. Commit: `Edited text uses the PDF's own font, the real free font or a twin
 with the same widths (Task 78)`. Merge after the checks pass and the user's nine steps pass.
+
+---
+
+### Task 80 — Paragraphs keep the page's height  🔲 TODO → branch `paragraph-height` **from `main`** (Task 78 is merged: `49b8ba9`)   *(Medium · 2–3 days)*
+
+*(Task 79 is reserved for on-screen translation.)*
+
+**What the user hit.** Two Corporate Governance boxes take more height than on the page and run over the heading
+below:
+- *p13* (`tmp/text-doubling/corporate-edited-3.pdf`, page label 8): click "(i) All elements of remuneration…" →
+  **Edit** → every line is spread out; the box's last lines ("…shareholders and also sent to the stock exchange.")
+  sit on top of "1.7 CORPORATE GOVERNANCE – HISTORY IN INDIA" and "Introduction". Nothing has been typed.
+- *p18*: in "Common stockholders have the right…", insert "ordinary" → **Done** → the paragraph needs **25** lines
+  instead of 24 and its last line ("enterprises.") lands on "1.10.4 Competition" (Step 5d accepted item 2; Task 78
+  cause 2; Codex's `TASK74_JUSTIFY` check for it still fails by design).
+
+**Fix A — the editor's line spacing comes from the lines inside paragraphs.**
+- *Why — measured.* The p13 box has **36** lines on two spacings: **12 pt** between the lines of one paragraph and
+  **16 pt** where a new item starts (12 + a 4 pt gap) — it is mostly short items ("(i)", "(ii)", "1.", "2."), so there
+  are **24** steps of 16 pt and **11** of 12 pt. `sourceParagraphLineHeight` (`paragraphSeed.ts`) takes the **most
+  common** step as the box's line spacing → 16 pt → every paragraph's `gapBeforePt` becomes 0 and every wrapped line
+  opens 16 pt apart instead of 12. At the user's zoom: 28 px against the page's 21 px; the box is about **44 pt** too
+  tall. Read from the code; `paragraphSeed.ts` is unchanged by Task 78, so this is live.
+- *Fix.* Take the line spacing from the steps **between lines of the same paragraph** (Change 10's paragraph split
+  already knows which lines continue a paragraph); paragraph starts then keep their own `gapBeforePt` (4 pt here),
+  which Step 5c.2 Change 10 already draws. Fall back to today's rule when a box has fewer than two such steps.
+- *Scope — measured* (`src/lib/edit/lineSpacingScope.local.test.ts`, `SPACING_SCOPE=1`, 2026-10-17): **20** of
+  **1,466** multi-line boxes open with the wrong spacing — **10** in each of the two Corporate Governance copies —
+  about **33 pt** too tall on average. **No other test PDF changes.** Codex re-runs it; after the fix it must read 0.
+- *Before / after (p13).* Before: every line 16 pt apart, the box ends over the heading. After: lines inside a
+  paragraph 12 pt apart, a 4 pt gap before each new item, the box ends where the page's text ends, the heading clear.
+
+**Fix B — a justified paragraph may squeeze its letters as much as the PDF did.**
+- *Why — measured by Codex (Task 74 Step 5d Change 4).* Corporate fits its justified lines by narrowing the spaces
+  **and** the letters inside words: two p18 rows carry −4.97 pt and −4.75 pt of in-word adjustments. Step 5d copies
+  the narrowed spaces (Change 4 point 6, down to the paragraph's own tightest gap) but re-flows letters at normal
+  spacing, so after an inserted word the paragraph needs one more line. Task 78's letter tightening does not cover it:
+  that is one even value per font on a page (Healing, Ladakh), while Corporate squeezes only some lines, by different
+  amounts.
+- *Fix.*
+  1. *Measure.* For each justified paragraph, read how much the PDF tightened the letters inside its words, line by
+     line (the glyph offsets Step 5d Change 1 already keeps), and keep the tightest value as the paragraph's limit.
+  2. *Re-flow.* When a re-flowed justified line does not fit, it may tighten its letters — evenly across that line —
+     down to that limit, together with Change 4's space rule; beyond it, the last word moves to the next line as today.
+  3. *Same on screen and in the PDF.* The editor shows the tightening while typing; the export draws it with the
+     character spacing Task 78 added to the text handler.
+  4. A paragraph whose PDF did not squeeze its letters is never squeezed. Left, centred and right boxes are untouched.
+- *Change 0 — measure first.* Across the 47 test PDFs, count the justified paragraphs whose PDF squeezed letters inside
+  words, with the amount per paragraph and the files; and re-run "insert one word" on each to count how many keep
+  their line count with the fix. Publish before building Fix B.
+- *Before / after (p18, insert "ordinary").* Before: 25 lines, "enterprises." on "1.10.4 Competition". After: 24
+  lines, the heading clear; on the few lines that needed it the letters are a hair tighter — no tighter than the
+  original's. Adding a whole sentence still adds lines: no squeezing can make room for that.
+
+**Checks**
+- *p13*: opens with every line at the page's baseline (within 0.5 px at 100 % and 200 %); nothing over the heading;
+  Done unchanged = 0 edits.
+- *Scope*: `SPACING_SCOPE=1` reads **0** wrong boxes; the other 1,446 boxes open exactly as today (asserted).
+- *p18*: insert "ordinary" → 24 lines, last baseline above the heading; Codex's `TASK74_JUSTIFY` 24-line assertion
+  passes unchanged.
+- *Fix B scope*: only paragraphs found in Change 0 change; every other justified paragraph re-flows exactly as today.
+- *Ladakh p2, Healing p3, résumés, Goa, Ziro*: unchanged (open, type, Done, export).
+- *Unchanged elsewhere*: full suite; every real-PDF switch; typecheck; lint; build.
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/edit/paragraphSeed.ts` + test | Fix A: line spacing from steps inside paragraphs |
+| `src/lib/pdf/justification.ts` (or text reading) + test | Fix B: each justified paragraph's in-word letter limit |
+| `src/lib/edit/justifiedLayout.ts`, `src/lib/edit/paragraphLayout.ts` + tests | Fix B: re-flow may tighten letters up to the limit |
+| `src/lib/edit/paragraphPresentation.ts`, `src/components/TextEditOverlay.tsx` + tests | Fix B: the same tightening while typing |
+| `src/lib/export/handlers/text.ts` + test | Fix B: draw it (character spacing, as Task 78) |
+| `src/lib/edit/lineSpacingScope.local.test.ts` (local, `SPACING_SCOPE=1`) | Fix A's scope count |
+
+**Files that must not change:** text grouping (`textUnits.ts`) and the justified-paragraph detector's accept/reject
+rules; fonts and font matching (Task 78); bullet algorithms; tables; glyph, image and shape removal; Step 5d's
+positions for untouched lines; the saved-project format beyond optional fields.
+
+**Verify (user):**
+1. Corporate p13 → click "(i) All elements of remuneration…" → **Edit** → the lines are spaced as on the page and
+   nothing covers "1.7 CORPORATE GOVERNANCE – HISTORY IN INDIA" → **Done** → nothing moves.
+2. Corporate p18 → "Common stockholders…" → add "ordinary" → **Done** → still 24 lines, "1.10.4 Competition" clear →
+   **Export** → the same in the PDF.
+3. Ladakh p2 and Healing p3 → edit a paragraph → behaves exactly as now.
+
+**Land:** branch `paragraph-height` from `main`. Commit: `Paragraphs keep the page's height (Task 80)`. Merge after
+Change 0 is reviewed, the checks pass and the user's three steps pass.
 
 ---
