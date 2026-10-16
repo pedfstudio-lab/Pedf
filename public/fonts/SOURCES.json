@@ -1,0 +1,782 @@
+[
+  {
+    "family": "Carlito",
+    "file": "carlito/Carlito-Bold.ttf",
+    "bytes": 682468,
+    "sha256": "bb5d20f79b82599ec72983597437373a80f2d2085fa91fc144fd74e876a594db",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/carlito/Carlito-Bold.ttf",
+    "licence": "carlito/OFL.txt"
+  },
+  {
+    "family": "Carlito",
+    "file": "carlito/Carlito-BoldItalic.ttf",
+    "bytes": 808508,
+    "sha256": "b32928186c119599e03ca6a1ffc680fdcb7fac95772f4b95d989cf6cd3861517",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/carlito/Carlito-BoldItalic.ttf",
+    "licence": "carlito/OFL.txt"
+  },
+  {
+    "family": "Carlito",
+    "file": "carlito/Carlito-Italic.ttf",
+    "bytes": 615236,
+    "sha256": "0b019225e58d702bfedcbd35c21696769f8ee115cb6343f84c2f240312450d1c",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/carlito/Carlito-Italic.ttf",
+    "licence": "carlito/OFL.txt"
+  },
+  {
+    "family": "Carlito",
+    "file": "carlito/Carlito-Regular.ttf",
+    "bytes": 628032,
+    "sha256": "f6418f708baede9789daef5d458c0f53d2a888af9820e8062934e504fedc6595",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/carlito/Carlito-Regular.ttf",
+    "licence": "carlito/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Black.ttf",
+    "bytes": 664748,
+    "sha256": "808c62839c62dbce7de689af7603666fc7f8b81e0df537d8a5212c87580d4337",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Black.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-BlackItalic.ttf",
+    "bytes": 698264,
+    "sha256": "3214f75bf96783a571bd25338c867c669e7c5e7c08a227f18a7b63766d6e6cbe",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-BlackItalic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Bold.ttf",
+    "bytes": 656544,
+    "sha256": "8a0aace75d33794eece4b28187bfc1df0bbd2888b5d8a56e01788c8d65d16be1",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Bold.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-BoldItalic.ttf",
+    "bytes": 698364,
+    "sha256": "62c1b7f0d2e74b45960154c3520efc337b553db0961bfdc950d5618334596cc8",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-BoldItalic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-ExtraBold.ttf",
+    "bytes": 613920,
+    "sha256": "61018de62bdaf90d4ac80b1d53c5c130756c8e9219aea3d2773fc9bd5869af97",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-ExtraBold.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Italic.ttf",
+    "bytes": 722900,
+    "sha256": "e399c44efe1387100531d26c7e4800c5d12251b890d6654a3098c7c679cb1786",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Italic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Light.ttf",
+    "bytes": 643884,
+    "sha256": "cf2a774503baf418d584f49967bd160e1e03f087c13b25602f28024ec7788f08",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Light.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-LightItalic.ttf",
+    "bytes": 657552,
+    "sha256": "700e6722fd14a10e7646347a6b14c486d4c364a373ba61c70e0b5ccee7811635",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-LightItalic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Medium.ttf",
+    "bytes": 636396,
+    "sha256": "d3ac182a6833e005745dd75679fbad081c0b12535df4e93ad8ed57817a31a338",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Medium.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-MediumItalic.ttf",
+    "bytes": 694924,
+    "sha256": "ecbce6cffa42d8a67afeb27a9d6e85d515e81481d4b2cece989e833a48048405",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-MediumItalic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-Regular.ttf",
+    "bytes": 656568,
+    "sha256": "d636e4683231f931eda222d588e944d082bfd3bdba02f928bee461c0f185b251",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-Regular.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-SemiBold.ttf",
+    "bytes": 668548,
+    "sha256": "71b8b7decbe75a881ed267be539d402bd1e9420b799658aada4e0d1bd5af803c",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-SemiBold.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Lato",
+    "file": "lato/Lato-SemiBoldItalic.ttf",
+    "bytes": 697364,
+    "sha256": "5adeb6b334d8fb99ef053bc052b952773d544315e0e1d668a12c0ce8bd51375c",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/lato/Lato-SemiBoldItalic.ttf",
+    "licence": "lato/OFL.txt"
+  },
+  {
+    "family": "Allura",
+    "file": "allura/Allura-Regular.ttf",
+    "bytes": 246632,
+    "sha256": "9c142b2e515832c0dfc4ff8b8ea18f40314943bf937b72e2b23c4661bac14cc6",
+    "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/allura/Allura-Regular.ttf",
+    "licence": "allura/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-Bold.ttf",
+    "bytes": 147264,
+    "sha256": "27da758f4dcac9a65abe914c13b463b42982b9909bc65713424099f4810bd1e6",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-Bold.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-BoldItalic.ttf",
+    "bytes": 153308,
+    "sha256": "d672a770037104b6af45e1336b3d3c1729c8aea940f81e010f5a8a7319c29a21",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-BoldItalic.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-ExtraBold.ttf",
+    "bytes": 151700,
+    "sha256": "22c3e66c8a0ae60bf10ee636bb8a54d61ff77c956f5c4ebe3058b793e56ee727",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-ExtraBold.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-Italic.ttf",
+    "bytes": 153256,
+    "sha256": "93bc1bb6abf4e6b7c75d7131714061d5b57cc478abcabe4cb3519bb38fb917aa",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-Italic.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-Light.ttf",
+    "bytes": 143788,
+    "sha256": "3472097ec4d9e57228cbfad3c9911e53923664d3df86568d0b05d674399e034e",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-Light.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-LightItalic.ttf",
+    "bytes": 151216,
+    "sha256": "548dc557bcef26267d16f1afaf0770814a329c9f04a0168d396ca9d1ceafb16f",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-LightItalic.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-Regular.ttf",
+    "bytes": 147528,
+    "sha256": "c53aceea2dcf5b4098099c0c4d0a061d17e178a049317b42a422b1a9f7f8eb59",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-Regular.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-SemiBold.ttf",
+    "bytes": 150592,
+    "sha256": "4a413711684a9dd564ef0f1c10cb62b5d9f7eb6df2cff962f5341a6ecd5f64ae",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-SemiBold.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "OpenSans",
+    "file": "opensans/OpenSans-SemiBoldItalic.ttf",
+    "bytes": 157560,
+    "sha256": "c646a9aefc0e964f66487260639e375685328a6280856faea3e012c43fe9c56d",
+    "source": "https://raw.githubusercontent.com/googlefonts/opensans/bd7e37632246368c60fdcbd374dbf9bad11969b6/fonts/ttf/OpenSans-SemiBoldItalic.ttf",
+    "licence": "opensans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-Bold.ttf",
+    "bytes": 200872,
+    "sha256": "9e6c74a889a700d707613d24548fe4ffa6bc59559a0689d2cf9e133bdcdafb2f",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Bold.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-BoldItalic.ttf",
+    "bytes": 208588,
+    "sha256": "0e3142ba2ef31fe5c02f0c6c36424f251609cd6b73880076e21c2e81931ba2b9",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-BoldItalic.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-Italic.ttf",
+    "bytes": 207920,
+    "sha256": "a9c6ef9942c49e49d11e11a6dacc0b3a087978757e9b22a06b8ac22a6400fb15",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Italic.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-Light.ttf",
+    "bytes": 203240,
+    "sha256": "2218b5f3f1fc9d3a793343f45c3be5ee7eae9584a7a52391bb8cf2d37622b3e0",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Light.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-LightItalic.ttf",
+    "bytes": 210860,
+    "sha256": "54ad6d58d163b6b1f850fcbab3c46a1ed6c1ec3050524abb904c076a52c6bb1a",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-LightItalic.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-Medium.ttf",
+    "bytes": 202460,
+    "sha256": "331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Medium.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-MediumItalic.ttf",
+    "bytes": 210220,
+    "sha256": "9928852bf60d82fdbbfe30eac86bcecd611e4188f0fa4d98938560659fa99c64",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-MediumItalic.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-Regular.ttf",
+    "bytes": 200500,
+    "sha256": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-SemiBold.ttf",
+    "bytes": 202632,
+    "sha256": "a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-SemiBold.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "IBMPlexSans",
+    "file": "ibmplexsans/IBMPlexSans-SemiBoldItalic.ttf",
+    "bytes": 211072,
+    "sha256": "147106b619423a82b40f6d64bace074ad5b786e59f48023bda69d63b1755fb82",
+    "source": "https://raw.githubusercontent.com/IBM/plex/39276912b05f700ee1dd491950c35d8697214208/packages/plex-sans/fonts/complete/ttf/IBMPlexSans-SemiBoldItalic.ttf",
+    "licence": "ibmplexsans/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-Black.ttf",
+    "bytes": 79068,
+    "sha256": "e97f12c9f592cd26e7d5094e2ebea914f85c64919872657d935bb2e5e5240bd7",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-Black.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-Bold.ttf",
+    "bytes": 78836,
+    "sha256": "28a76032877053bc2a01b9ec15ad2a9c912491ca74e1343aa0ee3297a1dfa230",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-Bold.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-ExtraBold.ttf",
+    "bytes": 78884,
+    "sha256": "1e432a9911799ec9bdf6146778e57946c7abe07acdc918c41219df1a363d6b95",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-ExtraBold.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-Light.ttf",
+    "bytes": 77080,
+    "sha256": "7127c368244adf9ed3b9564e29ef74a1ce656c5dea8987f7b71960a7819abd43",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-Light.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-Medium.ttf",
+    "bytes": 77964,
+    "sha256": "178357941afa3d007bedcc513a35f4856590af2480761ac304cfdc47bfa10b62",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-Medium.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-Regular.ttf",
+    "bytes": 77976,
+    "sha256": "f0d22ae34443b2fd9437f528ac52718b0e9b2569f866c6f43ee89122a3b01d6a",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-Regular.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan/LeagueSpartan-SemiBold.ttf",
+    "bytes": 78648,
+    "sha256": "8509055f2e6075a0e96d28585aad8ed00161bdedb6e49dd11278b7d65c3fb7d0",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/27341b9bf93a2c7faa140538a64ce342486c5fb5/fonts/ttf/LeagueSpartan-SemiBold.ttf",
+    "licence": "leaguespartan/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Black.ttf",
+    "bytes": 591488,
+    "sha256": "2ea74ab862678045678cd0843e12fa17e100e7ad10b20f220fea6bb7b0ae88a5",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Black.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-BlackItalic.ttf",
+    "bytes": 567480,
+    "sha256": "91758ca2da43c9d883d3baddda3c2629aede21dc51fc95f97e51b85ae7d4f6da",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-BlackItalic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Bold.ttf",
+    "bytes": 575740,
+    "sha256": "c976e4b1b99edc88775377fcc21692ca4bfa46b6d6ca6522bfda505b28ff9d6a",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Bold.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-BoldItalic.ttf",
+    "bytes": 555292,
+    "sha256": "6edf4227ef0fa846aca70e86a307804ca4401741830f5b3af0f2554abe2b8466",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-BoldItalic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-ExtraBold.ttf",
+    "bytes": 577300,
+    "sha256": "1cfa3aa25ee505ee66cbf12e29b13b4b8dd0f8ca9e89d08e7ca36f3788d80a57",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-ExtraBold.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Italic.ttf",
+    "bytes": 552776,
+    "sha256": "36cff144df01309dab648bea71baff9bb074026914afe63aeacc8bc90b67a28b",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Italic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Light.ttf",
+    "bytes": 555788,
+    "sha256": "74ffdd438f2ae232371ceb00444dae93e2590d263a4ff4c5e2c8385aa8012fdb",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Light.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-LightItalic.ttf",
+    "bytes": 544388,
+    "sha256": "701297fd68809f0834632aa93a5ec3e16e072aa6cbe153fdb0a827422ecc94da",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-LightItalic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Medium.ttf",
+    "bytes": 566428,
+    "sha256": "7bbe267354704c6ad18bde24b1dbc756c8e4380ca1c3f3c25c45ec5c4471510b",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Medium.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-MediumItalic.ttf",
+    "bytes": 548688,
+    "sha256": "7e6fae52e3df56ef6544c74f39a3948f7391eee44a48640e2652602455de46bf",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-MediumItalic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-Regular.ttf",
+    "bytes": 569208,
+    "sha256": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Regular.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-SemiBold.ttf",
+    "bytes": 572924,
+    "sha256": "87a8b90ece1e89746b544e4e086f85a3710e41485a8078f9be874837dfad45d5",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-SemiBold.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "NotoSans",
+    "file": "notosans/NotoSans-SemiBoldItalic.ttf",
+    "bytes": 553424,
+    "sha256": "70e540e31cc9b497751570c7d9a5d2409c55d81376fcf5b7f6572f7e24387bc9",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-SemiBoldItalic.ttf",
+    "licence": "notosans/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-Black.ttf",
+    "bytes": 253584,
+    "sha256": "4183f9ae34bd50bde1ee5601302c0d1666638cad52ff2a8886d8c47535be1999",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-Black.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-Bold.ttf",
+    "bytes": 253344,
+    "sha256": "8d869f2aeac0220984a430120af819fbcb12a88e8ea4ad72aae4c5f6d6a2b985",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-Bold.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-BoldIt.ttf",
+    "bytes": 114696,
+    "sha256": "9cbd037fd721a3eea395675ecabaf10961d76198589a3e71a99a9c73e72ce384",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-BoldIt.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-It.ttf",
+    "bytes": 114976,
+    "sha256": "8fa3fe523cb385c2184e6691821c0431a5189a2a01a708a7b047847e15536b03",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-It.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-Light.ttf",
+    "bytes": 252560,
+    "sha256": "ce323db75733028ec2961b442b3368117d4daf724e3217d120f1990da8533fd0",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-Light.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-Regular.ttf",
+    "bytes": 254076,
+    "sha256": "c6f835b6a6d942b196e2607bf73a7b086407ae8dbdc928c23a2fb4893ec383f6",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-Regular.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-Semibold.ttf",
+    "bytes": 253832,
+    "sha256": "72bf9aa2e78b8c78444ae74b6be09411d5fb5bf0eb9bcdfd47082cc5d9b536df",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-Semibold.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "SourceSansPro",
+    "file": "sourcesanspro/SourceSansPro-SemiboldIt.ttf",
+    "bytes": 114800,
+    "sha256": "10adf27bee9b4fe8374fb4d2056fa46a81d6914b652f7a3cd9fe843c5a8279c7",
+    "source": "https://raw.githubusercontent.com/adobe-fonts/source-sans/ce77773581f4d454f0fa985c073bb25c721bfcf5/TTF/SourceSansPro-SemiboldIt.ttf",
+    "licence": "sourcesanspro/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-Bold.ttf",
+    "bytes": 116260,
+    "sha256": "f83cb3f1ddb91bdb02868eeddb4f817b326aef993f96fe6f8a3b40b0f31c689b",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-Bold.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-ExtraBold.ttf",
+    "bytes": 118028,
+    "sha256": "20ca28c496aef07993031176c1a02da6959682abbc4cbf73776f83e63ef80c00",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-ExtraBold.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-Light.ttf",
+    "bytes": 117252,
+    "sha256": "121cd3614a367ae68287977832e7077aafb76b1e98723488a93914c03a3c0639",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-Light.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-Medium.ttf",
+    "bytes": 115764,
+    "sha256": "1dd2a3b41e0ce8eff2d9000ce8e79e8a5d9d2f0b22f4e27dc8c59e94894fe50a",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-Medium.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-Regular.ttf",
+    "bytes": 114708,
+    "sha256": "dcfe24ee4e7aa40aa13a91837acca9b170befd4dbbbcf9e084a0db1c1676e06f",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-Regular.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "BricolageGrotesque",
+    "file": "bricolagegrotesque/BricolageGrotesque-SemiBold.ttf",
+    "bytes": 116840,
+    "sha256": "25534ff95de6305903a3f74b237f07d9e32adefec13d0f0a0d99a4b820c6a8cf",
+    "source": "https://raw.githubusercontent.com/ateliertriay/bricolage/84745e5b96261ae5f8c6c856e262fe78d1d6efdd/fonts/ttf/BricolageGrotesque-SemiBold.ttf",
+    "licence": "bricolagegrotesque/OFL.txt"
+  },
+  {
+    "family": "LeagueSpartan",
+    "file": "leaguespartan-legacy/LeagueSpartan-Bold.ttf",
+    "bytes": 35664,
+    "sha256": "6b99a6629efb2568ff1211ab08da867c73f39644e3169c86957e7c48a1476c20",
+    "source": "https://raw.githubusercontent.com/theleagueof/league-spartan/f1c5917c52e6425ffeeee8e3d070775b9f396cf6/_webfonts/leaguespartan-bold.ttf",
+    "licence": "leaguespartan-legacy/OFL.txt"
+  },
+  {
+    "family": "LiberationMono",
+    "file": "liberation/LiberationMono-Bold.ttf",
+    "bytes": 307996,
+    "sha256": "bd62a0672d0b9b6710b01df434c80ad54fa5f0835207eb7b17b7a761463067bb",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationMono",
+    "file": "liberation/LiberationMono-BoldItalic.ttf",
+    "bytes": 284068,
+    "sha256": "79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationMono",
+    "file": "liberation/LiberationMono-Italic.ttf",
+    "bytes": 281536,
+    "sha256": "605c01c711b44480a7508d349dfbf3264e81fa43d69e61cfa7d10b86e764c4d1",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationMono",
+    "file": "liberation/LiberationMono-Regular.ttf",
+    "bytes": 319508,
+    "sha256": "f2b83c763e8afd21709333370bed4774337fae82267937e2b5aea7e2fbd922c1",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSans",
+    "file": "liberation/LiberationSans-Bold.ttf",
+    "bytes": 414456,
+    "sha256": "788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSans",
+    "file": "liberation/LiberationSans-BoldItalic.ttf",
+    "bytes": 408996,
+    "sha256": "698da70fc191cc5f33ad4d6d3fe830fe4624b898ea2e3169955928b7c491f1ee",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSans",
+    "file": "liberation/LiberationSans-Italic.ttf",
+    "bytes": 415816,
+    "sha256": "e5bae5c4cde31f22142753855f4f8fb86da6ff39955ed3c0a11248b0d16948b0",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSans",
+    "file": "liberation/LiberationSans-Regular.ttf",
+    "bytes": 410712,
+    "sha256": "76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSerif",
+    "file": "liberation/LiberationSerif-Bold.ttf",
+    "bytes": 370096,
+    "sha256": "d754ba427cfe0bca54ae052384baa8f842da5bd6550ad4da024ac441e7a7d5ce",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSerif",
+    "file": "liberation/LiberationSerif-BoldItalic.ttf",
+    "bytes": 376772,
+    "sha256": "f17db8af71e24d2066b587546021d4f0b296be389512b658dec3c09affeb11a7",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSerif",
+    "file": "liberation/LiberationSerif-Italic.ttf",
+    "bytes": 375632,
+    "sha256": "0e3dea9f8d613e006ccfa62201f33e265d19167bd0907725c3e145368b04fc2e",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "LiberationSerif",
+    "file": "liberation/LiberationSerif-Regular.ttf",
+    "bytes": 393576,
+    "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "licence": "liberation/OFL.txt"
+  },
+  {
+    "family": "R1WidthMono",
+    "file": "r1width/R1WidthMono-Bold.ttf",
+    "bytes": 454840,
+    "sha256": "a295cc7bb15b311737931ec1701fc19819a5c4c7a0164fc11ac3a406c4acf66e",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthMono",
+    "file": "r1width/R1WidthMono-BoldItalic.ttf",
+    "bytes": 489808,
+    "sha256": "1eef66fafbf3f7c0e76d321c99e2f3a16a9970f75d3130753ea4f33931a64b1e",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthMono",
+    "file": "r1width/R1WidthMono-Italic.ttf",
+    "bytes": 487092,
+    "sha256": "83ae783b702ad1ad1a9e08671481922cb0e2aa50a9de97432a47db07d8712442",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthMono",
+    "file": "r1width/R1WidthMono-Regular.ttf",
+    "bytes": 451840,
+    "sha256": "244bbe663d4ef6d121fdcd6450f9fbd5bdffd7b74ac8b60f883b311c26e75117",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSans",
+    "file": "r1width/R1WidthSans-Bold.ttf",
+    "bytes": 482956,
+    "sha256": "f27440883e0f352842bf837b826e03588518bbea919c11ccfccc11cc808b823c",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSans",
+    "file": "r1width/R1WidthSans-BoldItalic.ttf",
+    "bytes": 519260,
+    "sha256": "d9270bafbead6fe0718d3ac3fe39faad70443a95d60613db8c23ab659d726663",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSans",
+    "file": "r1width/R1WidthSans-Italic.ttf",
+    "bytes": 514472,
+    "sha256": "28c516fad1b857b2f75dc5d13ea4f0868cdaddcbc0acfcf25a7c08fd1c6c6d39",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSans",
+    "file": "r1width/R1WidthSans-Regular.ttf",
+    "bytes": 484084,
+    "sha256": "3654996fbe2f8b3a4e2e9e6972e5bd00d55a5c6b5d6f08495e0597707bd5320f",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSerif",
+    "file": "r1width/R1WidthSerif-Bold.ttf",
+    "bytes": 542928,
+    "sha256": "d728ecfccf7fd2d873b592a0dfd805ff8945e902910589935fa3e3641c0dac23",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSerif",
+    "file": "r1width/R1WidthSerif-BoldItalic.ttf",
+    "bytes": 568832,
+    "sha256": "4fa2bea5dac2327fad14e83144f17afa67d4cde4d847738856a52d9a776ddc19",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSerif",
+    "file": "r1width/R1WidthSerif-Italic.ttf",
+    "bytes": 574200,
+    "sha256": "ce06fe5642c5b4f298e70d79fd5d6c67da1ffdba1be6c10c32b31b1862f463bf",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "R1WidthSerif",
+    "file": "r1width/R1WidthSerif-Regular.ttf",
+    "bytes": 541232,
+    "sha256": "3c9d6b181101e7691899fcb4d9bd72f684de815ee084966db95cd072619e161b",
+    "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
+    "licence": "r1width/OFL.txt"
+  }
+]

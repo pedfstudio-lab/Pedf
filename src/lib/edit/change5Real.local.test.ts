@@ -6,12 +6,15 @@ import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
 import { exportPdf } from '@/lib/export/exportPdf';
 import type { TextSpan, TextStyle } from '@/lib/export/types';
-import { paragraphSeedText } from './paragraphSeed';
+import { paragraphSeedText, sourceParagraphs } from './paragraphSeed';
 import { paragraphPresentation } from './paragraphPresentation';
 import { sourceSpansForTextBlock } from './richText';
 import { buildTextBlockEdits, type NextTextEdit } from './buildTextEdits';
 import { wrapTextParagraphs } from './paragraphLayout';
 import { calculateInitialEditorWidth } from './textEditSession';
+import { canUseSourceWord, matchFont, sourceFontWidth } from '@/lib/fonts/fontMatch';
+import { loadFontBytes } from '@/lib/fonts/twinFonts';
+import { sfntMetrics } from '@/lib/fonts/sfnt';
 
 describe.runIf(process.env.TASK74_CHANGE5 === '1')('Change 5 real PDF model/export checks', () => {
   it('keeps Corporate p18 inside its column and preserves untouched glyphs on Ladakh p2', async () => {
@@ -28,14 +31,19 @@ describe.runIf(process.env.TASK74_CHANGE5 === '1')('Change 5 real PDF model/expo
         const [runs, ruleLines, regions] = await Promise.all([extractTextRuns(page, pageIndex), detectRuleLines(page, pageIndex), detectPageGraphicRegions(page, pageIndex)]);
         const block = groupRunsIntoBlocks(runs, { ruleLines, markers: [...regions.imageRegions, ...regions.shapeMarkerRegions] }).find(block => block.text.startsWith(prefix));
         expect(block, prefix).toBeDefined(); if (!block) continue;
-        const widths = new Map<string, number>();
-        const key = (font: string | undefined, character: string) => JSON.stringify([font, character]);
-        for (const run of runs) {
-          for (const glyph of run.metrics?.glyphs ?? []) if ([...glyph.text].length === 1) widths.set(key(run.style.fontRef, glyph.text), glyph.widthPt / run.style.fontSizePt);
-          if (run.spaceWidthPt) widths.set(key(run.style.fontRef, ' '), run.spaceWidthPt / run.style.fontSizePt);
+        // Task 78 supplies real matched-face advances and optional tracking.
+        // The old 0.5-em guess for missing glyph metrics falsely trips the new
+        // readable-gap guard. Source origins below remain independent assertions.
+        const metrics = new Map<string, ReturnType<typeof sfntMetrics>>();
+        for (const style of [block.style,...block.lines.flatMap(line=>line.runs.map(run=>run.style))]) {
+          const match=matchFont(style);
+          if(!metrics.has(match.file))metrics.set(match.file,sfntMetrics(await loadFontBytes(match.file)));
         }
-        // Source-glyph measurement, not a claim about browser-rendered metrics.
-        const measure = (text: string, style: TextStyle) => [...text].reduce((sum, character) => sum + (widths.get(key(style.fontRef, character)) ?? 0.5) * style.fontSizePt, 0);
+        const measure = (text: string, style: TextStyle) => (text.match(/\s+|\S+/gu)??[]).reduce((sum,word)=>{
+          const own=canUseSourceWord(word,style)?sourceFontWidth(word,style):undefined, match=matchFont(style);
+          const width=own??[...word].reduce((n,c)=>n+(metrics.get(match.file)!.width(c)??0)*style.fontSizePt*match.scale,0);
+          return sum+width+[...word].length*(style.fontTrackingEm??0)*style.fontSizePt;
+        },0);
         const text = paragraphSeedText(block);
         const presentation = paragraphPresentation(block, text, block.style, 1, measure);
         expect((presentation.html.match(/data-pdf-source-row/g) ?? []).length, `${name}: source rows`).toBe(block.lines.length);
@@ -50,8 +58,8 @@ describe.runIf(process.env.TASK74_CHANGE5 === '1')('Change 5 real PDF model/expo
         } else {
           changed += 'S'; spans = spans?.map((span, index) => ({ ...span, text: span.text + (index === spans!.length - 1 ? 'S' : '') }));
         }
-        const next: NextTextEdit = { text: changed, style: block.style, spans, width, height: block.rect.h, dx: 0, dy: 0,
-          paragraphs: presentation.lines.map((_, index) => ({ gapBeforePt: index ? 0 : 0, firstIndentPt: 0, restIndentPt: 0 })),
+        const next: NextTextEdit = { text: changed, style: block.style, spans, width, height: block.rect.h, dx: 0, dy: 0, align: block.align,
+          paragraphs: sourceParagraphs(block).layouts,
           sourceParagraphLines: presentation.lines, preserveSourceWrapping: true,
           measurePiece: (text, style, piece) => {
             const value = measure(text, style), intrinsic = piece?.source?.glyphs?.reduce((sum, glyph) => sum + glyph.widthPt, 0);

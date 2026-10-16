@@ -15,11 +15,15 @@ import {
   sameTextEditSession,
 } from '@/lib/edit/textEditSession';
 import type { TextEditSessionValue } from '@/lib/edit/textEditSession';
-import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import { measureMatchedText, textFontFamily, textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import { ensureMatchedFont } from '@/lib/fonts/twinFonts';
+import { canUseSourceWord } from '@/lib/fonts/fontMatch';
+import { fallbackWordRanges, overlapsFallback } from '@/lib/fonts/wordFonts';
 import { baselineCorrectionPx, editorFirstLineOffsetPx } from '@/lib/edit/editorPosition';
 import { classifyFontFamily } from '@/lib/pdf/textContent';
 import {
   effectiveTextSpanStyle,
+  elementTextStyle,
   richTextToHtml,
   serializeRichText,
   sourceSpansForTextBlock,
@@ -55,18 +59,19 @@ import { minimumWordSpacing } from '@/lib/edit/justifiedLayout';
 import { hasLetterSpacedHeading } from '@/lib/edit/letterSpacedHeading';
 import { effectiveTextSpans } from '@/lib/edit/richText';
 import { readParagraphLayout } from '@/lib/edit/paragraphDom';
+import { bulletEditorHtml, canonicalBulletValue, insertBulletItems, refreshBulletEditorLayout } from '@/lib/edit/bulletEditorPresentation';
 
 /** Widths are measured at 1 PDF point per CSS pixel, independent of zoom/layout. */
 function measurePieceWithCanvas(text: string, style: TextStyle, source?: PositionedTextPiece): number {
   const context = window.document.createElement('canvas').getContext('2d');
   if (!context) return NaN;
-  context.font = textStyleToCanvasFont(style);
-  const width = context.measureText(text).width;
+  const measure = (value: string) => measureMatchedText(context, value, style);
+  const width = measure(text);
   if (source?.advanceTrackingPt !== undefined) return width + [...text].length * source.advanceTrackingPt;
   if (source?.advanceScale !== undefined) return width * source.advanceScale;
   if (!source || (source.source && !source.source.glyphs?.length)) return width;
   const intrinsicWidth = source.source?.glyphs?.reduce((sum, glyph) => sum + glyph.widthPt, 0) ?? source.widthPt;
-  const originalWidth = context.measureText(source.text).width;
+  const originalWidth = measure(source.text);
   return originalWidth > 0 ? width * intrinsicWidth / originalWidth : width;
 }
 
@@ -297,7 +302,7 @@ function measureWidestInitialLine(
   const context = canvas.getContext('2d');
   if (!context) return 0;
   context.font = textStyleToCanvasFont(style);
-  return widestLineWidth(text, (line) => context.measureText(line).width);
+  return widestLineWidth(text, (line) => measureMatchedText(context,line,style));
 }
 
 function savedTextBoxRect(texts: readonly TextEdit[]): PdfRect {
@@ -367,6 +372,8 @@ interface TextEditOverlayProps {
     readonly items: readonly string[];
     readonly symbols?: readonly string[];
     readonly maxHeightPt: number;
+    readonly indentPt?: number;
+    readonly itemSpacingPt?: number;
   };
   /** Test seam for deterministic line-width measurements; production uses canvas. */
   readonly measureTextWidth?: (line: string) => number;
@@ -473,6 +480,7 @@ export function TextEditOverlay({
     return piece && natural > 0 ? piece.widthPt / natural : 1;
   });
   const initialHtmlRef = useRef((() => {
+    if (bulletMode?.indentPt !== undefined) return bulletEditorHtml(initialText,initialStyle,initialSpans,zoom,bulletMode.indentPt);
     if (paragraphPresentationRef.current) return paragraphPresentationRef.current.html;
     if (!initialComposition || sourceCompositionsRef.current.some(composition => !composition)
       || (initialCompositions.length === 1 && initialComposition.pieces.length < 2)) return richTextToHtml(initialText, initialStyle, initialSpans, zoom, initialParagraphs);
@@ -486,7 +494,8 @@ export function TextEditOverlay({
       const gap = previous ? piece.x - previous.x - previous.widthPt - canvasWidth(separator, initialStyle) : 0;
       const tracking = piece.advanceTrackingPt ?? 0;
       const html = richTextToHtml(piece.text, initialStyle, [{ text: piece.text, ...piece.style }], zoom);
-      return richTextToHtml(separator, initialStyle) + `<span data-pdf-source-line="${lineIndex}" data-pdf-source-piece="${index}" style="margin-left:${gap * zoom}px"><span data-pdf-piece-content="true" style="letter-spacing:${tracking * zoom}px">${html}</span></span>`;
+      const baseTracking = (piece.style.fontTrackingEm ?? 0) * piece.style.fontSizePt * zoom;
+      return richTextToHtml(separator, initialStyle) + `<span data-pdf-source-line="${lineIndex}" data-pdf-source-piece="${index}" style="margin-left:${gap * zoom}px"><span data-pdf-piece-content="true" style="--pdf-piece-tracking:${tracking * zoom}px;letter-spacing:calc(var(--pdf-piece-tracking,0px) + ${baseTracking}px)">${html}</span></span>`;
       }).join('') + richTextToHtml(composition.text.slice(cursor), initialStyle);
       const layout = initialParagraphs?.[lineIndex];
       const paragraphAttributes = layout ? ` data-pdf-paragraph="true" data-paragraph-id="source-${lineIndex}" data-gap-before-pt="${layout.gapBeforePt}" data-first-indent-pt="${layout.firstIndentPt}" data-rest-indent-pt="${layout.restIndentPt}" style="margin-top:${layout.gapBeforePt * zoom}px;padding-left:${layout.restIndentPt * zoom}px;text-indent:${(layout.firstIndentPt - layout.restIndentPt) * zoom}px"` : '';
@@ -638,7 +647,8 @@ export function TextEditOverlay({
     if (committing || composingRef.current) return;
     const editable = editableRef.current;
     if (!editable) return;
-    const serialized = serializeRichText(editable, style, zoom);
+    const raw = serializeRichText(editable, style, zoom);
+    const serialized = bulletMode ? canonicalBulletValue(raw) : raw;
     const fontMetrics = paragraphMode ? measureFontMetrics(style, zoom) : undefined;
     const next: NextTextEdit = {
       text: serialized.text,
@@ -845,7 +855,7 @@ export function TextEditOverlay({
     editable.querySelectorAll<HTMLElement>('[data-pdf-source-piece]').forEach(wrapper => {
       const index = Number(wrapper.dataset.pdfSourcePiece), line = sourceCompositionsRef.current[Number(wrapper.dataset.pdfSourceLine ?? 0)], piece = line?.pieces[index], content = wrapper.querySelector<HTMLElement>('[data-pdf-piece-content]');
       if (!piece || !content) return;
-      if (!active) { wrapper.style.marginLeft = '0px'; content.style.letterSpacing = 'normal'; return; }
+      if (!active) { wrapper.style.marginLeft = '0px'; content.style.setProperty('--pdf-piece-tracking','0px'); content.style.letterSpacing = ''; return; }
       const previous = line?.pieces[index - 1];
       if (previous && line) {
         let cursor = 0, separator = '';
@@ -855,7 +865,8 @@ export function TextEditOverlay({
         }
         wrapper.style.marginLeft = `${(piece.x - previous.x - previous.widthPt - canvasWidth(separator, initialStyle)) * zoom}px`;
       } else wrapper.style.marginLeft = '0px';
-      content.style.letterSpacing = `${(piece.advanceTrackingPt ?? 0) * zoom}px`;
+      content.style.setProperty('--pdf-piece-tracking',`${(piece.advanceTrackingPt ?? 0) * zoom}px`);
+      content.style.letterSpacing = `calc(var(--pdf-piece-tracking,0px) + ${(piece.style.fontTrackingEm ?? 0) * piece.style.fontSizePt * zoom}px)`;
     });
   }, [boxLeftPt, initialAlign, initialParagraphs, initialStyle, measureTextWidth, sourceXCorrectionPt, style, width, zoom]);
   const updateParagraphPresentation = useCallback(() => {
@@ -885,7 +896,60 @@ export function TextEditOverlay({
       if (spacing < 0) paragraph.style.textAlignLast = 'justify';
     });
   }, [initialAlign, measureTextWidth, style, width, zoom]);
-  const handleInput = useCallback(() => { normalizeParagraphs(); updateParagraphPresentation(); updatePiecePresentation(); resizeToContent(); }, [normalizeParagraphs, updateParagraphPresentation, updatePiecePresentation, resizeToContent]);
+  const refreshWordFonts = useCallback(() => {
+    const editable = editableRef.current; if (!editable) return;
+    // Presentation attributes only: never replace a text node while typing.
+    const words = [...editable.querySelectorAll<HTMLElement>('[data-pdf-font-word]')];
+    let text = '';
+    const fragments = words.map(word => {
+      const ancestors: HTMLElement[] = []; let node: HTMLElement | null = word;
+      while (node && node !== editable) { ancestors.unshift(node); node = node.parentElement; }
+      const wordStyle = ancestors.reduce((inherited, element) => elementTextStyle(element, inherited, zoom), style);
+      const start = text.length, content = word.textContent ?? ''; text += content;
+      return { word, start, text: content, style: wordStyle };
+    });
+    const fallback = fallbackWordRanges(text, fragments, canUseSourceWord);
+    for (const part of fragments) {
+      const { word, style: wordStyle } = part;
+      const forceFallback = overlapsFallback(part.start, part.text.length, fallback);
+      const paint = (element: HTMLElement, resolved: TextStyle) => {
+        const family = textFontFamily(forceFallback ? { ...resolved, fontRef: undefined } : resolved, part.text);
+        if (element.style.fontFamily.replaceAll('"', '') !== family.replaceAll('"', '')) element.style.fontFamily = family;
+        // Native B/I creates formatting descendants inside a word wrapper.
+        // Give each formatting run its actual matched variant, not browser
+        // synthesis of the regular wrapper's uniquely-named font family.
+        element.dataset.fontName = resolved.fontName;
+        if (resolved.fontIdentity) element.dataset.fontIdentity = resolved.fontIdentity;
+        else delete element.dataset.fontIdentity;
+        if (resolved.fontWidthScale !== undefined) element.dataset.fontWidthScale = String(resolved.fontWidthScale);
+        else delete element.dataset.fontWidthScale;
+        if (resolved.fontTrackingEm !== undefined) element.dataset.fontTrackingEm = String(resolved.fontTrackingEm);
+        else delete element.dataset.fontTrackingEm;
+        element.style.letterSpacing = `calc(var(--pdf-piece-tracking,0px) + ${(resolved.fontTrackingEm ?? 0) * resolved.fontSizePt * zoom}px)`;
+        void ensureMatchedFont(resolved).catch(() => undefined);
+        for (const child of element.children) {
+          if (child instanceof HTMLElement) paint(child, elementTextStyle(child, resolved, zoom));
+        }
+      };
+      paint(word, wordStyle);
+    }
+  }, [style, zoom]);
+  const handleInput = useCallback(() => { refreshWordFonts(); normalizeParagraphs(); updateParagraphPresentation(); updatePiecePresentation(); resizeToContent(); }, [refreshWordFonts, normalizeParagraphs, updateParagraphPresentation, updatePiecePresentation, resizeToContent]);
+
+  const updateBulletPresentation = useCallback(() => {
+    if (editableRef.current && bulletMode?.indentPt !== undefined) refreshBulletEditorLayout(editableRef.current,bulletMode.indentPt,
+      (bulletMode.itemSpacingPt ?? 0) * style.fontSizePt / Math.max(1,block.style.fontSizePt),zoom);
+  }, [bulletMode?.indentPt,bulletMode?.itemSpacingPt,style.fontSizePt,block.style.fontSizePt,zoom]);
+  useLayoutEffect(() => { if (initializedRef.current) { updateBulletPresentation(); resizeToContent(); } }, [updateBulletPresentation,resizeToContent]);
+
+  const fontSeedRef = useRef([initialStyle, ...effectiveTextSpans(initialText, initialStyle, initialSpans).map(span => effectiveTextSpanStyle(initialStyle, span))]);
+  useEffect(() => {
+    let disposed = false;
+    void Promise.all([style, ...fontSeedRef.current].map(ensureMatchedFont))
+      .then(() => { if (!disposed) { refreshWordFonts(); updateParagraphPresentation(); resizeToContent(); } })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, [style, refreshWordFonts, updateParagraphPresentation, resizeToContent]);
 
   useLayoutEffect(() => {
     const editable = editableRef.current;
@@ -898,8 +962,9 @@ export function TextEditOverlay({
       editable.focus({ preventScroll: true });
       placeCaretAtEnd(editable);
     }
+    updateBulletPresentation();
     resizeToContent();
-  }, [resizeToContent, width, style, previewMode, baselineCorrection, initialStyle, zoom]);
+  }, [resizeToContent, updateBulletPresentation, width, style, previewMode, baselineCorrection, initialStyle, zoom]);
 
   useLayoutEffect(() => {
     measureBaseline();
@@ -1021,6 +1086,7 @@ export function TextEditOverlay({
       return;
     }
     window.document.execCommand(command, false);
+    refreshWordFonts();
     updateParagraphPresentation();
     measureBaseline();
     refreshSelectionStyle();
@@ -1077,6 +1143,9 @@ export function TextEditOverlay({
         ...value,
         fontName,
         fontRef: undefined,
+        fontIdentity: undefined,
+        fontWidthScale: undefined,
+        fontTrackingEm: undefined,
         sourceBold: undefined,
         sourceStrokeBold: undefined,
       }));
@@ -1128,9 +1197,14 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     if (!editable) return;
     event.preventDefault();
+    const text = event.clipboardData.getData('text/plain');
+    if (bulletMode?.indentPt !== undefined && /[\r\n]/u.test(text)) {
+      const prefix = markerPrefixAtLineEnd(editable,style,zoom,false) ?? '• ';
+      if (insertBulletItems(editable,text,style,zoom,bulletMode.indentPt,bulletMode.itemSpacingPt ?? 0,prefix)) { updateBulletPresentation(); handleInput(); return; }
+    }
     flowSelectedParagraphs(editable);
-    if (paragraphMode) insertParagraphText(editable, event.clipboardData.getData('text/plain'));
-    else insertPlainText(editable, event.clipboardData.getData('text/plain'));
+    if (paragraphMode) insertParagraphText(editable, text);
+    else insertPlainText(editable, text);
     handleInput();
   };
 
@@ -1279,7 +1353,7 @@ export function TextEditOverlay({
         onBeforeInput={(event) => {
           if (!(event.nativeEvent as InputEvent).inputType?.startsWith('history') && editableRef.current) flowSelectedParagraphs(editableRef.current);
         }}
-        onInput={handleInput}
+        onInput={() => { updateBulletPresentation(); handleInput(); }}
         onCompositionStart={()=>{if (editableRef.current) flowSelectedParagraphs(editableRef.current);composingRef.current=true;}}
         onCompositionUpdate={resizeToContent}
         onCompositionEnd={()=>{composingRef.current=false;handleInput();}}
@@ -1295,6 +1369,10 @@ export function TextEditOverlay({
           } else if (event.key === 'Enter') {
             event.preventDefault();
             const editable = editableRef.current;
+            if (editable && bulletMode?.indentPt !== undefined) {
+              const prefix = markerPrefixAtLineEnd(editable,style,zoom,false) ?? '• ';
+              if (insertBulletItems(editable,'\n',style,zoom,bulletMode.indentPt,bulletMode.itemSpacingPt ?? 0,prefix)) { updateBulletPresentation(); handleInput(); return; }
+            }
             if (editable && paragraphMode) {
               flowSelectedParagraphs(editable);
               insertParagraphBreak(editable); handleInput(); return;
@@ -1314,6 +1392,9 @@ export function TextEditOverlay({
         className="relative z-0 block w-full overflow-hidden whitespace-pre-wrap break-words border-0 bg-transparent p-0 outline-none"
         style={{
           ...textStyleToCss(style, zoom),
+          // New unwrapped text nodes also use a complete fallback face. Source
+          // word spans explicitly opt back into the PDF face when safe.
+          ...(style.fontIdentity ? { fontFamily: textFontFamily({ ...style, fontRef: undefined }) } : {}),
           ...(previewMode === 'preparing' ? {WebkitTextFillColor:'transparent',caretColor:colorCss(style.color)} : {}),
           lineHeight: lineHeight / style.fontSizePt,
           top: firstLineOffsetPx + baselineCorrection,

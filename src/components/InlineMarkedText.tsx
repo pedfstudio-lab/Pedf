@@ -43,10 +43,14 @@ export function InlineMarkedText({
   onDateClick,
 }: InlineMarkedTextProps) {
   return segments.map((segment, index) => {
+    const effectiveStyle = segment.span ? effectiveTextSpanStyle(style, segment.span) : style;
     const segmentStyle = textStyleToCss(
-      segment.span ? effectiveTextSpanStyle(style, segment.span) : style,
+      effectiveStyle,
       zoom,
     );
+    const content = effectiveStyle.fontIdentity
+      ? (segment.text.match(/\s+|\S+/gu) ?? []).map((word, index) => <span key={index} style={textStyleToCss(effectiveStyle, zoom, word)}>{word}</span>)
+      : segment.text;
     const key = `${index}:${segment.text}`;
     if (segment.location && !marksHidden) {
       return (
@@ -63,7 +67,7 @@ export function InlineMarkedText({
             ...underlineStyle(LOCATION_UNDERLINE_COLOR, LOCATION_UNDERLINE_OFFSET, 'solid'),
           }}
         >
-          {segment.text}
+          {content}
         </button>
       );
     }
@@ -82,10 +86,10 @@ export function InlineMarkedText({
             ...underlineStyle(DATE_UNDERLINE_COLOR, DATE_UNDERLINE_OFFSET, 'dotted'),
           }}
         >
-          {segment.text}
+          {content}
         </button>
       );
     }
-    return <span key={key} style={segmentStyle}>{segment.text}</span>;
+    return <span key={key} style={segmentStyle}>{content}</span>;
   });
 }

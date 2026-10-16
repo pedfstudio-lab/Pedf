@@ -2,10 +2,19 @@ import type { TextComposition, TextSpan, TextStyle } from '@/lib/export/types';
 import type { MeasureTextSpan, WrappedTextLine } from './textLayout';
 import { effectiveTextSpans, effectiveTextSpanStyle } from './richText';
 
-/** One uniform contraction, never smaller than any source-measured minimum gap. */
+/** Even a source-measured tight row must retain a third of a normal space. */
+export function visibleWordSpacingFloor(spans: readonly TextSpan[], style: TextStyle, measure: MeasureTextSpan): number {
+  if (!spans.length) return 0;
+  return Math.max(...spans.map(span => {
+    const resolved = { ...span, text: ' ', ...effectiveTextSpanStyle(style,span) };
+    return measure(' ',{ ...resolved,fontTrackingEm:0 }) / 3 - measure(' ',resolved);
+  }));
+}
+
+/** One uniform contraction, bounded by source gaps and readable spaces. */
 export function minimumWordSpacing(spans: readonly TextSpan[], style: TextStyle, measure: MeasureTextSpan, minimumGapEm?: number): number {
   if (minimumGapEm === undefined || !spans.length) return 0;
-  return Math.min(0, Math.max(...spans.map(span => {
+  return Math.min(0, Math.max(visibleWordSpacingFloor(spans, style, measure), ...spans.map(span => {
     const resolved = effectiveTextSpanStyle(style, span);
     return minimumGapEm * resolved.fontSizePt - measure(' ', span);
   })));

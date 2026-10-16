@@ -71,7 +71,13 @@ describe.runIf(enabled)('Changes 7–9 real PDF acceptance', () => {
     await writeFile('tmp/pdfs/5c2-789-facts-edited.pdf', exported.bytes);
     const after = await load(exported.bytes, 0), reopened = after.blocks.find(block => block.text.startsWith('Total items'))!;
     expect(reopened.lines.map(line => line.text)).toEqual(text.split('\n'));
-    expect(reopened.lines.slice(1).map(line => line.rect)).toEqual(block.lines.slice(1).map(line => line.rect));
+    for (const [index, line] of reopened.lines.slice(1).entries()) {
+      const original = block.lines[index + 1]!.rect;
+      // A subset font's serialized advance can differ in its last binary bit.
+      // Positions/heights remain exact; tolerate only numerical noise in width.
+      expect({ x: line.rect.x, y: line.rect.y, h: line.rect.h }).toEqual({ x: original.x, y: original.y, h: original.h });
+      expect(line.rect.w).toBeCloseTo(original.w, 10);
+    }
   });
   for (const file of ['tmp/nmat-check.pdf', 'tmp/pdfs/nmat-syllabus.pdf']) {
     it.runIf(existsSync(file))(`${file}: keeps the two notes outside their bullet lists`, async () => {

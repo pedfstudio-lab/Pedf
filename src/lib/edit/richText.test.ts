@@ -32,6 +32,7 @@ interface FakeNode {
     readonly fontSizePt?: string;
     readonly fontName?: string;
     readonly fontRef?: string;
+    readonly fontTrackingEm?: string;
     readonly textColor?: string;
     readonly sourceBold?: string;
     readonly sourceStrokeBold?: string;
@@ -49,6 +50,19 @@ const element = (
 ): FakeNode => ({ nodeType: 1, tagName, style: elementStyle, dataset, childNodes });
 
 describe('rich text serialization', () => {
+  it('round-trips drawn tracking, retaining an explicit untracked run beside a tracked run', () => {
+    const root=element('DIV',[text('Tight '),element('SPAN',[text('normal')],{}, {fontTrackingEm:'0'})]);
+    const tracked={...style,fontTrackingEm:-0.04};
+    const result=serializeRichText(root as unknown as HTMLElement,tracked);
+    expect(result.spans).toEqual([{text:'Tight ',bold:false,italic:false},{text:'normal',bold:false,italic:false,fontTrackingEm:0}]);
+    const html=richTextToHtml(result.text,result.style,result.spans,2);
+    expect(html).toContain('data-font-tracking-em="0"');
+    expect(html).toContain('letter-spacing:calc(var(--pdf-piece-tracking,0px) + -0.96px)');
+    // A new family must not inherit the PDF face's tightening on re-open.
+    const changedFamily=richTextToHtml('normal',tracked,[{text:'normal',bold:false,italic:false,fontName:'Times New Roman'}],2);
+    expect(changedFamily).toContain('letter-spacing:calc(var(--pdf-piece-tracking,0px) + 0px)');
+    expect(changedFamily).not.toContain('-0.96px');
+  });
   it('walks a mixed bold/italic DOM tree and collapses adjacent equal runs', () => {
     const root = element('DIV', [
       text('Plain '),

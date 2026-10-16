@@ -63,7 +63,7 @@ interface RenderEditorOptions {
   readonly toolbarObstacles?: readonly ScreenRect[];
   readonly blocks?: readonly TextBlock[];
   readonly existing?: readonly TextEdit[];
-  readonly bulletMode?: { readonly items: readonly string[]; readonly symbols?: readonly string[]; readonly maxHeightPt: number };
+  readonly bulletMode?: { readonly items: readonly string[]; readonly symbols?: readonly string[]; readonly maxHeightPt: number; readonly indentPt?: number; readonly itemSpacingPt?: number };
   readonly onDone?: ReturnType<typeof vi.fn>;
   readonly onCancel?: ReturnType<typeof vi.fn>;
   readonly measureTextWidth?: (line: string) => number;
@@ -108,6 +108,50 @@ function placeCaretAtTextEnd(node: Node): void {
   selection?.removeAllRanges();
   selection?.addRange(range);
 }
+
+it('keeps matched-font presentation out of the no-op model and preserves text nodes on input', async () => {
+  const value = paragraph('First ordinary line', 'Last ordinary line');
+  const fontStyle = { ...style, fontName:'sans-serif', fontIdentity:'Calibri', fontRef:'task78-editor-subset' };
+  const matched = { ...value, style:fontStyle, lines:value.lines.map(line=>({ ...line,style:fontStyle,runs:line.runs.map(run=>({...run,style:fontStyle})) })) };
+  const onDone=vi.fn(),onCancel=vi.fn();
+  renderEditor(matched,1,0,{onDone,onCancel});
+  await act(async()=>{ await Promise.resolve(); });
+  const editable=screen.getByRole('textbox',{name:'Editable text'}), first=editable.querySelector('[data-pdf-font-word]')!.firstChild!;
+  expect(editable.querySelector('[data-pdf-font-word]')?.getAttribute('data-font-name')).toBe('sans-serif');
+  fireEvent.input(editable);
+  expect(editable.querySelector('[data-pdf-font-word]')!.firstChild).toBe(first);
+  fireEvent.click(screen.getByRole('button',{name:'Done'}));
+  expect(onDone).not.toHaveBeenCalled();expect(onCancel).toHaveBeenCalledOnce();
+});
+
+it('selects the real matched B/I variant inside native formatting descendants without replacing text', () => {
+  const value = block('QualityQZ', 12), fontStyle = { ...value.style, fontIdentity:'Calibri' };
+  renderEditor({ ...value, style:fontStyle },1,0);
+  const editor = screen.getByRole('textbox'), word = editor.querySelector<HTMLElement>('[data-pdf-font-word]')!;
+  const text = word.firstChild!, nativeBold = document.createElement('b');
+  nativeBold.append(text); word.append(nativeBold);
+  placeCaretAtTextEnd(text);
+  fireEvent.input(editor);
+  expect(nativeBold.style.fontFamily).toContain('Carlito-Bold-ttf');
+  expect(nativeBold.dataset.fontName).toBe(fontStyle.fontName);
+  expect(nativeBold.firstChild).toBe(text);
+  expect(window.getSelection()?.anchorNode).toBe(text);
+  nativeBold.style.fontWeight = 'normal'; nativeBold.style.fontStyle = 'italic';
+  fireEvent.input(editor);
+  expect(nativeBold.style.fontFamily).toContain('Carlito-Italic-ttf');
+  nativeBold.style.fontStyle = 'normal'; fireEvent.input(editor);
+  expect(nativeBold.style.fontFamily).toContain('Carlito-Regular-ttf');
+  expect(nativeBold.firstChild).toBe(text);
+});
+
+it('keeps a presentation-aligned bullet list a no-op when Done is pressed unchanged', () => {
+  const value = block('First item\nSecond item',12), onDone=vi.fn(),onCancel=vi.fn();
+  renderEditor({ ...value, style:{...value.style,fontIdentity:'Calibri'} },1,0,{onDone,onCancel,
+    bulletMode:{items:['First item','Second item'],maxHeightPt:400,indentPt:29,itemSpacingPt:4.5}});
+  expect(screen.getByRole('textbox').querySelectorAll('[data-pdf-bullet-item]')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button',{name:'Done'}));
+  expect(onDone).not.toHaveBeenCalled();expect(onCancel).toHaveBeenCalledOnce();
+});
 
 function selectText(node: Node, start: number, end: number): void {
   const range = document.createRange();
@@ -366,6 +410,25 @@ describe('TextEditOverlay first-line placement', () => {
 });
 
 describe('TextEditOverlay paragraph seed', () => {
+  it('adds measured-piece residual tracking to font tracking instead of overriding either', () => {
+    const tracked={...style,fontIdentity:'Lato',fontTrackingEm:-0.04};
+    const text='N E W Y E A R';
+    const runs=[{text:'N E W',x:40,width:50},{text:'Y E A R',x:140,width:70}].map(piece=>({
+      pageIndex:0,text:piece.text,style:tracked,rect:{x:piece.x,y:680,w:piece.width,h:20},
+      metrics:{matrix:[20,0,0,20,piece.x,680] as const,x:piece.x,baselineY:680,widthPt:piece.width},
+    }));
+    renderEditor({...block(text,24),style:tracked,lines:[{pageIndex:0,text,style:tracked,runs,baselineY:680,rect:{x:40,y:680,w:170,h:20}}]});
+    const editor=screen.getByRole('textbox',{name:'Editable text'});
+    const contents=editor.querySelectorAll<HTMLElement>('[data-pdf-piece-content]');
+    const first=contents[0]!.querySelector<HTMLElement>('[data-pdf-font-word]')!;
+    const node=first.firstChild;
+    expect(Number.parseFloat(contents[0]!.style.getPropertyValue('--pdf-piece-tracking'))).toBeCloseTo(0.8);
+    expect(first.style.letterSpacing).toContain('var(--pdf-piece-tracking,0px)');
+    expect(first.style.letterSpacing).toContain('-0.8px');
+    fireEvent.input(editor);
+    expect(first.firstChild).toBe(node);
+    expect(first.style.letterSpacing).toContain('var(--pdf-piece-tracking,0px)');
+  });
   it.each([1, 2])('uses displayed-face metrics, not source-face heights, at zoom %s', zoom => {
     vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue({
       font: '', measureText(this: { font: string }, text: string) {

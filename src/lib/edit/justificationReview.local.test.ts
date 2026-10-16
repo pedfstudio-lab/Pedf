@@ -34,7 +34,9 @@ describe.runIf(process.env.TASK74_JUSTIFY_REVIEW === '1')('Step 5d revised justi
           const extracted = mergeRunsIntoLines(runs, options).map(line => line.text);
           expect(extracted, `${file} p${entry.pageIndex + 1}`).toEqual(entry.lines); pages++; lineCount += extracted.length;
           for (const [blockIndex, block] of groupRunsIntoBlocks(runs, options).entries()) {
-            if (block.lines.length < 2 || (block.align ?? 'left') !== 'left') continue;
+            // The detector is now shipped: accepted boxes already say justify.
+            // Review the same pre-detector population, not just its rejections.
+            if (block.lines.length < 2 || !['left', 'justify'].includes(block.align ?? 'left')) continue;
             const groups = sourceParagraphs(block).lines, full = groups.flatMap(group => group.slice(0, -1));
             const fullIndexes = full.map(line => block.lines.indexOf(line));
             const measurements = block.lines.map(line => ({ text: line.text, x: line.rect.x, right: line.rect.x + line.rect.w, baseline: line.baselineY, ...wordGaps(line, raw) }));

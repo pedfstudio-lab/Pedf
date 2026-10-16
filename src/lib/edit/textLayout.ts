@@ -115,6 +115,9 @@ interface StyledCharacter {
   readonly fontSizePt?: number;
   readonly fontName?: string;
   readonly fontRef?: string;
+  readonly fontIdentity?: string;
+  readonly fontWidthScale?: number;
+  readonly fontTrackingEm?: number;
   readonly color?: TextSpan['color'];
   readonly sourceBold?: boolean;
   readonly sourceStrokeBold?: boolean;
@@ -128,6 +131,9 @@ function sameCharacterStyle(span: TextSpan, character: StyledCharacter): boolean
     span.fontSizePt === character.fontSizePt &&
     span.fontName === character.fontName &&
     span.fontRef === character.fontRef &&
+    span.fontIdentity === character.fontIdentity &&
+    span.fontWidthScale === character.fontWidthScale &&
+    span.fontTrackingEm === character.fontTrackingEm &&
     span.color?.r === character.color?.r &&
     span.color?.g === character.color?.g &&
     span.color?.b === character.color?.b &&
@@ -151,6 +157,9 @@ function charactersToSpans(characters: readonly StyledCharacter[]): TextSpan[] {
         ...(character.fontSizePt ? { fontSizePt: character.fontSizePt } : {}),
         ...(character.fontName ? { fontName: character.fontName } : {}),
         ...(character.fontRef ? { fontRef: character.fontRef } : {}),
+        ...(character.fontIdentity ? { fontIdentity: character.fontIdentity } : {}),
+        ...(character.fontWidthScale !== undefined ? { fontWidthScale: character.fontWidthScale } : {}),
+        ...(character.fontTrackingEm !== undefined ? { fontTrackingEm: character.fontTrackingEm } : {}),
         ...(character.color ? { color: character.color } : {}),
         ...(character.sourceBold !== undefined ? { sourceBold: character.sourceBold } : {}),
         ...(character.sourceStrokeBold !== undefined
@@ -266,6 +275,9 @@ export function wrapTextSpansToLines(
         ...(span.fontSizePt ? { fontSizePt: span.fontSizePt } : {}),
         ...(span.fontName ? { fontName: span.fontName } : {}),
         ...(span.fontRef ? { fontRef: span.fontRef } : {}),
+        ...(span.fontIdentity ? { fontIdentity: span.fontIdentity } : {}),
+        ...(span.fontWidthScale !== undefined ? { fontWidthScale: span.fontWidthScale } : {}),
+        ...(span.fontTrackingEm !== undefined ? { fontTrackingEm: span.fontTrackingEm } : {}),
         ...(span.color ? { color: span.color } : {}),
         ...(span.sourceBold !== undefined ? { sourceBold: span.sourceBold } : {}),
         ...(span.sourceStrokeBold !== undefined

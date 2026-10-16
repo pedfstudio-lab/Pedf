@@ -205,7 +205,9 @@ describe('RAHUL résumé bullet detection', () => {
         .filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
         .map((item) => item.str);
       expect(strings.filter((text) => text === '•')).toHaveLength(7);
-      expect(strings.join(' ')).toContain('Added export bullet');
+      // One-face-per-word may switch from source subset to twin between words;
+      // separate PDF text items can include their own literal separator.
+      expect(strings.join(' ').replace(/\s+/gu, ' ')).toContain('Added export bullet');
     } finally {
       await reopened.destroy();
     }
@@ -430,7 +432,7 @@ describe('Corporate Governance symbol-character bullet detection', () => {
 
       expect(committed?.text).toBe(replacement);
       expect(committed?.text).not.toMatch(/[\uF0B7☐]/u);
-      expect(font?.name).toMatch(/Times|Helvetica|Courier/i);
+      expect(font?.name).toMatch(/Times|Helvetica|Courier|Liberation/i); // Task 78 embeds the shipped twin.
       expect(font?.name).not.toMatch(/Symbol/i);
     } finally {
       await reopened.destroy();

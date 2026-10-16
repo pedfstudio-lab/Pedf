@@ -189,7 +189,10 @@ function isStyle(value: unknown): value is TextStyle {
     && typeof value.bold === 'boolean'
     && typeof value.italic === 'boolean'
     && isRgb(value.color)
-    && (value.fontRef === undefined || typeof value.fontRef === 'string');
+    && (value.fontRef === undefined || typeof value.fontRef === 'string')
+    && (value.fontIdentity === undefined || typeof value.fontIdentity === 'string')
+    && (value.fontWidthScale === undefined || (isFiniteNumber(value.fontWidthScale) && value.fontWidthScale >= 0.5 && value.fontWidthScale <= 2))
+    && (value.fontTrackingEm === undefined || (isFiniteNumber(value.fontTrackingEm) && value.fontTrackingEm >= -0.2 && value.fontTrackingEm <= 0.2));
 }
 
 function isSpan(value: unknown): value is TextSpan {
@@ -199,7 +202,10 @@ function isSpan(value: unknown): value is TextSpan {
     && typeof value.italic === 'boolean'
     && (value.fontSizePt === undefined || (isFiniteNumber(value.fontSizePt) && value.fontSizePt > 0))
     && (value.fontName === undefined || typeof value.fontName === 'string')
-    && (value.fontRef === undefined || typeof value.fontRef === 'string');
+    && (value.fontRef === undefined || typeof value.fontRef === 'string')
+    && (value.fontIdentity === undefined || typeof value.fontIdentity === 'string')
+    && (value.fontWidthScale === undefined || (isFiniteNumber(value.fontWidthScale) && value.fontWidthScale >= 0.5 && value.fontWidthScale <= 2))
+    && (value.fontTrackingEm === undefined || (isFiniteNumber(value.fontTrackingEm) && value.fontTrackingEm >= -0.2 && value.fontTrackingEm <= 0.2));
 }
 
 function isComposition(value: unknown): value is TextComposition {

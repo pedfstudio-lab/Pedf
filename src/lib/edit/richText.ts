@@ -3,6 +3,9 @@ import {
   alignParagraphLayouts, breakStartsLine, continuationParagraph, hasRootParagraphText, readParagraphLayout, ZERO_PARAGRAPH,
 } from './paragraphDom';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
+import { textFontFamily } from './textStyleCss';
+import { canUseSourceWord } from '@/lib/fonts/fontMatch';
+import { fallbackWordRanges, locateFragments, overlapsFallback } from '@/lib/fonts/wordFonts';
 
 export interface SerializedRichText {
   readonly text: string;
@@ -25,6 +28,9 @@ function sameSpanStyle(left: TextSpan, right: TextSpan): boolean {
     left.fontSizePt === right.fontSizePt &&
     left.fontName === right.fontName &&
     left.fontRef === right.fontRef &&
+    left.fontIdentity === right.fontIdentity &&
+    left.fontWidthScale === right.fontWidthScale &&
+    left.fontTrackingEm === right.fontTrackingEm &&
     sameColor(left.color, right.color) &&
     left.sourceBold === right.sourceBold &&
     left.sourceStrokeBold === right.sourceStrokeBold &&
@@ -41,6 +47,9 @@ export function effectiveTextSpanStyle(baseStyle: TextStyle, span: TextSpan): Te
     fontSizePt: span.fontSizePt ?? baseStyle.fontSizePt,
     fontName: span.fontName ?? baseStyle.fontName,
     fontRef: changesFamily ? span.fontRef : (span.fontRef ?? baseStyle.fontRef),
+    fontIdentity: changesFamily ? span.fontIdentity : (span.fontIdentity ?? baseStyle.fontIdentity),
+    fontWidthScale: changesFamily ? span.fontWidthScale : (span.fontWidthScale ?? baseStyle.fontWidthScale),
+    fontTrackingEm: changesFamily ? span.fontTrackingEm : (span.fontTrackingEm ?? baseStyle.fontTrackingEm),
     color: span.color ?? baseStyle.color,
     sourceBold: changesFamily ? span.sourceBold : (span.sourceBold ?? baseStyle.sourceBold),
     sourceStrokeBold: changesFamily
@@ -59,6 +68,9 @@ function spanForRun(text: string, run: TextRun, baseStyle: TextStyle): TextSpan 
     ...(style.fontSizePt !== baseStyle.fontSizePt ? { fontSizePt: style.fontSizePt } : {}),
     ...(style.fontName !== baseStyle.fontName ? { fontName: style.fontName } : {}),
     ...(style.fontRef !== baseStyle.fontRef && style.fontRef ? { fontRef: style.fontRef } : {}),
+    ...(style.fontIdentity !== baseStyle.fontIdentity && style.fontIdentity ? { fontIdentity: style.fontIdentity } : {}),
+    ...(style.fontWidthScale !== baseStyle.fontWidthScale && style.fontWidthScale !== undefined ? { fontWidthScale: style.fontWidthScale } : {}),
+    ...(style.fontTrackingEm !== baseStyle.fontTrackingEm ? { fontTrackingEm: style.fontTrackingEm ?? 0 } : {}),
     ...(!sameColor(style.color, baseStyle.color) ? { color: style.color } : {}),
     ...(style.sourceBold !== baseStyle.sourceBold && style.sourceBold !== undefined
       ? { sourceBold: style.sourceBold }
@@ -284,6 +296,22 @@ function colorKnownFromElement(element: HTMLElement, inherited: boolean | undefi
   return element.style?.color || element.dataset?.textColor ? true : inherited;
 }
 
+export function elementTextStyle(element: HTMLElement, inherited: TextStyle, zoom = 1): TextStyle {
+  const fontName = fontNameFromElement(element, inherited.fontName), sameFamily = fontName === inherited.fontName;
+  return { ...inherited, fontName,
+    bold: weightFromElement(element, inherited.bold), italic: italicFromElement(element, inherited.italic),
+    fontSizePt: fontSizeFromElement(element, inherited.fontSizePt, zoom),
+    fontRef: fontRefFromElement(element, inherited.fontRef, !sameFamily),
+    fontIdentity: element.dataset?.fontIdentity ?? (sameFamily ? inherited.fontIdentity : undefined),
+    fontWidthScale: element.dataset?.fontWidthScale ? Number(element.dataset.fontWidthScale) : (sameFamily ? inherited.fontWidthScale : undefined),
+    fontTrackingEm: element.dataset?.fontTrackingEm !== undefined ? Number(element.dataset.fontTrackingEm) : (sameFamily ? inherited.fontTrackingEm : undefined),
+    color: colorFromElement(element, inherited.color),
+    sourceBold: sourceBoldFromElement(element, sameFamily ? inherited.sourceBold : undefined),
+    sourceStrokeBold: sourceStrokeBoldFromElement(element, sameFamily ? inherited.sourceStrokeBold : undefined),
+    colorKnown: colorKnownFromElement(element, inherited.colorKnown),
+  };
+}
+
 /** Serialize an uncontrolled contentEditable tree into absolute bold/italic runs. */
 export function serializeRichText(
   root: HTMLElement,
@@ -302,6 +330,9 @@ export function serializeRichText(
       ...(current.fontSizePt !== baseStyle.fontSizePt ? { fontSizePt: current.fontSizePt } : {}),
       ...(current.fontName !== baseStyle.fontName ? { fontName: current.fontName } : {}),
       ...(current.fontRef !== baseStyle.fontRef && current.fontRef ? { fontRef: current.fontRef } : {}),
+      ...(current.fontIdentity !== baseStyle.fontIdentity && current.fontIdentity ? { fontIdentity: current.fontIdentity } : {}),
+      ...(current.fontWidthScale !== baseStyle.fontWidthScale && current.fontWidthScale !== undefined ? { fontWidthScale: current.fontWidthScale } : {}),
+      ...(current.fontTrackingEm !== baseStyle.fontTrackingEm && current.fontTrackingEm !== undefined ? { fontTrackingEm: current.fontTrackingEm } : {}),
       ...(!sameColor(current.color, baseStyle.color) ? { color: current.color } : {}),
       ...(current.sourceBold !== baseStyle.sourceBold ? { sourceBold: current.sourceBold } : {}),
       ...(current.sourceStrokeBold !== baseStyle.sourceStrokeBold
@@ -342,6 +373,9 @@ export function serializeRichText(
       fontSizePt: fontSizeFromElement(element, inherited.fontSizePt, zoom),
       fontName,
       fontRef: fontRefFromElement(element, inherited.fontRef, fontName !== inherited.fontName),
+      fontIdentity: element.dataset?.fontIdentity ?? (fontName === inherited.fontName ? inherited.fontIdentity : undefined),
+      fontWidthScale: element.dataset?.fontWidthScale ? Number(element.dataset.fontWidthScale) : (fontName === inherited.fontName ? inherited.fontWidthScale : undefined),
+      fontTrackingEm: element.dataset?.fontTrackingEm !== undefined ? Number(element.dataset.fontTrackingEm) : (fontName === inherited.fontName ? inherited.fontTrackingEm : undefined),
       color,
       sourceBold: sourceBoldFromElement(
         element,
@@ -379,6 +413,7 @@ function escapeAttribute(text: string): string {
 }
 
 function cssFontFamily(span: TextSpan, baseStyle: TextStyle): string | undefined {
+  if (baseStyle.fontIdentity || span.fontIdentity) return textFontFamily(effectiveTextSpanStyle(baseStyle, span), span.text);
   if (!span.fontName && !span.fontRef) return undefined;
   const family = span.fontName ?? baseStyle.fontName;
   return span.fontRef ? `"${span.fontRef.replace(/"/g, '\\"')}", ${family}` : family;
@@ -404,21 +439,32 @@ export function richTextToHtml(
       return `<div data-pdf-paragraph="true" data-paragraph-id="source-${index}" data-gap-before-pt="${gap}" data-first-indent-pt="${layout.firstIndentPt}" data-rest-indent-pt="${layout.restIndentPt}" style="margin-top:${gap * zoom}px;padding-left:${layout.restIndentPt * zoom}px;text-indent:${(layout.firstIndentPt - layout.restIndentPt) * zoom}px">${part ? richTextToHtml(part, style, spans ? parts[index] : undefined, zoom) : '<br>'}</div>`;
     }).join('');
   }
-  if (!spans) return escapeHtml(text.replace(/\r\n?/g, '\n'));
-  return effectiveTextSpans(text, style, spans).map((span) => {
+  if (!spans && !style.fontIdentity) return escapeHtml(text.replace(/\r\n?/g, '\n'));
+  const words = effectiveTextSpans(text, style, spans).flatMap(span => (style.fontIdentity || span.fontIdentity)
+    ? (span.text.match(/\s+|\S+/gu) ?? []).map(text => ({ ...span, text })) : [span]);
+  const fragments = locateFragments(text, words.map(span => ({ text: span.text, style: effectiveTextSpanStyle(style, span) })));
+  const fallback = fallbackWordRanges(text, fragments, canUseSourceWord);
+  return words.map((span, index) => {
     const content = escapeHtml(span.text);
-    const family = cssFontFamily(span, style);
+    const resolved = fragments[index]!.style;
+    const family = (style.fontIdentity || span.fontIdentity) && overlapsFallback(fragments[index]!.start, span.text.length, fallback)
+      ? textFontFamily({ ...fragments[index]!.style, fontRef: undefined }) : cssFontFamily(span, style);
     const declarations = [
       `font-weight:${span.bold ? 'bold' : 'normal'}`,
       `font-style:${span.italic ? 'italic' : 'normal'}`,
       ...(span.fontSizePt ? [`font-size:${span.fontSizePt * zoom}px`] : []),
       ...(family ? [`font-family:${family}`] : []),
+      ...((resolved.fontTrackingEm !== undefined || style.fontTrackingEm !== undefined)
+        ? [`letter-spacing:calc(var(--pdf-piece-tracking,0px) + ${(resolved.fontTrackingEm ?? 0) * resolved.fontSizePt * zoom}px)`] : []),
       ...(span.color ? [`color:${colorCss(span.color)}`] : []),
     ].join(';');
     const data = [
       ...(span.fontSizePt ? [` data-font-size-pt="${span.fontSizePt}"`] : []),
-      ...(span.fontName || span.fontRef ? [` data-font-name="${escapeAttribute(span.fontName ?? style.fontName)}"`] : []),
+      ...(span.fontName || span.fontRef || span.fontIdentity || style.fontIdentity ? [` data-font-name="${escapeAttribute(span.fontName ?? style.fontName)}"`] : []),
       ...(span.fontRef ? [` data-font-ref="${escapeAttribute(span.fontRef)}"`] : []),
+      ...((span.fontIdentity ?? style.fontIdentity) ? [` data-font-identity="${escapeAttribute(span.fontIdentity ?? style.fontIdentity!)}" data-pdf-font-word="true"`] : []),
+      ...(span.fontWidthScale !== undefined ? [` data-font-width-scale="${span.fontWidthScale}"`] : []),
+      ...(span.fontTrackingEm !== undefined ? [` data-font-tracking-em="${span.fontTrackingEm}"`] : []),
       ...(span.color ? [` data-text-color="${span.color.r},${span.color.g},${span.color.b}"`] : []),
       ...(span.sourceBold !== undefined ? [` data-source-bold="${span.sourceBold}"`] : []),
       ...(span.sourceStrokeBold !== undefined

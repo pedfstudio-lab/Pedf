@@ -4,6 +4,8 @@ import type { PdfRect, TextAlignment, TextStyle } from '@/lib/export/types';
 import { viewportToPdf } from '@/lib/export/coordinates';
 import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
+import { pageFontTracking, registerSourceFont, sourceFontIdentity } from '@/lib/fonts/fontMatch';
+import { ensureMatchedFont, prepareSourceFont } from '@/lib/fonts/twinFonts';
 import { dropCoveredTextRuns } from './hiddenText';
 import { resolveTextPaint, textPaintForItems } from './textPaint';
 import type { RuleLine } from './ruleLines';
@@ -712,6 +714,21 @@ export async function extractTextRuns(
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const paintByItem = operatorList ? textPaintForItems(content.items, operatorList) : null;
   const glyphWidths = operatorList ? glyphWidthsByFont(operatorList) : new Map<string, Map<string, number>>();
+  // Font identity is appearance metadata only: fontName and every grouping
+  // decision stay unchanged. Only fonts actually used on this page are fetched.
+  const usedRefs = [...new Set(content.items.flatMap(item => 'str' in item ? [item.fontName] : []))];
+  for (const ref of usedRefs) if (page.commonObjs.has(ref)) registerSourceFont(ref, page.commonObjs.get(ref), glyphWidths.get(ref));
+  await Promise.all(usedRefs.map(async ref => {
+    if (!page.commonObjs.has(ref)) return;
+    const font = page.commonObjs.get(ref);
+    const style: TextStyle = { fontName: font?.name ?? ref, fontRef: ref, fontSizePt: 12,
+      bold: sourceBoldFromFont(font?.name ?? ref, font?.data), italic: classifyFontStyle(font?.name ?? ref).italic,
+      color: { r: 0, g: 0, b: 0 }, ...sourceFontIdentity(ref) };
+    try {
+      await prepareSourceFont(ref, style, usedRefs);
+      await ensureMatchedFont({ ...style, ...sourceFontIdentity(ref) });
+    } catch { /* Failed font loading must never hide readable source text. Export reports it. */ }
+  }));
   const sourceStates = operatorList ? textStatesForItems(content.items, operatorList) : [];
   const wordSpacing = operatorList ? await rawSpacing(page) : new Map<string, RawSpacing>();
   const runs: TextRun[] = [];
@@ -780,6 +797,7 @@ export async function extractTextRuns(
       ...(spaceWidthPt !== undefined ? { spaceWidthPt } : {}),
       style: {
         fontName,
+        ...sourceFontIdentity(fontRef),
         fontSizePt: verticalScale,
         bold: sourceBold || paintBold,
         italic: nameStyle.italic || (programStyle?.italic ?? false),
@@ -793,9 +811,13 @@ export async function extractTextRuns(
     itemIndexes.push(itemIndex);
   }
 
-  return dropSameSpotCopies(operatorList
+  const visible = dropSameSpotCopies(operatorList
     ? dropCoveredTextRuns(runs, itemIndexes, content.items, operatorList, viewport)
     : runs);
+  const tracking = pageFontTracking(visible);
+  return visible.map(run => tracking.has(run.style.fontRef ?? '')
+    ? { ...run, style: { ...run.style, fontTrackingEm: tracking.get(run.style.fontRef!)! } }
+    : run);
 }
 
 /**

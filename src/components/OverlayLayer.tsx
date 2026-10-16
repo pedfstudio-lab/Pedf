@@ -31,7 +31,7 @@ import type { BulletListItemLayout, NextTextEdit } from '@/lib/edit/buildTextEdi
 import { wrapTextSpansToLines, wrapTextToLines } from '@/lib/edit/textLayout';
 import { wrapTextParagraphs } from '@/lib/edit/paragraphLayout';
 import { effectiveTextSpanStyle } from '@/lib/edit/richText';
-import { textStyleToCanvasFont, textStyleToCss } from '@/lib/edit/textStyleCss';
+import { measureMatchedText, textStyleToCss } from '@/lib/edit/textStyleCss';
 import { coversOriginalRect } from '@/lib/edit/coverMatch';
 import { continuesCoverRun } from '@/lib/edit/coverTransactions';
 import { editorTopCorrection, freeTextBoxRect } from '@/lib/edit/editorPosition';
@@ -274,8 +274,7 @@ function wrapNextText(next: NextTextEdit, source?: TextBlock) {
   const context = canvas.getContext('2d');
   if (next.paragraphs) return wrapTextParagraphs(next, (text, span) => {
     const spanStyle = effectiveTextSpanStyle(next.style, span);
-    if (context) context.font = textStyleToCanvasFont(spanStyle);
-    return context?.measureText(text).width ?? text.length * spanStyle.fontSizePt * 0.55;
+    return context ? measureMatchedText(context, text, spanStyle) : text.length * spanStyle.fontSizePt * 0.55;
   }, source);
   if (next.spans) {
     return wrapTextSpansToLines(
@@ -283,18 +282,14 @@ function wrapNextText(next: NextTextEdit, source?: TextBlock) {
       next.width,
       (text, span) => {
         const spanStyle = effectiveTextSpanStyle(next.style, span);
-        if (context) {
-          context.font = textStyleToCanvasFont(spanStyle);
-        }
-        return context?.measureText(text).width ?? text.length * spanStyle.fontSizePt * 0.55;
+        return context ? measureMatchedText(context, text, spanStyle) : text.length * spanStyle.fontSizePt * 0.55;
       },
     );
   }
-  if (context) context.font = textStyleToCanvasFont(next.style);
   return wrapTextToLines(
     next.text,
     next.width,
-    (text) => context?.measureText(text).width ?? text.length * next.style.fontSizePt * 0.55,
+    (text) => context ? measureMatchedText(context, text, next.style) : text.length * next.style.fontSizePt * 0.55,
   );
 }
 
@@ -310,21 +305,17 @@ function wrapBulletItems(list: BulletList, next: NextTextEdit): BulletListItemLa
         textWidth,
         (value, span) => {
           const spanStyle = effectiveTextSpanStyle(next.style, span);
-          if (context) {
-            context.font = textStyleToCanvasFont(spanStyle);
-          }
-          return context?.measureText(value).width ?? value.length * spanStyle.fontSizePt * 0.55;
+          return context ? measureMatchedText(context, value, spanStyle) : value.length * spanStyle.fontSizePt * 0.55;
         },
       ),
     }));
   }
-  if (context) context.font = textStyleToCanvasFont(next.style);
   return parseBulletEditorItems(next.text).map((text) => ({
     text,
     lines: wrapTextToLines(
       text,
       textWidth,
-      (value) => context?.measureText(value).width ?? value.length * next.style.fontSizePt * 0.55,
+      (value) => context ? measureMatchedText(context, value, next.style) : value.length * next.style.fontSizePt * 0.55,
     ),
   }));
 }
@@ -1361,6 +1352,8 @@ export function OverlayLayer({
               bulletMode={activeBulletList ? {
                 items: activeBulletList.items.map((item) => item.text),
                 symbols: activeBulletList.items.map(item => item.markerSymbol ?? '•'),
+                indentPt: Math.max(1,activeBulletList.textX - activeBulletList.bulletX),
+                itemSpacingPt: activeBulletList.itemSpacingPt,
                 maxHeightPt: availableBulletListHeight(
                   activeBulletList,
                   blocks,

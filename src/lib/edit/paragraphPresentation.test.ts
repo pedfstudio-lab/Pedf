@@ -8,7 +8,7 @@ import { serializeRichText } from './richText';
 const style: TextStyle = { fontName: 'Helvetica', fontSizePt: 10, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
 function fixture(): TextBlock {
   const lines = ['alpha beta', 'gamma delta', 'other words', 'last words'].map((text, index) => {
-    const y = 700 - index * 20 - (index >= 2 ? 20 : 0), rect = { x: 40, y, w: 90, h: 10 };
+    const y = 700 - index * 20 - (index >= 2 ? 20 : 0), rect = { x: 40, y, w: 104, h: 10 };
     return { pageIndex: 0, text, rect, baselineY: y, style, runs: [{ pageIndex: 0, text, rect, style, spaceWidthPt: 5, characterWidthsPt: [...text].map(() => 90 / text.length),
       metrics: { matrix: [10, 0, 0, 10, 40, y] as const, x: 40, baselineY: y, widthPt: 90 } }] };
   });
@@ -16,6 +16,15 @@ function fixture(): TextBlock {
 }
 afterEach(() => { document.body.replaceChildren(); window.getSelection()?.removeAllRanges(); });
 describe('measured paragraph presentation', () => {
+  it('does not migrate the presentation of old saved rows when a late font is wide', () => {
+    const root=document.createElement('div');
+    root.innerHTML='<div data-pdf-measured-paragraph="true" data-pdf-saved-rows="true"><span data-pdf-source-row="true" data-pdf-source-width-pt="10">alpha beta</span></div>';
+    recalibrateParagraphRows(root,style,1,text=>text.length*10);
+    const paragraph=root.firstElementChild as HTMLElement;
+    expect(paragraph.dataset.pdfGapReflow).toBeUndefined();
+    expect(paragraph.dataset.pdfFlowing).toBeUndefined();
+    expect((paragraph.firstElementChild as HTMLElement).style.wordSpacing).toContain('-90px');
+  });
   it('shows source rows but serializes only logical paragraph boundaries', () => {
     const block = fixture(), text = 'alpha beta gamma delta\nother words last words';
     const value = paragraphPresentation(block, text, style, 1, text => text.length * 10);
@@ -25,7 +34,7 @@ describe('measured paragraph presentation', () => {
     expect(root.querySelectorAll('[data-pdf-source-row]')).toHaveLength(4);
     expect(serializeRichText(root, style).text).toBe(text);
     expect(serializeRichText(root, style).paragraphs).toHaveLength(2);
-    expect(value.html).toContain('word-spacing:var(--pdf-word-space,-10px)');
+    expect(value.html).toContain('word-spacing:var(--pdf-word-space,4px)');
     expect(value.lines[0]![0]!.sourcePosition?.y).toBe(700);
   });
   it('keeps the space joining two rows inside the earlier row, never as a blank line between them', () => {
@@ -74,11 +83,19 @@ describe('measured paragraph presentation', () => {
     const before = root.textContent;
     recalibrateParagraphRows(root, style, 2, text => text.length * 8);
     const row = root.querySelector<HTMLElement>('[data-pdf-source-row]')!;
-    expect(row.style.wordSpacing).toContain('20px');
+    expect(row.style.wordSpacing).toContain('48px');
     root.querySelector<HTMLElement>('[data-pdf-measured-paragraph]')!.dataset.pdfFlowing = 'true';
     const saved = row.style.wordSpacing;
     recalibrateParagraphRows(root, style, 2, text => text.length * 5);
     expect(row.style.wordSpacing).toBe(saved);
     expect(root.textContent).toBe(before);
+  });
+  it('flows an unfit source paragraph rather than erasing its word spaces', () => {
+    const block=fixture();
+    const value=paragraphPresentation(block,'alpha beta gamma delta\nother words last words',style,1,text=>text.length*30);
+    expect(value.fallbacks).toEqual(['word-gap-below-readable-minimum','word-gap-below-readable-minimum']);
+    expect(value.html).not.toContain('data-pdf-source-row');
+    const root=document.createElement('div');root.innerHTML=value.html;
+    expect(serializeRichText(root,style).text).toBe('alpha beta gamma delta\nother words last words');
   });
 });

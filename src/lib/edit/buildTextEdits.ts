@@ -20,6 +20,8 @@ import type { MeasurePiece } from './lineComposition';
 import { wrapTextParagraphs } from './paragraphLayout';
 import { effectiveTextSpanStyle } from './richText';
 import { justifiedComposition } from './justifiedLayout';
+import { canUseSourceWord } from '@/lib/fonts/fontMatch';
+import { locateFragments, overlapsFallback } from '@/lib/fonts/wordFonts';
 
 let fallbackId = 0;
 
@@ -496,7 +498,12 @@ export function buildTextBlockEdits(
       spans,
     });
     if (typeof line !== 'string' && line.compositionFallback) composition = { reason: line.compositionFallback };
-    if (align === 'justify' && typeof line !== 'string' && !line.sourcePosition && next.measurePiece) {
+    // Reflowing one row is not permission to redraw every row. A source row
+    // with identical text/style and baseline keeps its original run geometry.
+    const unchangedSourceLine = source?.text === text && 'composition' in composition
+      && composition.composition.pieces.every(piece => piece.source
+        && piece.x === piece.source.x && piece.baselineY === piece.source.baselineY);
+    if (!unchangedSourceLine && align === 'justify' && typeof line !== 'string' && !line.sourcePosition && next.measurePiece) {
       const following = wrappedLines[index + 1];
       const last = !following || typeof following === 'string' || following.paragraphStart === true;
       composition = { composition: justifiedComposition(line, next.style, position.x, position.y, position.width, last,
@@ -534,8 +541,22 @@ export function buildTextBlockEdits(
 
   if (next.measurePiece && texts.some(edit => edit.composition)) {
     const key = (text: string, rect: PdfRect) => JSON.stringify([text, rect.x, rect.y, rect.w, rect.h]);
+    const redraw = new Set<string>();
+    for (const edit of texts) if (edit.composition) {
+      const fragments = locateFragments(edit.text, edit.composition.pieces);
+      const changedWords = [...edit.text.matchAll(/\S+/gu)].flatMap(word => {
+        const range = { start: word.index, end: word.index + word[0].length };
+        return edit.composition!.pieces.some((piece, index) => !piece.source && piece.style.fontIdentity
+          && overlapsFallback(fragments[index]!.start, piece.text.length, [range])
+          && !canUseSourceWord(word[0], piece.style)) ? [range] : [];
+      });
+      edit.composition.pieces.forEach((piece, index) => {
+        if (piece.sourceRect && overlapsFallback(fragments[index]!.start, piece.text.length, changedWords)) redraw.add(key(piece.text, piece.sourceRect));
+      });
+    }
     const stationary = new Set(texts.flatMap(edit => edit.composition?.pieces.flatMap(piece => piece.source && piece.sourceRect
       && piece.x === piece.source.x && piece.baselineY === piece.source.baselineY
+      && !redraw.has(key(piece.text, piece.sourceRect))
       ? [key(piece.text, piece.sourceRect)] : []) ?? []));
     const dirtyRuns = block.lines.flatMap(line => line.runs).filter(run => !stationary.has(key(run.text, run.rect)));
     if (dirtyRuns.length && stationary.size) return {

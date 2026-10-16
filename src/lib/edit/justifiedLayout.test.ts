@@ -35,13 +35,17 @@ describe('justified model layout', () => {
     const spans = [span('one '), span('two', { fontSizePt: 20 })];
     const sizeMeasure = (text: string, value: TextSpan) => text.length * (value.fontSizePt ?? 10) / 2;
     const spacing = minimumWordSpacing(spans, style, sizeMeasure, 0.15);
-    expect(spacing).toBe(-3.5);
+    expect(spacing).toBeCloseTo(-10/3);
     for (const value of spans) expect(sizeMeasure(' ', value) + spacing).toBeGreaterThanOrEqual((value.fontSizePt ?? 10) * 0.15);
     const lines = wrapTextParagraphs({ text: 'one two end', style, align: 'justify', width: 32, height: 50, dx: 0, dy: 0,
       paragraphs: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0, minimumWordGapEm: 0.15 }] }, measure);
     expect(lines.map(line => line.text)).toEqual(['one two', 'end']);
     const composition = justifiedComposition(lines[0]!, style, 0, 700, 32, false, measure);
     expect(composition.pieces[1]!.x - composition.pieces[0]!.widthPt).toBe(2);
+  });
+  it('bounds pathological source gaps at one third of a normal space',()=>{
+    const spacing=minimumWordSpacing([span('one two')],style,measure,0.001);
+    expect(measure(' ')+spacing).toBeCloseTo(measure(' ')/3);
   });
 
   it('leaves a single word at the left instead of changing character spacing', () => {

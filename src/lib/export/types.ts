@@ -36,6 +36,12 @@ export interface TextStyle {
   readonly colorKnown?: boolean;
   /** pdf.js loaded font id used by its browser FontFace and the embedded-font export lookup. */
   readonly fontRef?: string;
+  /** Stable actual family/name, independent of pdf.js's session-local font id. */
+  readonly fontIdentity?: string;
+  /** Median original/fallback advance ratio for fonts without a free twin. */
+  readonly fontWidthScale?: number;
+  /** Page-measured tightening, in em; absent on older saved edits. */
+  readonly fontTrackingEm?: number;
 }
 
 /** Inline overrides; absent size/family values inherit from the containing TextEdit. */
@@ -46,6 +52,9 @@ export interface TextSpan {
   readonly fontSizePt?: number;
   readonly fontName?: string;
   readonly fontRef?: string;
+  readonly fontIdentity?: string;
+  readonly fontWidthScale?: number;
+  readonly fontTrackingEm?: number;
   readonly color?: Rgb;
   readonly sourceBold?: boolean;
   readonly sourceStrokeBold?: boolean;

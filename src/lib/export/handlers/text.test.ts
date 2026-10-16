@@ -2,13 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { resolvePageFontResource } from '../embeddedFont';
 import type { PageExportContext } from '../context';
 import type { TextEdit } from '../types';
 import { extractTextRuns } from '@/lib/pdf/textContent';
 import { resolveTextPaint, textPaintForItems } from '@/lib/pdf/textPaint';
 import { drawText } from './text';
+import { resolveEnglishFont } from '../englishFont';
 
 const openDocuments: PDFDocumentProxy[] = [];
 
@@ -64,6 +65,40 @@ async function makeResumeContext() {
 }
 
 describe('drawText rich spans', () => {
+  it.each([false,true])('retains a source run’s drawn width with explicit glyphs=%s', async (explicitGlyphs) => {
+    const context=await makeContext();
+    const style={fontName:'Lato',fontSizePt:12,bold:false,italic:false,color:{r:0,g:0,b:0},fontTrackingEm:-0.05};
+    await drawText({id:'source-glyph',kind:'text',pageIndex:0,z:1,rect:{x:20,y:300,w:10,h:12},text:'A',style,
+      composition:{version:1,text:'A',style,alignment:'left',alignmentLeftPt:20,alignmentWidthPt:10,
+        pieces:[{text:'A',x:20,baselineY:300,widthPt:10,style,source:{matrix:[12,0,0,12,20,300],x:20,baselineY:300,widthPt:10,...(explicitGlyphs?{glyphs:[{text:'A',offsetPt:0,widthPt:10}]}:{})}}]}},context);
+    const reader=await getDocument({data:await context.pdf.save(),verbosity:0}).promise;openDocuments.push(reader);
+    const item=(await(await reader.getPage(1)).getTextContent()).items.find(item=>'str' in item && item.str==='A');
+    expect(item && 'width' in item && item.width).toBeCloseTo(10,8);
+  });
+  it('exports letter tightening and clears it before the next legacy edit', async () => {
+    const context = await makeContext();
+    const style = { fontName: 'Lato', fontSizePt: 12, bold: false, italic: false, color: {r:0,g:0,b:0} };
+    for (const [index, tracking] of [-0.05, undefined].entries()) {
+      await drawText({id:String(index),kind:'text',pageIndex:0,z:index,rect:{x:20,y:300-index*30,w:200,h:12},text:'Tight word',style:{...style,fontTrackingEm:tracking}},context);
+    }
+    const reader=await getDocument({data:await context.pdf.save(),verbosity:0}).promise;openDocuments.push(reader);
+    const items=(await(await reader.getPage(1)).getTextContent()).items.filter(item=>'str' in item && item.str==='Tight word');
+    expect(items).toHaveLength(2);
+    const widths=items.map(item=>'width' in item ? item.width : 0);
+    // PDF.js reports the drawn extent (nine internal gaps), not the final Tc
+    // advance after the last glyph used to place a following span.
+    expect(widths[1]!-widths[0]!).toBeCloseTo(9*0.6,6);
+  });
+
+  it('applies tracking when the original PDF face is reused, without changing the reuse gate', async () => {
+    const {context,style}=await makeResumeContext();
+    const fallback=vi.spyOn(context.page,'drawText');
+    const pushed=vi.spyOn(context.page,'pushOperators');
+    await drawText({id:'tracked-source',kind:'text',pageIndex:0,z:1,rect:{x:30,y:30,w:180,h:style.fontSizePt},text:'keeps face',style:{...style,fontTrackingEm:-0.04}},context);
+    expect(fallback).not.toHaveBeenCalled();
+    expect(pushed.mock.calls.flat().filter(operator=>operator.toString().endsWith(' Tm'))).toHaveLength(1);
+    expect(pushed.mock.calls.flat().some(operator=>operator.toString().endsWith(' Tc'))).toBe(true);
+  });
   it('draws committed piece positions verbatim, retaining measured air and raw baselines', async () => {
     const context = await makeContext();
     const style = { fontName: 'Helvetica', fontSizePt: 12, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
@@ -117,8 +152,8 @@ describe('drawText rich spans', () => {
 
     await drawText(edit, context);
 
-    const regular = context.pdf.embedStandardFont(StandardFonts.Helvetica);
-    const bold = context.pdf.embedStandardFont(StandardFonts.HelveticaBold);
+    const regular = await resolveEnglishFont({ ...edit.style, bold: false }, context);
+    const bold = await resolveEnglishFont({ ...edit.style, bold: true }, context);
     expect(draw).toHaveBeenCalledTimes(3);
     expect(draw.mock.calls.map(([text]) => text)).toEqual(['plain ', 'bold ', 'italic']);
     expect(draw.mock.calls[0]?.[1]?.x).toBe(20);
@@ -285,7 +320,7 @@ describe('drawText rich spans', () => {
     await drawText(edit, context);
 
     expect(fallbackDraw).toHaveBeenCalledTimes(1);
-    expect(fallbackDraw.mock.calls[0]?.[1]?.font?.name).toBe('Helvetica');
+    expect(fallbackDraw.mock.calls[0]?.[1]?.font?.name).toBe('LiberationSans');
   });
 
   it('draws each rich span with its own colour override', async () => {
@@ -368,7 +403,7 @@ describe('drawText rich spans', () => {
 
     await drawText(edit, context);
 
-    const small = context.pdf.embedStandardFont(StandardFonts.Helvetica);
+    const small = await resolveEnglishFont(edit.style, context);
     expect(draw).toHaveBeenCalledTimes(2);
     expect(draw.mock.calls.map(([, options]) => options?.size)).toEqual([10, 20]);
     expect(draw.mock.calls.map(([, options]) => options?.y)).toEqual([260, 260]);
@@ -427,7 +462,7 @@ describe('drawText alignment', () => {
 
     await drawText(edit, context);
 
-    const font = context.pdf.embedStandardFont(StandardFonts.Helvetica);
+    const font = await resolveEnglishFont(edit.style, context);
     const expectedX = 30 + (
       240 - font.widthOfTextAtSize(edit.text, edit.style.fontSizePt)
     ) / 2;
@@ -463,8 +498,8 @@ describe('drawText alignment', () => {
 
     await drawText(edit, context);
 
-    const regular = context.pdf.embedStandardFont(StandardFonts.Helvetica);
-    const bold = context.pdf.embedStandardFont(StandardFonts.HelveticaBold);
+    const regular = await resolveEnglishFont({ ...edit.style, bold: false }, context);
+    const bold = await resolveEnglishFont({ ...edit.style, bold: true }, context);
     const totalWidth = regular.widthOfTextAtSize('Date ', 12) + bold.widthOfTextAtSize('2026', 12);
     expect(draw.mock.calls[0]?.[1]?.x).toBeCloseTo(30 + 240 - totalWidth, 6);
   });

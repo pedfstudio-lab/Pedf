@@ -6,6 +6,7 @@ import { effectiveTextSpans, effectiveTextSpanStyle, richTextToHtml, serializeRi
 import type { WrappedTextLine } from './textLayout';
 import type { MeasurePiece } from './lineComposition';
 import { isIndicRun } from '@/lib/export/scriptRouting';
+import { visibleWordSpacingFloor } from './justifiedLayout';
 
 export interface ParagraphPresentation {
   readonly html: string;
@@ -68,7 +69,17 @@ export function recalibrateParagraphRows(root: HTMLElement, style: TextStyle, zo
       if (!spaces) continue;
       const width = effectiveTextSpans(text, value.style, spans).reduce((sum, span) => sum + measure(span.text, effectiveTextSpanStyle(value.style, span)), 0);
       const target = Number(row.dataset.pdfSourceWidthPt);
-      row.style.wordSpacing = `var(--pdf-word-space,${(target - width) / spaces * zoom}px)`;
+      const spacing = (target - width) / spaces;
+      // Old edits keep their stored row presentation; the new safety rule is
+      // for newly extracted PDF text, not a migration of saved layouts.
+      const floor = paragraph.dataset.pdfSavedRows === 'true' ? -Infinity
+        : visibleWordSpacingFloor(effectiveTextSpans(text,value.style,spans),value.style,(word,span)=>measure(word,effectiveTextSpanStyle(value.style,span)));
+      if (spacing < floor - 1e-6) {
+        paragraph.dataset.pdfGapReflow = 'true';
+        setFlow(paragraph,true);
+        break;
+      }
+      row.style.wordSpacing = `var(--pdf-word-space,${Math.max(spacing,floor) * zoom}px)`;
     }
   }
 }
@@ -82,7 +93,7 @@ export function refreshParagraphPresentation(root: HTMLElement, initial: Readonl
   for (const element of root.querySelectorAll<HTMLElement>('[data-pdf-paragraph]')) {
     if (!element.hasAttribute('data-pdf-measured-paragraph') && element.querySelector('[data-pdf-source-row]')) element.dataset.pdfMeasuredParagraph = 'true';
     if (!element.hasAttribute('data-pdf-measured-paragraph')) continue;
-    setFlow(element, JSON.stringify(serializeRichText(element, style, zoom)) !== initial.get(element.dataset.paragraphId!));
+    setFlow(element, element.dataset.pdfGapReflow === 'true' || JSON.stringify(serializeRichText(element, style, zoom)) !== initial.get(element.dataset.paragraphId!));
   }
 }
 
@@ -108,6 +119,12 @@ export function paragraphPresentation(block: TextBlock, text: string, style: Tex
     for (const row of rowModels) {
       const composed = composeTextLine(row.sourceComposition, row.text, row.sourceComposition?.style ?? style, measure);
       if ('reason' in composed) reason ??= composed.reason;
+      if (!existing?.length) {
+        const spans = effectiveTextSpans(row.text,style,row.spans), spaces = (row.text.match(/\s/gu) ?? []).length;
+        const natural = spans.reduce((sum,span)=>sum+measure(span.text,effectiveTextSpanStyle(style,span)),0);
+        const floor = visibleWordSpacingFloor(spans,style,(word,span)=>measure(word,effectiveTextSpanStyle(style,span)));
+        if (spaces && (row.sourcePosition.width-natural)/spaces < floor-1e-6) reason ??= 'word-gap-below-readable-minimum';
+      }
     }
     fallbacks.push(reason);
     const body = reason ? richTextToHtml(part, style, paragraphSpans[paragraphIndex]?.length ? paragraphSpans[paragraphIndex] : undefined, zoom)
@@ -124,7 +141,7 @@ export function paragraphPresentation(block: TextBlock, text: string, style: Tex
         const separator = rowIndex < rowModels.length - 1 ? ' ' : '';
         return `<span data-pdf-source-row="true" data-pdf-source-width-pt="${row.sourcePosition.width}" style="display:var(--pdf-row-display,block);white-space:var(--pdf-row-space,nowrap);text-indent:0;word-spacing:var(--pdf-word-space,${wordSpacing * zoom}px);margin-left:var(--pdf-row-indent,${offset * zoom}px)">${content}${separator}</span>`;
       }).join('');
-    return `<div data-pdf-paragraph="true" data-paragraph-id="source-${paragraphIndex}"${reason ? ` data-pdf-paragraph-fallback="${reason}"` : ' data-pdf-measured-paragraph="true"'}${layout?.minimumWordGapEm !== undefined ? ` data-minimum-word-gap-em="${layout.minimumWordGapEm}"` : ''} data-gap-before-pt="${layout?.gapBeforePt ?? 0}" data-first-indent-pt="${layout?.firstIndentPt ?? 0}" data-rest-indent-pt="${layout?.restIndentPt ?? 0}" style="margin-top:${(paragraphIndex ? layout?.gapBeforePt ?? 0 : 0) * zoom}px;padding-left:${(layout?.restIndentPt ?? 0) * zoom}px;text-indent:${((layout?.firstIndentPt ?? 0) - (layout?.restIndentPt ?? 0)) * zoom}px">${body || '<br>'}</div>`;
+    return `<div data-pdf-paragraph="true" data-paragraph-id="source-${paragraphIndex}"${existing?.length ? ' data-pdf-saved-rows="true"' : ''}${reason ? ` data-pdf-paragraph-fallback="${reason}"` : ' data-pdf-measured-paragraph="true"'}${layout?.minimumWordGapEm !== undefined ? ` data-minimum-word-gap-em="${layout.minimumWordGapEm}"` : ''} data-gap-before-pt="${layout?.gapBeforePt ?? 0}" data-first-indent-pt="${layout?.firstIndentPt ?? 0}" data-rest-indent-pt="${layout?.restIndentPt ?? 0}" style="margin-top:${(paragraphIndex ? layout?.gapBeforePt ?? 0 : 0) * zoom}px;padding-left:${(layout?.restIndentPt ?? 0) * zoom}px;text-indent:${((layout?.firstIndentPt ?? 0) - (layout?.restIndentPt ?? 0)) * zoom}px">${body || '<br>'}</div>`;
   }).join('');
   return { html, lines, fallbacks };
 }

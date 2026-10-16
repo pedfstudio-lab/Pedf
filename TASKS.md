@@ -14882,7 +14882,7 @@ the narrower spaces, not the font — Step 5d Change 5.)*
 
 ---
 
-### Task 78 — Edited text uses the PDF's own font, or a twin with the same widths, and never grows  🔲 TODO → branch `font-match` **from `main`** (Step 5d is merged: `39970ab`)   *(Large · 1–2 weeks)*
+### Task 78 — Edited text uses the PDF's own font, the real free font, or a twin with the same widths — never a wider look-alike  🟡 IN PROGRESS — Change 0 ✅ measured and reviewed by the user (2026-10-15); Changes 1–5 implemented, acceptance still open → branch `font-match` **from `main`** (Step 5d is merged: `39970ab`)   *(Large · 1–2 weeks)*
 
 **What the user hit.** Edited text does not look like the page and can take more room than the original:
 - *Letters look different* — Ladakh p2 is a narrow, condensed face; edited text comes out in wider, rounder Arial.
@@ -14911,13 +14911,54 @@ today's reuse path accepts it. Then, per font family: how much wider or narrower
 (average and worst, over the corpus's lines), and a simulated edit — one extra word in every paragraph — counting the
 paragraphs that gain a line today. Publish the table before building; the twins in Change 1 are chosen from it.
 
-**Change 1 — twin fonts with the same widths.** Ship open-licence faces whose letters have the same widths as common
-fonts: Liberation Sans / Serif / Mono (Arial–Helvetica, Times New Roman–Times, Courier New–Courier), Carlito (Calibri),
-Caladea (Cambria) — regular, bold, italic, bold-italic — with their licence files, in `public/fonts/twins/`, served by
-our own site and loaded only when a page needs them (the PDF never leaves the device). A name table maps a PDF font to
-its twin (strip `ABCDEF+`, `PSMT`, `MT`, `-Bold`, `,Bold`, …). The export embeds the twin as a **subset** through
-`@pdf-lib/fontkit` (a new dependency, loaded lazily so the first page load is not heavier). Codex confirms each
-licence (SIL OFL 1.1) and reports the added download size and the exported-file size change.
+**Change 0 result — 2026-10-15 (Codex, uncommitted; awaiting user review).** Published
+`TASK78_CHANGE0_REPORT.md` on `font-match` from `main`: all **47 PDFs / 473 pages**, **67 used font variants / 27
+families**, with the complete name/type/embedding/encoding/reuse table and **14,019** family/line width samples.
+The one-extra-word survey simulated **6,989 / 6,999** logical text units; **10** explicitly unmeasurable cases are
+listed, not counted as zero error. Multiline/list units and one-line headings/cells are separate; unchanged-text
+reflow is the control. These are Node/Skia model simulations, not Chrome or exported-page line-count proof.
+Green and NMAT are separate supplemental examples, excluded from the 47-file totals. All source PDF hashes are
+unchanged. `TASK78_FONTS=1`, default suite (**1,550 passed, 0 failed**), typecheck, lint and build pass. No app code,
+font assets, reuse rules or package declarations changed; **Changes 1–5 are not started. Nothing committed.**
+
+**Change 0 review — 2026-10-15 (user + Claude).** What the measurement showed, and what it changed in this task:
+
+| Font (family) | Where | Reusable today | Today's look-alike vs the original | Plan |
+|---|---|---|---|---|
+| Helvetica Now (Type3) | Firgun itineraries — Ladakh, Ziro, Bhutan, Healing; by far the most text | no — letters are stored as drawings, only those used | Helvetica, **5.6 % narrower** on average | Change 4 — width matching |
+| Times New Roman (Type0/CID) | Corporate Governance | no — stored as numbered glyphs, only those used | Times, **0.09 %** | Twin: Liberation Serif (look only; widths already match) |
+| Lato, Open Sans, IBM Plex Sans, League Spartan, Noto Sans, Source Sans Pro, Bricolage Grotesque, Allura (Type0) | Canva-made PDFs | no — numbered glyphs, only those used | Helvetica; 0–3 % for most, Allura 26 % | **Ship the real free font** (Change 1) — an exact match with every letter |
+| Calibri | résumés; reusable as TrueType, not as Type0 | TrueType yes, Type0 no | Helvetica, **12.5 % wider** (worst 36 %) | Twin: **Carlito** — the most valuable twin |
+| Arial | Word files | TrueType yes, Type0 no | Helvetica, −0.9 % | Twin: Liberation Sans |
+| Garet, Tahoma, Lucida Sans Unicode, Arial Black, Aptos Narrow (when not reusable), Organic, Zuume Rough, TAN Jambore | various | partly | −12 % … +62 % | Paid fonts, no free twin → Change 4 |
+| Cambria | none of our PDFs | — | — | **Caladea dropped** |
+
+So the hard route — reusing Type0/CID fonts from the PDF itself — is **not needed**: the real free fonts and the twins
+cover those PDFs, and Type3 can never be reused for new letters.
+
+*"Text getting bigger" has three causes; this task fixes only the first.*
+1. **A wider look-alike font** — same letter height, longer lines, a word drops down (Calibri → Helvetica, 12.5 %).
+   **This task.**
+2. **The PDF squeezed its spacing** — narrower spaces, even inside words, so lines fit (Corporate Governance; the font
+   there is only 0.09 % off). Codex's survey found **1,328** paragraphs that already gain a line when re-flowed without
+   any added word. Not a font problem; Step 5d fixed most of it for justified paragraphs, the rest (5d accepted item 2,
+   Corporate p18) needs its own small task — copy the PDF's tight spacing.
+3. **The size itself read wrong** (taller letters) — not seen yet; measure it if a PDF shows it.
+
+**Change 1 — the real free fonts, and twins with the same widths.** Ship, with their licence files, in
+`public/fonts/` (served by our own site and loaded only when a page needs them — the PDF never leaves the device):
+- **Real free fonts found in our PDFs** — Lato, Open Sans, IBM Plex Sans, League Spartan, Noto Sans, Source Sans Pro,
+  Bricolage Grotesque, Allura — in the weights and styles the PDFs use (regular, bold, italic where present). The PDF
+  font name maps to the real font, so edited text is an **exact** match, with every letter.
+- **Twins with the same widths** — **Carlito** (Calibri) first, then Liberation Sans / Serif / Mono (Arial–Helvetica,
+  Times New Roman–Times, Courier New–Courier); regular, bold, italic, bold-italic. **No Caladea** — Cambria is in none
+  of our PDFs.
+
+A name table maps a PDF font to its real font or twin (strip `ABCDEF+`, `PSMT`, `MT`, `-Bold`, `,Bold`, …; read the
+embedded name when the PDF calls it `CIDFont+F3`, as Change 0 did). The export embeds the chosen font as a **subset**
+through `@pdf-lib/fontkit` (a new dependency, loaded lazily so the first page load is not heavier). Codex confirms each
+licence (SIL OFL 1.1 or Apache 2.0) **before** adding a font, and reports the added download size and the
+exported-file size change. A font whose licence does not allow shipping goes to Change 4 instead.
 
 **Change 2 — the same face on screen.** Register the twin as a browser font and put it right after the PDF's own face
 in the CSS list, before Times/Arial. The canvas measuring used for wrapping and Step 5d's compositions
@@ -14925,16 +14966,81 @@ in the CSS list, before Times/Arial. The canvas measuring used for wrapping and 
 the same places.
 
 **Change 3 — one face per word.** If any character of a word is missing from the PDF's own font, the whole word uses
-the twin — never mixed letters. When every character is present, the page font is reused exactly as today, including
-its synthetic bold/italic and the `sourceBold` / `sourceStrokeBold` rules (Task 10Q).
+the real font or the twin — never mixed letters. When every character is present, the page font is reused exactly as
+today, including its synthetic bold/italic and the `sourceBold` / `sourceStrokeBold` rules (Task 10Q).
 
-**Change 4 — no twin: match the widths.** For a font with no twin (Type3, decorative, Type0 without a match), use
-the nearest generic (serif / sans / mono; a condensed face when the original runs narrow) and scale it horizontally so
-its widths match the original's `/Widths` for the letters the PDF has (median ratio) — on screen and in the export
-(the existing per-piece scale in `handlers/text.ts`). Ladakh p2 goes here.
+**Change 4 — no real font and no twin: match the widths.** For the paid fonts Change 0 found — **Helvetica Now**
+(Ladakh and the other Firgun itineraries; today 5.6 % narrower), Garet, Tahoma, Lucida Sans Unicode, Arial Black,
+Aptos Narrow when it cannot be reused, and the decorative Organic, Zuume Rough and TAN Jambore — use the nearest
+generic (serif / sans / mono; a condensed face when the original runs narrow) and scale it horizontally so its widths
+match the original's for the letters the PDF has (median ratio) — on screen and in the export (the existing
+per-piece scale in `handlers/text.ts`).
 
 **Change 5 — untouched lines stay original.** In a re-flowed paragraph, a line whose text and position did not change
 keeps its original glyphs (`sourceVisible`), as Step 5d already does for one-line edits. Closes 5d's accepted item 1.
+
+**Fixes from the user's Chrome test — 2026-10-16** *(Changes 1–5 built by Codex, uncommitted on `font-match`; both
+problems below were caused by Task 78 and must be fixed before it merges. Measured by Claude.)*
+
+**Fix 2 — words glued together in Healing's justified paragraph.**
+- *What the user hit.* Healing p3, "It's not about fixing anything. It's about creating space to feel…" → **Edit**:
+  three of its five lines show no spaces — `spacetofeel,torelease,andtoreconnectwithwhat`,
+  `trulymatters.Throughbreath,movement,stillness,`, `oftenkeepclosed.`
+- *Measured in the browser.* The editor rows' word spacing is +0.51, **−5.30**, **−6.95**, −2.28 and **−8.92 px**; a
+  normal space there is about 6 px, so anything below −6 px removes the space and the words touch or overlap. The look-
+  alike shown is `R1WidthSans` stretched to **106.9 %** — but plain Arial is already **3.4 % wider** than the page for
+  "often keep closed." (174.9 against 169.2 pt), so the stretch makes it about 10 % too wide.
+- *Why — measured.* These Canva PDFs draw their letters **tighter than the font's normal letter widths** (letter-spacing
+  set in Canva, written as TJ adjustments, `Tc` 0): Healing p3 is drawn **6.3 %** tighter, Ladakh p2 **5.2 %**
+  tighter (`src/lib/edit/healingTrackingProbe.local.test.ts`, drawn run widths against `sourceFontWidth`). Change 4
+  calibrates the look-alike on the font's **nominal** widths (`calibrateSourceFont`), ignoring that tightening, so on
+  screen it is about 6 % wider than the page. Step 5d's per-row spacing (`paragraphPresentation.ts`) then squeezes the
+  spaces to keep each row at its page width; Healing's rows have no slack, so the spaces vanish. Ladakh's justified
+  rows have stretched spaces to give up, which is why its checks passed.
+- *Fix.*
+  1. Size the look-alike on **what the page draws**, not on the font's nominal widths: carry the page's letter
+     tightening (drawn width against the font's own letters, per font on the page) and apply it as letter-spacing on
+     screen and in the export, so the edited text is as tight as the page. The same applies to a real free font or a
+     twin when the PDF tightened it.
+  2. A space is never squeezed below **one third** of a normal space. A row that still cannot fit re-flows normally
+     instead of gluing its words together.
+- *Checks.* Healing p3 opens with every space visible and every row at its page width (within 0.5 px at 100 % and
+  200 %); Ladakh p2 still opens with its page lines; the Ladakh check below becomes "edited lines within **1 %** of
+  what the page draws"; the Canva Lato / Open Sans / League Spartan checks are re-run.
+- *Does not change:* grouping, justified-paragraph detection, bullets, glyph removal, Step 5d positions, saved files,
+  old edits. The one intended change: in PDFs with tightened paid fonts (Ladakh, Healing and the other Firgun
+  itineraries) edited text is about 6 % narrower than Task 78 draws it now — as the page is.
+
+**Fix 3 — a new bullet starts shifted to the right.**
+- *What the user hit.* In every list, including the Rahul résumé: put the cursor at the end of a bullet → **Enter** →
+  the new "•" appears under the text, indented, not in the bullets' column.
+- *Why.* Task 78's list display fix (`bulletEditorPresentation.ts`) lays each bullet out with a hanging indent
+  (`padding-left` = indent, `text-indent` = −indent). Enter still runs the old `insertPlainText(editable, "\n• ")`,
+  which adds the new marker **inside the current bullet** as a second line; a second line starts at the text indent, so
+  the "•" sits there. Pasting several lines into a list does the same.
+- *Fix.* In a bullet list, Enter (and pasting several lines) starts a **new bullet item** laid out like the others,
+  so its "•" is in the same column; the caret lands after it. Undo after Enter works at least as well as today.
+- *Checks.* Rahul résumé, Green p7 and a Word list: Enter at the end of a bullet → the new "•" lines up with the
+  others; type → its text wraps under its own text indent; Done → the saved list is the same text as today's Enter
+  would give; Ctrl+Z after Enter removes the new bullet; paste two lines → two bullets, both aligned.
+- *Does not change:* what is saved, list detection, markers, wrapping on Done, export.
+
+**Fixes 2/3 checkpoint — 2026-10-16 (Codex, uncommitted on `font-match`).** Implemented;
+see `TASK78_FIXES_2_3_REPORT.md` for native Chrome evidence and final check results.
+Healing's five source rows are within 0.5 CSS px at both 100% and 200%, and remain
+readable through typing/Done/export. Ladakh's appended `wonderful` now stays on six
+rows, with five unchanged rows / 138 source pieces retained; the nominal median
+rule is unchanged. Enter/paste creates sibling list items with aligned marker/body
+columns and native Enter Undo; display tabs become ordinary spaces before saving.
+The new tracking field is optional; old saved row presentation is not migrated.
+No font-reuse gate, grouping, bullet algorithm, glyph-removal or position-model
+rule changed. This checkpoint does **not** close the broader Task 78 acceptance
+gaps or the résumé formatting defect recorded in `TASK78_BROWSER_CHECK.md`.
+Final default: **1,609 passed / 0 failed / 111 skipped**; final targeted real-PDF
+rerun: **151 passed / 0 failed / 1 skipped**. All 33 named switches were run;
+the combined run and repairs are itemized in the report. Corporate's excluded
+25-vs-24-row assertion and the image-deletion sweep's 30-minute timeout remain
+non-green. Typecheck, lint, build and diff check pass. Nothing committed or merged.
 
 **Compatibility.** Saved edits keep their stored widths (Step 5d compositions), so old edits export at the same
 positions, now in a closer face. Projects saved before this task open unchanged; any new field is optional.
@@ -14944,13 +15050,20 @@ positions, now in a closer face. Projects saved before this task open unchanged;
 - *Green p7 list*: add a word → Done → the list keeps its height; "project" stays on its line.
 - *Résumé (Calibri)*: change a word → export → the PDF names Carlito for the new text; each word's width within
   **0.5 %** of the original's.
-- *Corporate (Times)*: change a word in a full line → the page font or Liberation Serif → the line still fits.
-- *Ladakh p2*: add a word at the end → untouched lines keep their original glyphs (Change 5); edited lines are within
-  **1 %** of the original font's widths.
+- *A Canva PDF using Lato* (Codex names one from Change 0's inventory): change a word → export → the PDF names Lato for
+  the new text; each word's width within **0.5 %** of the original's; the same for one Open Sans and one League
+  Spartan page.
+- *Corporate (Times)*: change a word → the new text uses Liberation Serif. Corporate p18's extra line (squeezed
+  spacing, cause 2) is **not** expected to go away — this task must not claim it.
+- *Ladakh p2 (Helvetica Now)*: add a word at the end → untouched lines keep their original glyphs (Change 5); edited
+  lines are within **1 %** of what the page draws (Fix 2).
+- *Healing p3*: every space visible when opened and after typing (Fix 2).
+- *Lists*: Enter and multi-line paste start aligned bullets (Fix 3).
 - *A letter the subset lacks* (e.g. a capital Q): the whole word in one face, proved in pixels.
 - *Screen = PDF*: across the corpus sweep, the editor's line breaks equal the exported line breaks.
 - *Bold / italic*: switching them on and off behaves exactly as Task 10Q made it.
-- *Privacy*: in the browser's network list, the only new requests are our own `/fonts/twins/…` files.
+- *Privacy*: in the browser's network list, the only new requests are our own `/fonts/…` files.
+- *Licences*: every shipped font has its licence file next to it, and Codex's report lists each one.
 - *Unchanged elsewhere*: tests that expect Helvetica/Times/Courier names or the "substituted with Helvetica" warning
   are updated with the reason; everything else as before — full suite; every real-PDF switch; typecheck; lint; build.
 
@@ -14958,18 +15071,18 @@ positions, now in a closer face. Projects saved before this task open unchanged;
 
 | File | Why |
 |---|---|
-| `public/fonts/twins/*` + licence files | The twin faces (Change 1) |
-| `src/lib/fonts/fontMatch.ts` + test | PDF font name → twin, or the nearest generic and its width ratio (Changes 1, 4) |
-| `src/lib/fonts/twinFonts.ts` + test | Load a twin for the screen; fetch its bytes for embedding (Changes 1, 2) |
+| `public/fonts/*` + licence files | The real free fonts and the twins (Change 1) |
+| `src/lib/fonts/fontMatch.ts` + test | PDF font name → real font or twin, or the nearest generic and its width ratio (Changes 1, 4) |
+| `src/lib/fonts/twinFonts.ts` + test | Load a shipped font for the screen; fetch its bytes for embedding (Changes 1, 2) |
 | a local `TASK78_FONTS` test | Change 0's table and the corpus checks |
 
 **Existing files that change**
 
 | File | Change |
 |---|---|
-| `src/lib/export/englishFont.ts` + test | The twin first; a standard font only as the last resort |
-| `src/lib/export/handlers/text.ts` + test | One face per word; width matching for fonts without a twin |
-| `src/lib/edit/textStyleCss.ts` + test | The twin in the CSS font list, after the PDF's own face |
+| `src/lib/export/englishFont.ts` + test | The real font or twin first; a standard font only as the last resort |
+| `src/lib/export/handlers/text.ts` + test | One face per word; width matching for fonts without a real font or twin |
+| `src/lib/edit/textStyleCss.ts` + test | The real font or twin in the CSS font list, after the PDF's own face |
 | `src/components/TextEditOverlay.tsx` + test | Canvas measuring with the same font list |
 | `src/lib/edit/buildTextEdits.ts` + test | Change 5: unchanged lines in a re-flowed paragraph stay original |
 | `package.json` | `@pdf-lib/fontkit` |
@@ -14985,19 +15098,44 @@ matching and redaction; the Indic route (`isIndicRun` → `pathA.ts`) — a sepa
 3. Ladakh p2 → add a word at the end → **Done** → at 300 % the other lines look exactly as before.
 4. Type a capital letter that the page never uses (Q, Z) → it matches the letters around it.
 5. Bold and italic on and off → as before.
-6. Corporate p18 → add "ordinary" → see whether it still grows a line (5d accepted item 2 — this task may help, it
-   does not promise to).
+6. A PDF made in Canva (Codex names one that uses Lato or League Spartan) → change a word → **Done** → **Export** →
+   the new word looks exactly like the words around it, in Chrome and in the exported PDF.
+7. Corporate p18 → add "ordinary" → it may still grow a line: that is squeezed spacing (cause 2), not this task.
+8. Healing p3, "It's not about fixing anything…" → **Edit** → every space is there; type a word → still no words
+   glued together (Fix 2).
+9. Rahul résumé list → cursor at the end of a bullet → **Enter** → the new "•" lines up with the others (Fix 3).
 
-**Known limits:** decorative and one-off fonts (logos, fancy headings like Bhutan's) get the nearest generic — closer,
-not identical; Type0/CID page fonts are not reused yet (they get a twin or a width-matched generic) — reusing them is a
-later step; Indic scripts are out of scope.
+**Known limits:** paid fonts with no free twin (Helvetica Now, Garet, Tahoma, Aptos, decorative and one-off fonts
+like Bhutan's heading) get a width-matched look-alike — the same length, not the same letter shapes; reusing a PDF's
+own Type0/CID font is **not needed** (the real free fonts and the twins cover those PDFs) and Type3 can never be reused
+for new letters; growth from squeezed spacing (cause 2) is a separate task; Indian scripts are out of scope.
 
-**Found while checking, not part of this task (2026-10-15):** exporting an edit that contains **Hindi or any other
+**Found while checking (2026-10-15), corrected the same day:** exporting an edit that contains **Hindi or any other
 Indian script fails** — `pathA.ts` still holds the Task 13 placeholder (`notImplemented('Indic text export / Path A
-(Task 13)')`), which throws, and the Noto fonts it would use are not in the repo. Typing Hindi in the editor works;
-saving it into the PDF does not. This needs its own task.
+(Task 13)')`), which throws. Drawing Indian scripts into the PDF is **not needed**: the user decided translation is
+view-only and editing stays English (Task 79). Task 79's guard stops Hindi typed or pasted into an edit box from
+breaking the download.
 
-**Land:** branch `font-match` from `main`. Commit: `Edited text uses the PDF's own font or a twin with the same widths
-(Task 78)`. Merge after Change 0's table is reviewed, the checks pass and the user's six steps pass.
+**Implementation checkpoint — 2026-10-15 (Codex, uncommitted).** Changes 1–5 are in the working tree;
+see `TASK78_CHANGES1_5_REPORT.md` for licences, asset/export sizes, tests and open acceptance gates. The user
+chose the written median rule: no word-specific correction. Ladakh's `wonderful` remains 1.28529% narrower,
+outside the 1% target. Four untouched Ladakh rows retain 107 source pieces. All four Carlito styles now have
+subset-outline/advance regression coverage after a fontkit glyph-offset issue was caught visually and fixed in
+an in-memory export copy. The 314 approved justification boxes and 9,315 source strings remain unchanged.
+With explicit user approval, the list editor's presentation now reserves the existing saved marker indent and
+item gap: `new project` is 15 rows while typing and after Done; fitting `a project` remains 14 with unchanged
+native height and through export/reopen. Unchanged Done creates zero edits. The original list Enter/paste helper
+still uses manual Range insertion (native undo limitation); input handlers were not changed under the
+presentation-only approval. **Not complete:**
+full native corpus wrap acceptance is not closed, and the full image-deletion sweep times out at 30 minutes
+(image-box classification passes). The overflowing export can regroup into separate list/word click targets;
+grouping remains untouched. Corporate's excluded 25-row spacing case is
+not claimed fixed. No bullet algorithm or font-reuse gate changed. **Nothing committed or merged.**
+Final default suite: **1,591 passed, 0 failed, 108 skipped**; typecheck, lint, build and diff check pass.
+The named real-PDF run and targeted reruns, including remaining non-green gates, are recorded in the report;
+this checkpoint is not an all-checks-green or full native-browser acceptance claim.
+
+**Land:** branch `font-match` from `main`. Commit: `Edited text uses the PDF's own font, the real free font or a twin
+with the same widths (Task 78)`. Merge after the checks pass and the user's nine steps pass.
 
 ---

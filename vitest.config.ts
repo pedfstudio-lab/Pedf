@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     // The test suites are Node-compatible and stub browser globals when needed.
     environment: 'node',
+    setupFiles: ['src/lib/fonts/testFontLoader.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

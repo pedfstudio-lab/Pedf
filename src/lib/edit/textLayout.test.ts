@@ -3,6 +3,18 @@ import { fitTextToBlock, wrapTextSpansToLines, wrapTextToLines } from './textLay
 
 const monospaceMeasure = (text: string) => text.length;
 
+it('carries the optional matched-font identity and median scale through soft breaks', () => {
+  const identity = { fontIdentity: 'HelveticaNowText', fontWidthScale: 0.93 };
+  const lines = wrapTextSpansToLines([{ text: 'one two', bold: false, italic: false, ...identity }], 4, (text, span) => {
+    expect(span).toMatchObject(identity);
+    return text.length;
+  });
+  expect(lines.map(line => line.spans?.[0])).toEqual([
+    { text: 'one', bold: false, italic: false, ...identity },
+    { text: 'two', bold: false, italic: false, ...identity },
+  ]);
+});
+
 describe.each(['plain', 'rich'] as const)('soft-break whitespace (%s)', (kind) => {
   const wrap = (text: string, width: number) => kind === 'plain'
     ? wrapTextToLines(text, width, monospaceMeasure)

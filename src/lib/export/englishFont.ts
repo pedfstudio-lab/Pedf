@@ -4,10 +4,14 @@ import { classifyFontFamily } from '@/lib/pdf/textContent';
 import type { FontFamilyClass } from '@/lib/pdf/textContent';
 import type { PageExportContext } from './context';
 import type { TextStyle } from './types';
+import { loadFontBytes } from '@/lib/fonts/twinFonts';
+import { matchFont } from '@/lib/fonts/fontMatch';
+import { subsetSafeSfnt } from '@/lib/fonts/subsetSafeSfnt';
 
 const cache = new WeakMap<PDFDocument, Map<StandardFonts, PDFFont>>();
 
-const KNOWN_FONT = /times|georgia|serif|courier|mono|consolas|helvetica|arial|sans|inter|roboto/i;
+const shipped = new WeakMap<PDFDocument, Map<string, Promise<PDFFont>>>();
+let fontkit: Promise<typeof import('@pdf-lib/fontkit')> | undefined;
 
 export function standardFontFor(
   family: FontFamilyClass,
@@ -38,11 +42,25 @@ export async function resolveEnglishFont(
 ): Promise<PDFFont> {
   const family = classifyFontFamily(style.fontName);
   const standardFont = standardFontFor(family, style.bold, style.italic);
-
-  if (!KNOWN_FONT.test(style.fontName)) {
-    context.warnings.push(
-      `Font '${style.fontName}' substituted with Helvetica; widths/kerning may differ.`,
-    );
+  const match = matchFont(style);
+  if (!match.exact && style.fontWidthScale === undefined && !style.fontRef) {
+    const warning = `Font '${style.fontIdentity ?? style.fontName}' substituted with ${match.family}; no source widths available for calibration.`;
+    if (!context.warnings.includes(warning)) context.warnings.push(warning);
+  }
+  let fonts = shipped.get(context.pdf);
+  if (!fonts) { fonts = new Map(); shipped.set(context.pdf, fonts); }
+  if (!fonts.has(match.file)) fonts.set(match.file, (async () => {
+    const [data, kit] = await Promise.all([loadFontBytes(match.file), fontkit ??= import('@pdf-lib/fontkit')]);
+    // fontkit's ESM build has a default export, while its declaration file
+    // exposes create(). Handle both module shapes (browser and Node tests).
+    context.pdf.registerFontkit((kit as unknown as { default?: typeof kit }).default ?? kit);
+    return context.pdf.embedFont(subsetSafeSfnt(data), { subset: true, features: { liga: false, kern: false } });
+  })());
+  try { return await fonts.get(match.file)!; }
+  catch (error) {
+    fonts.delete(match.file);
+    const warning = `Font asset '${match.file}' could not be loaded; used ${standardFont}: ${String(error)}`;
+    if (!context.warnings.includes(warning)) context.warnings.push(warning);
   }
 
   let documentCache = cache.get(context.pdf);

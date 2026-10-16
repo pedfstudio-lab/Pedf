@@ -116,6 +116,17 @@ function history(edits = allEditKinds()): HistoryState {
 }
 
 describe('project state serialization', () => {
+  it('round-trips optional drawn tracking and accepts old saves without it', () => {
+    const edit: TextEdit={...(allEditKinds()[0] as TextEdit),style:{...style,fontTrackingEm:-0.04},spans:[{text:'Saved text',bold:false,italic:false,fontTrackingEm:0}]};
+    const restored=deserializeProject(serializeProject(history([edit]),0,1),3);
+    expect(restored.ok).toBe(true);
+    if(restored.ok)expect(restored.value.history.present.edits[0]).toEqual(edit);
+    for(const tracking of [NaN,Infinity,-0.21,0.21,'-0.04']) {
+      const invalid={...edit,style:{...style,fontTrackingEm:tracking as number}};
+      expect(deserializeProject(serializeProject(history([invalid]),0,1),3).ok).toBe(false);
+    }
+    expect(deserializeProject(serializeProject(history([allEditKinds()[0]!]),0,1),3).ok).toBe(true);
+  });
   it('round-trips and deep-clones optional positioned pieces while old text edits stay valid', () => {
     const edit: TextEdit = { ...(allEditKinds()[0] as TextEdit), composition: { version: 1, text: 'Saved text', style,
       alignment: 'left', alignmentLeftPt: 30, alignmentWidthPt: 120,

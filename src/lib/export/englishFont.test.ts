@@ -43,7 +43,7 @@ async function makeContext(): Promise<PageExportContext> {
 }
 
 describe('resolveEnglishFont', () => {
-  it('caches embedded standard fonts per PDF document', async () => {
+  it('caches subset-embedded metric twins per PDF document', async () => {
     const context = await makeContext();
     const style: TextStyle = {
       fontName: 'Arial',
@@ -56,11 +56,11 @@ describe('resolveEnglishFont', () => {
     const first = await resolveEnglishFont(style, context);
     const second = await resolveEnglishFont(style, context);
     expect(first).toBe(second);
-    expect(first.name).toBe(StandardFonts.HelveticaBold);
+    expect(first.name).toBe('LiberationSans-Bold');
     expect(context.warnings).toEqual([]);
   });
 
-  it('substitutes an unknown font with Helvetica and emits a warning', async () => {
+  it('uses the local generic and reports unavailable calibration for an unknown font', async () => {
     const context = await makeContext();
     const font = await resolveEnglishFont(
       {
@@ -73,9 +73,9 @@ describe('resolveEnglishFont', () => {
       context,
     );
 
-    expect(font.name).toBe(StandardFonts.Helvetica);
+    expect(font.name).toBe('LiberationSans');
     expect(context.warnings).toEqual([
-      "Font 'MysteryGrotesk' substituted with Helvetica; widths/kerning may differ.",
+      "Font 'MysteryGrotesk' substituted with LiberationSans; no source widths available for calibration.",
     ]);
   });
 });
