@@ -4,6 +4,7 @@ import type { TextBlock } from '@/lib/pdf/textContent';
 import type { TextStyle } from '@/lib/export/types';
 import { paragraphPresentation, flowSelectedParagraphs, snapshotParagraphs, refreshParagraphPresentation, recalibrateParagraphRows } from './paragraphPresentation';
 import { serializeRichText } from './richText';
+import { sourceParagraphLineHeight, sourceParagraphs } from './paragraphSeed';
 
 const style: TextStyle = { fontName: 'Helvetica', fontSizePt: 10, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } };
 function fixture(): TextBlock {
@@ -16,6 +17,32 @@ function fixture(): TextBlock {
 }
 afterEach(() => { document.body.replaceChildren(); window.getSelection()?.removeAllRanges(); });
 describe('measured paragraph presentation', () => {
+  it('keeps a larger source step inside an existing soft group when leading is corrected', () => {
+    const texts = ['alpha beta', 'long next line', 'bold label', 'short', 'other words', 'last words', 'short', 'short'];
+    const steps = [12, 16, 16, 12, 16, 16, 16], widths = [90, 90, 40, 90, 40, 30, 30, 30];
+    let y = 700;
+    const lines = texts.map((text, index) => {
+      y -= index ? steps[index - 1]! : 0;
+      const rect = { x: 40, y, w: widths[index]!, h: 10 };
+      return { pageIndex: 0, text, rect, baselineY: y, style, runs: [{ pageIndex: 0, text, rect, style,
+        characterWidthsPt: [...text].map(() => rect.w / text.length), spaceWidthPt: 2,
+        metrics: { matrix: [10, 0, 0, 10, 40, y] as const, x: 40, baselineY: y, widthPt: rect.w } }] };
+    });
+    const block = { ...fixture(), text: texts.join('\n'), lines, rect: { x: 40, y, w: 90, h: 700 - y + 10 } };
+    const seed = sourceParagraphs(block);
+    expect(sourceParagraphLineHeight(block)).toBe(12);
+    const value = paragraphPresentation(block, seed.text, style, 2, text => text.length * 2);
+    expect(value.html).toContain('margin-top:var(--pdf-source-row-gap,8px)');
+    const root = document.createElement('div'); root.innerHTML = value.html; document.body.append(root);
+    const paragraph = root.querySelector<HTMLElement>('[data-pdf-measured-paragraph]')!;
+    const node = paragraph.querySelector('[data-pdf-source-row]')!.firstChild!;
+    const range = document.createRange(); range.setStart(node, 0); range.collapse(true); window.getSelection()!.addRange(range);
+    const snapshots = snapshotParagraphs(root, style, 2);
+    flowSelectedParagraphs(root);
+    expect(paragraph.style.getPropertyValue('--pdf-source-row-gap')).toBe('0px');
+    refreshParagraphPresentation(root, snapshots, style, 2);
+    expect(paragraph.style.getPropertyValue('--pdf-source-row-gap')).toBe('');
+  });
   it('does not migrate the presentation of old saved rows when a late font is wide', () => {
     const root=document.createElement('div');
     root.innerHTML='<div data-pdf-measured-paragraph="true" data-pdf-saved-rows="true"><span data-pdf-source-row="true" data-pdf-source-width-pt="10">alpha beta</span></div>';

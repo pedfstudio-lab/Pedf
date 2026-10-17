@@ -22,8 +22,8 @@ function flowingLines(lines: readonly string[]): string {
   return seed.replace(/\s+/g, ' ').trim();
 }
 
-/** Keep intentional line ends; only a word that did not fit proves a soft wrap. */
-export function sourceParagraphLineHeight(block: TextBlock): number {
+/** The existing pitch used to decide soft wraps; paragraph boundaries do not change. */
+function groupingLineHeight(block: TextBlock): number {
   const bins = new Map<number, number[]>();
   block.lines.slice(1).forEach((line, index) => {
     const gap = block.lines[index]!.baselineY - line.baselineY;
@@ -39,16 +39,15 @@ export function sourceParagraphLineHeight(block: TextBlock): number {
   return values?.length ? values.reduce((a, b) => a + b, 0) / values.length : block.lineHeightPt;
 }
 
-export function sourceParagraphs(block: TextBlock): { text: string; layouts: readonly TextParagraphLayout[]; lines: readonly (readonly TextBlock['lines'][number][])[] } {
+function sourceParagraphGroups(block: TextBlock, normal: number) {
   if (block.lines.length <= 1 || ((block.align ?? 'left') !== 'left' && block.align !== 'justify')) return {
-    text: block.text, layouts: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }], lines: [block.lines],
+    text: block.text, groups: [block.lines],
   };
   const lines = block.lines.map((line) => normalizedLine(line.text));
   const right = Math.max(block.rect.x + block.rect.w,
     block.alignLeftPt !== undefined && block.alignWidthPt !== undefined ? block.alignLeftPt + block.alignWidthPt : 0);
   let seed = lines[0] ?? '';
   const groups: TextBlock['lines'][number][][] = [[block.lines[0]!]];
-  const normal = sourceParagraphLineHeight(block);
   for (let index = 1; index < lines.length; index += 1) {
     const upper = block.lines[index - 1]!, lower = block.lines[index]!;
     const wordWidth = firstWordWidthPt(lower);
@@ -65,7 +64,38 @@ export function sourceParagraphs(block: TextBlock): { text: string; layouts: rea
       ? seed.slice(0, -1) + text : seed + (soft ? ' ' : '\n') + text;
     if (soft) groups.at(-1)!.push(lower); else groups.push([lower]);
   }
-  return { text: seed, lines: groups, layouts: groups.map((group, index) => {
+  return { text: seed, groups };
+}
+
+/** Paragraph-start gaps are not leading: measure only the existing soft wraps. */
+export function sourceParagraphLineHeight(block: TextBlock): number {
+  const fallback = groupingLineHeight(block);
+  if ((block.align ?? 'left') !== 'left' && block.align !== 'justify') return fallback;
+  if (block.lines.some(line => startsWithBulletMarker(line.text))) return fallback;
+  const inside = sourceParagraphGroups(block, fallback).groups.flatMap(group =>
+    group.slice(1).map((line, index) => group[index]!.baselineY - line.baselineY)).filter(gap => gap > 0.5);
+  if (inside.length < 2) return fallback;
+  const bins = new Map<number, number[]>();
+  for (const gap of inside) {
+    const key = Math.round(gap * 2), values = bins.get(key) ?? [];
+    values.push(gap); bins.set(key, values);
+  }
+  const values = [...bins.values()].sort((a, b) => b.length - a.length)[0]!;
+  const measured = values.reduce((sum, gap) => sum + gap, 0) / values.length;
+  // Keep the previous exact value inside the existing half-point pitch
+  // tolerance; sampling a different subset must not introduce numeric drift.
+  return Math.abs(measured - fallback) > 0.5 ? measured : fallback;
+}
+
+/** Keep intentional line ends; only a word that did not fit proves a soft wrap. */
+export function sourceParagraphs(block: TextBlock): { text: string; layouts: readonly TextParagraphLayout[]; lines: readonly (readonly TextBlock['lines'][number][])[]; lineHeightCorrected?: true } {
+  if (block.lines.length <= 1 || ((block.align ?? 'left') !== 'left' && block.align !== 'justify')) return {
+    text: block.text, layouts: [{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }], lines: [block.lines],
+  };
+  const groupingHeight = groupingLineHeight(block);
+  const { text, groups } = sourceParagraphGroups(block, groupingHeight);
+  const normal = sourceParagraphLineHeight(block);
+  return { text, lines: groups, ...(normal !== groupingHeight ? { lineHeightCorrected: true as const } : {}), layouts: groups.map((group, index) => {
     const previous = groups[index - 1]?.at(-1), first = group[0]!;
     const gap = previous ? previous.baselineY - first.baselineY - normal : 0;
     const rest = group.slice(1).map(line => line.rect.x - block.rect.x).sort((a, b) => a - b);

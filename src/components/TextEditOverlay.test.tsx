@@ -10,6 +10,7 @@ import type { TextBlock } from '@/lib/pdf/textContent';
 import { buildTextBlockEdits } from '@/lib/edit/buildTextEdits';
 import { widestLineWidth } from '@/lib/edit/paragraphSeed';
 import { detectRuleLines } from '@/lib/pdf/ruleLines';
+import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import { TextEditOverlay } from './TextEditOverlay';
 
@@ -1287,6 +1288,29 @@ describe('TextEditOverlay unchanged guard', () => {
 
 const resumeFixture = 'tmp/bullets/RAHUL_RAJPUT_RESUME.pdf';
 const resumeEnabled = process.env.TASK74_REAL === '1' && existsSync(resumeFixture);
+
+describe.runIf(process.env.TASK80_REAL === '1')('Task 80 Corporate p13', () => {
+  it.each([1, 2])('opens with 12pt leading at zoom %s and Done makes no edit', async zoom => {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const reader = await getDocument({ data: new Uint8Array(await readFile('tmp/text-doubling/corporate-edited-3.pdf')), fontExtraProperties: true, verbosity: 0 }).promise;
+    try {
+      const page = await reader.getPage(13);
+      const [runs, ruleLines, regions] = await Promise.all([extractTextRuns(page, 12), detectRuleLines(page, 12), detectPageGraphicRegions(page, 12)]);
+      const value = groupRunsIntoBlocks(runs, { ruleLines, markers: [...regions.imageRegions, ...regions.shapeMarkerRegions] }).find(block => block.text.startsWith('(i) All elements of remuneration'))!;
+      expect(value.lines).toHaveLength(36);
+      const onDone = vi.fn(), onCancel = vi.fn();
+      renderEditor(value, zoom, 0, { onDone, onCancel, measureTextWidth: text => text.length * 2 });
+      await act(async () => { await Promise.resolve(); });
+      const editable = screen.getByRole('textbox', { name: 'Editable text' });
+      expect(Number.parseFloat(editable.style.lineHeight) * Number.parseFloat(editable.style.fontSize)).toBeCloseTo(12 * zoom, 6);
+      // Existing Change 10 partitions: 22 groups (including larger steps inside
+      // three soft groups). Fix A must not turn those into new paragraphs.
+      expect(editable.querySelectorAll('[data-pdf-paragraph]')).toHaveLength(22);
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(onDone).not.toHaveBeenCalled(); expect(onCancel).toHaveBeenCalledOnce();
+    } finally { await reader.destroy(); }
+  }, 120_000);
+});
 
 describe.skipIf(!resumeEnabled)('TextEditOverlay fill-and-stroke bold, unchanged Done', () => {
   it('treats Done without typing as a no-op on a paragraph with painted bold phrases', async () => {

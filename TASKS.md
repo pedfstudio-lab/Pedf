@@ -15156,7 +15156,24 @@ with the same widths (Task 78)`. Merge after the checks pass and the user's nine
 
 ---
 
-### Task 80 — Paragraphs keep the page's height  🔲 TODO → branch `paragraph-height` **from `main`** (Task 78 is merged: `49b8ba9`)   *(Medium · 2–3 days)*
+### Task 80 — Paragraphs keep the page's height  ✅ Fix A DONE → merged to `main` (2026-10-17); Fix B ⏭️ SKIPPED by the user after its Change 0 → branch `paragraph-height` **from `main`** (Task 78 is merged: `49b8ba9`)   *(Medium · 2–3 days)*
+
+> **Fix A shipped — 2026-10-17.** Built by Codex; checked by Claude in the browser on Corporate p13 (inside-paragraph
+> lines 12 px and new items 16 px apart at 100 %; first-to-last line **509 px** against the page's 509.7 pt, was about
+> 561 px; the heading clear) and tested by the user in Chrome. `SPACING_SCOPE=1`: **0 / 1,466** wrong, the 20 Corporate
+> boxes corrected, **1,446 exactly unchanged**. Full suite **1,617 passed / 0 failed**; with the real-PDF switches
+> **1,657 passed / 0 failed**; typecheck, lint, build.
+>
+> **Fix B skipped — 2026-10-17.** Its Change 0 (`TASK80_FIX_B_CHANGE0_TABLE.md`, `task80Change0.local.test.ts`) found
+> 208 candidate paragraphs, all in the two Corporate Governance copies; with one inserted word, **12** stop gaining a
+> line (p18 25 → 24), 12 still grow, and in Codex's oracle 8 came out **shorter** than the source (squeezing applied
+> where nothing needed it). The user tested it: adding several words grows a paragraph as it should, and the
+> one-short-word case is a small gain in one document — not worth the layout complexity. If revisited, squeeze only
+> when the paragraph would otherwise gain a line, and keep the original breaks otherwise. Codex's `TASK74_JUSTIFY`
+> 24-line assertion for p18 stays failing by design.
+>
+> **Found while checking (Codex), not fixed:** Ziro p2 "Some festivals…" (centre-aligned) shows seven rows while typing
+> but saves eight ("and" alone) — the same on `main` before Fix A; a width/wrap mismatch outside this task.
 
 *(Task 79 is reserved for on-screen translation.)*
 
@@ -15238,6 +15255,19 @@ positions for untouched lines; the saved-project format beyond optional fields.
 2. Corporate p18 → "Common stockholders…" → add "ordinary" → **Done** → still 24 lines, "1.10.4 Competition" clear →
    **Export** → the same in the PDF.
 3. Ladakh p2 and Healing p3 → edit a paragraph → behaves exactly as now.
+
+**Partial implementation checkpoint (Codex, 2026-10-17; no commit).** User authorized Fix A plus Fix B's Change 0
+only. Fix A scope: **0 / 1,466** wrong boxes, **20** corrected in the two Corporate copies, **1,446** retain their
+previous exact leading/layouts. Chrome p13: 36 visible rows, baseline errors below **0.46 px** at 100% and 200%,
+heading clear, unchanged Done = 0 edits. Existing paragraph membership is preserved: larger source steps inside
+soft groups remain source-only row offsets until that paragraph flows. Fix B survey: **47 paths / 473 pages**,
+**484** justified paragraphs; **234** have measured source tightening, **208** have an additional cap from a
+completely measured row (105 + 103 in the Corporate copies). Partial glyph coverage and prototype limitations are
+explicit in [TASK80_REPORT.md](TASK80_REPORT.md) and the full
+[Change 0 table](TASK80_FIX_B_CHANGE0_TABLE.md). The offline p18 candidate gives **24** rows instead of **25**;
+**the app remains at 25 until Fix B is approved and built**. The Ziro control's existing 7-editor/8-saved-row
+mismatch reproduces identically with the pre-Fix-A helper; it is documented, not changed here. Final check results
+are in the report. No Fix B production field, wrapper, CSS, or export implementation was added.
 
 **Land:** branch `paragraph-height` from `main`. Commit: `Paragraphs keep the page's height (Task 80)`. Merge after
 Change 0 is reviewed, the checks pass and the user's three steps pass.

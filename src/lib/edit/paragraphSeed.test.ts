@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TextEdit } from '@/lib/export/types';
 import type { TextBlock, TextLine } from '@/lib/pdf/textContent';
-import { editorWidthMeasurementText, listSeedText, paragraphSeedText } from './paragraphSeed';
+import { editorWidthMeasurementText, listSeedText, paragraphSeedText, sourceParagraphLineHeight, sourceParagraphs } from './paragraphSeed';
 
 const style = {
   fontName: 'Helvetica',
@@ -61,6 +61,50 @@ describe('paragraphSeedText', () => {
   it('does not add a second space when a line already ends with one', () => {
     expect(paragraphSeedText(paragraph('First line ', 'second line')))
       .toBe('First line second line');
+  });
+});
+
+describe('paragraph line spacing (Task 80 Fix A)', () => {
+  function withSteps(steps: number[], widths: number[]): TextBlock {
+    const block = paragraph(...widths.map((_, index) => `Item ${index} continues`));
+    let baselineY = 700;
+    return { ...block, lines: block.lines.map((line, index) => {
+      baselineY -= index ? steps[index - 1]! : 0;
+      const rect = { ...line.rect, y: baselineY, w: widths[index]! };
+      return { ...line, rect, baselineY, runs: line.runs.map(run => ({ ...run, rect,
+        characterWidthsPt: [...run.text].map(() => rect.w / [...run.text].length) })) };
+    }) };
+  }
+
+  it('takes leading from wrapped lines even when item-start gaps are more common', () => {
+    // Short final lines make real paragraph ends; full lines prove soft wraps.
+    const block = withSteps([12, 16, 16, 12, 16, 16], [300, 50, 50, 300, 50, 50, 50]);
+    expect(sourceParagraphLineHeight(block)).toBe(12);
+    const seeded = sourceParagraphs(block);
+    expect(seeded.lines.map(lines => lines.length)).toEqual([2, 1, 2, 1, 1]);
+    expect(seeded.layouts.map(layout => layout.gapBeforePt)).toEqual([0, 4, 4, 4, 4]);
+    expect(seeded.text.split('\n')).toHaveLength(5);
+  });
+
+  it('keeps the old modal rule with fewer than two within-paragraph steps', () => {
+    const block = withSteps([12, 16, 16], [300, 50, 50, 50]);
+    expect(sourceParagraphLineHeight(block)).toBe(16);
+  });
+
+  it('preserves uniform spacing and page-pitch fallback', () => {
+    expect(sourceParagraphLineHeight(paragraph('one', 'two', 'three'))).toBe(16);
+    expect(sourceParagraphLineHeight({ ...paragraph('one'), paragraphLineHeightPt: 13 })).toBe(13);
+  });
+
+  it('does not reinterpret centred or right-aligned rows or bullet leading', () => {
+    const block = withSteps([12, 16, 16, 12, 16], [300, 50, 50, 300, 50, 50]);
+    for (const align of ['center', 'right'] as const) {
+      expect(sourceParagraphLineHeight({ ...block, align })).toBe(16);
+      expect(sourceParagraphs({ ...block, align }).layouts).toEqual([{ gapBeforePt: 0, firstIndentPt: 0, restIndentPt: 0 }]);
+      expect(sourceParagraphLineHeight({ ...withSteps([20, 12], [300, 300, 300]), align })).toBe(12);
+    }
+    const lines = block.lines.map(line => ({ ...line, text: `• ${line.text}` }));
+    expect(sourceParagraphLineHeight({ ...block, lines })).toBe(16);
   });
 });
 

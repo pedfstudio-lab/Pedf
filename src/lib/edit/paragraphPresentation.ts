@@ -1,7 +1,7 @@
 import type { TextEdit, TextSpan, TextStyle } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import { composeTextLine, sourceLineComposition } from './lineComposition';
-import { sourceParagraphs } from './paragraphSeed';
+import { sourceParagraphLineHeight, sourceParagraphs } from './paragraphSeed';
 import { effectiveTextSpans, effectiveTextSpanStyle, richTextToHtml, serializeRichText, sourceSpansForTextBlock, splitParagraphSpans } from './richText';
 import type { WrappedTextLine } from './textLayout';
 import type { MeasurePiece } from './lineComposition';
@@ -44,7 +44,7 @@ export function flowSelectedParagraphs(root: HTMLElement): void {
 
 function setFlow(paragraph: HTMLElement, flowing: boolean): void {
   paragraph.dataset.pdfFlowing = String(flowing);
-  for (const [key, value] of [['--pdf-row-display', 'inline'], ['--pdf-row-space', 'normal'], ['--pdf-row-indent', '0px'], ['--pdf-piece-gap', '0px'], ['--pdf-word-space', '0px']] as const) {
+  for (const [key, value] of [['--pdf-row-display', 'inline'], ['--pdf-row-space', 'normal'], ['--pdf-row-indent', '0px'], ['--pdf-piece-gap', '0px'], ['--pdf-word-space', '0px'], ['--pdf-source-row-gap', '0px']] as const) {
     if (flowing) paragraph.style.setProperty(key, value); else paragraph.style.removeProperty(key);
   }
 }
@@ -99,6 +99,7 @@ export function refreshParagraphPresentation(root: HTMLElement, initial: Readonl
 
 export function paragraphPresentation(block: TextBlock, text: string, style: TextStyle, zoom: number, measure: MeasurePiece, existing?: readonly TextEdit[]): ParagraphPresentation {
   const original = sourceParagraphs(block), saved = existing?.length ? savedParagraphs(text, existing) : undefined;
+  const sourceLeading = !existing?.length && original.lineHeightCorrected ? sourceParagraphLineHeight(block) : undefined;
   const groups = saved ?? (existing?.length ? [] : original.lines);
   const layouts = existing?.[0]?.boxParagraphs ?? original.layouts;
   const lines: WrappedTextLine[][] = [], fallbacks: (string | undefined)[] = [];
@@ -139,7 +140,14 @@ export function paragraphPresentation(block: TextBlock, text: string, style: Tex
         // editor's pre-wrap text, a space of its own would be a blank line; at the end of a
         // nowrap row it takes no room, and it still separates the words once the paragraph flows.
         const separator = rowIndex < rowModels.length - 1 ? ' ' : '';
-        return `<span data-pdf-source-row="true" data-pdf-source-width-pt="${row.sourcePosition.width}" style="display:var(--pdf-row-display,block);white-space:var(--pdf-row-space,nowrap);text-indent:0;word-spacing:var(--pdf-word-space,${wordSpacing * zoom}px);margin-left:var(--pdf-row-indent,${offset * zoom}px)">${content}${separator}</span>`;
+        // Fix A changes leading, not paragraph membership. An existing soft
+        // group may contain a larger source step; retain it until this paragraph
+        // flows. The offset is PDF model geometry, never a DOM measurement.
+        const previous = rowModels[rowIndex - 1];
+        const rowGap = sourceLeading !== undefined && previous
+          ? previous.sourcePosition.y - row.sourcePosition.y - sourceLeading : 0;
+        const sourceGap = Math.abs(rowGap) > 1e-8 ? `;margin-top:var(--pdf-source-row-gap,${rowGap * zoom}px)` : '';
+        return `<span data-pdf-source-row="true" data-pdf-source-width-pt="${row.sourcePosition.width}" style="display:var(--pdf-row-display,block);white-space:var(--pdf-row-space,nowrap);text-indent:0;word-spacing:var(--pdf-word-space,${wordSpacing * zoom}px);margin-left:var(--pdf-row-indent,${offset * zoom}px)${sourceGap}">${content}${separator}</span>`;
       }).join('');
     return `<div data-pdf-paragraph="true" data-paragraph-id="source-${paragraphIndex}"${existing?.length ? ' data-pdf-saved-rows="true"' : ''}${reason ? ` data-pdf-paragraph-fallback="${reason}"` : ' data-pdf-measured-paragraph="true"'}${layout?.minimumWordGapEm !== undefined ? ` data-minimum-word-gap-em="${layout.minimumWordGapEm}"` : ''} data-gap-before-pt="${layout?.gapBeforePt ?? 0}" data-first-indent-pt="${layout?.firstIndentPt ?? 0}" data-rest-indent-pt="${layout?.restIndentPt ?? 0}" style="margin-top:${(paragraphIndex ? layout?.gapBeforePt ?? 0 : 0) * zoom}px;padding-left:${(layout?.restIndentPt ?? 0) * zoom}px;text-indent:${((layout?.firstIndentPt ?? 0) - (layout?.restIndentPt ?? 0)) * zoom}px">${body || '<br>'}</div>`;
   }).join('');
