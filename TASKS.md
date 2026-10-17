@@ -14895,7 +14895,8 @@ the narrower spaces, not the font — Step 5d Change 5.)*
 > - *Résumé bullet lists lose their bold* — opening the Rahul résumé's Firgun list and pressing Done without typing
 >   drops the bold phrases and saves the loss (`TASK78_BROWSER_CHECK.md`: `sourceSpansForTextBlock` refuses the
 >   marker-prefixed list seed). Older than this task, live; needs its own fix.
-> - *Corporate p13 / p18 boxes taller than the page* → **Task 80**.
+> - *Corporate p13 / p18 boxes taller than the page* → **Task 80**: p13 fixed by Fix A (`83a6e0d`, 2026-10-17); p18's
+>   one-word growth left as it is — Fix B skipped by the user.
 > - *Bullet tails* — parked by the user.
 > - *Font size*: trim weights no PDF uses (Light, Medium, Black, …) and consider woff2 — later.
 > - *The image-deletion corpus sweep* exceeds its 30-minute test timeout (test timing, no functional failure found).
@@ -15271,5 +15272,134 @@ are in the report. No Fix B production field, wrapper, CSS, or export implementa
 
 **Land:** branch `paragraph-height` from `main`. Commit: `Paragraphs keep the page's height (Task 80)`. Merge after
 Change 0 is reviewed, the checks pass and the user's three steps pass.
+
+---
+
+### Task 79 — Read the PDF in your language: on-screen translation, and Indian scripts never break a download  🔲 TODO → branch `translate` **from `main`** (Task 80 Fix A is merged: `83a6e0d`)   *(Medium · 3–5 days)*
+
+**The user's decisions (2026-10-15 to 10-17).**
+- Translation is **for reading on screen only**. A translated PDF is **not** downloadable; **Export** always gives the
+  original or edited **English** PDF.
+- Editing stays **English**: clicking **Edit text** always shows the original English text.
+- **Meaning** is dropped — whole-page translation and **Ask** already cover it.
+- *Fresh answers after editing* (the chat reads only the original PDF text) and *switching the chat language
+  mid-conversation* are **separate tasks**, not part of this one.
+
+**Today** (read from the code, 2026-10-17):
+- The click menu (`TapPopover.tsx`) shows **Translate** and **Meaning** as disabled placeholders ("Available in the
+  translation update").
+- The provider seam already has `translate` (`LanguageProvider.translate` in `src/lib/providers/types.ts`, routed by
+  `providers/index.ts`); `sarvam.ts` throws `NotImplementedError` for it and `browser.ts` `NotSupportedError`.
+- Languages: `SUPPORTED_LANGUAGES` in `src/state/prefsStore.tsx` — English, Hindi, Tamil, Bengali, Telugu, Marathi,
+  Gujarati, Kannada, Malayalam, Punjabi.
+- **Live bug:** a text edit containing Hindi or any other Indian script makes the whole export throw — `handlers/text.ts`
+  routes it to `pathA.ts`, still the Task 13 placeholder (`notImplemented('Indic text export / Path A (Task 13)')`).
+  Proved 2026-10-15 (`src/lib/export/hindiExportProbe.local.test.ts`): `Hello` exports, `Hello नमस्ते` fails with
+  "Not implemented yet". Nothing stops a user typing or pasting Hindi into an edit box.
+
+**Change 1 — a Translate button in the top bar.** Next to **Ask**: **Translate** with a language list (the nine
+Indian languages of `SUPPORTED_LANGUAGES`; English means "show original"). Choosing a language turns translation on for
+the open document; choosing English or **Show original** turns it off. It starts in the chat's preferred language if
+that is not English. While translation is on, the toolbar shows which language is on screen.
+
+**Change 2 — translate in place, page by page.**
+1. *What is translated:* each text box the editor already knows on a page (paragraphs, headings, table cells, list
+   items) — the same boxes, so no new grouping. Numbers, prices and dates are left to Sarvam to keep as they are.
+2. *Where it is shown:* in the box's own place, over the real page. The original text under it is hidden the way
+   Step 5b hides it while a box is being edited (clean page, no white block); the translation uses the box's colour,
+   alignment and size.
+3. *Fit:* a translation longer than the box is drawn smaller to fit, down to **70 %** of the original size; if it still
+   does not fit, it keeps 70 % and runs below the box (screen only — the PDF is untouched). A shorter one stays at the
+   original size.
+4. *Which pages:* only the pages in view and the next one; more as the user scrolls. Never the whole document at once.
+5. *Remembered:* each page's translation is kept per document, page and language while the file is open, so switching
+   back and forth or scrolling back does not ask Sarvam again.
+6. *Fonts:* the browser's own fonts for the Indian scripts. If a supported script shows boxes instead of letters on
+   Windows/Android, ship that script's Noto font in `public/fonts/` (SIL OFL, licence beside it) — Codex checks all
+   nine scripts and reports.
+
+**Change 3 — Sarvam's translate.** Implement `translate` in `src/lib/providers/sarvam.ts` with Sarvam's translate
+endpoint, through the same key path as Ask and voice — the key **only** from the app's Settings or the server secret
+`SARVAM_API_KEY`; never in code, logs or chat. Send a page's boxes in as few requests as the endpoint's limits allow;
+Codex confirms the endpoint, its model, its per-request character limit and its language codes against Sarvam's
+documentation before building. Errors are shown, never thrown at the page: no key → "Translation needs a Sarvam key in
+Settings"; offline or a failure → that page shows its original text with a small "Couldn't translate this page — try
+again" note.
+
+**Change 4 — the click menu.** **Translate** works: it shows the selected box's translation in a small card, in the
+chosen language (or the chat's preferred language), with a copy button. **Meaning** is removed.
+
+**Change 5 — editing and translation never mix.**
+- Clicking **Edit text** turns translation off and shows the original English page; translation can be turned on again
+  after **Done** or **Cancel**.
+- Search, **Ask**, voice and **Export** keep working on the original/edited English text.
+
+**Change 6 — the guard: Indian script never breaks a download.**
+1. *In the editor:* when an edit box contains Hindi or another Indian script (typed with a Hindi keyboard or pasted),
+   a short message appears under the box — **"Editing supports English text. Use Translate to read this page in Hindi."**
+   (the script's own language name) — and **Done** is refused with that message until those letters are removed.
+   **Cancel** always works. English typing is unchanged.
+2. *In the export:* a saved project that already holds such an edit (from before this task) exports **without** that
+   edit's Indian-script text and with a warning naming the page, instead of failing the whole download.
+3. `pathA.ts` stays the placeholder: drawing Indian scripts into a PDF is not needed (translation is view-only).
+
+**Privacy.** The page's **text** goes to Sarvam to be translated, as Ask's questions already do; the PDF file never
+leaves the device. The first time Translate is used, a one-line note says so (as Ask's does).
+
+**Checks**
+- *Provider:* `translate` with a mocked Sarvam response returns the text; no key → the Settings message; a failed request
+  → the page falls back to the original with the "Couldn't translate" note; the key never appears in a log or error.
+- *Healing p3 → Hindi:* every box on the page shows Hindi in its own place; no white blocks; nothing outside its box
+  except a translation that needed the 70 % floor; scrolling to p4 translates p4; scrolling back to p3 makes **no** new
+  request.
+- *Corporate p11 → Tamil*, *Ladakh p2 → Bengali*, *the Rahul résumé → Gujarati*: same.
+- *All nine scripts* render real letters (no boxes) in Chrome on Windows.
+- *Edit text* while translated → the original English opens; **Done** → translation can be turned on again.
+- *Export* while translated → the downloaded PDF is English (its extracted text equals the untranslated export's).
+- *The guard:* type "नमस्ते" in an edit box → the message, **Done** refused, **Cancel** works; paste Tamil text → the same;
+  English → unchanged. A saved project holding "Hello नमस्ते" exports, with the warning, instead of failing
+  (`hindiExportProbe.local.test.ts` turned into a real test).
+- *Meaning* is gone from the click menu; *Translate* there shows a card.
+- *Requests:* in the browser's network list, translation sends only page text to Sarvam — no PDF bytes.
+- *Unchanged elsewhere:* full suite; every real-PDF switch; typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/components/TranslationLayer.tsx` + test | Draws a page's translated boxes in place (Change 2) |
+| `src/lib/translate/pageTranslation.ts` + test | Which boxes to send, batching, the per-page cache, the 70 % fit (Changes 2, 3) |
+| `public/fonts/noto-*` + licences | Only for a script that does not render with the system fonts (Change 2.6) |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/providers/sarvam.ts` + test | Implement `translate` (Change 3) |
+| The toolbar (where **Ask** is, in `App.tsx` or its toolbar component) + test | The **Translate** button and language list (Change 1) |
+| `src/components/TapPopover.tsx` + test | **Translate** works; **Meaning** removed (Change 4) |
+| `src/components/OverlayLayer.tsx` / `PageCanvas.tsx` | Show the translation layer; hide the original text under it as Step 5b does (Change 2) |
+| `src/components/TextEditOverlay.tsx` + test | The guard in the editor (Change 6.1) |
+| `src/lib/export/handlers/text.ts` (or `exportPdf.ts`) + test | Skip Indian-script text with a warning instead of failing (Change 6.2) |
+
+**Files that must not change:** text extraction and grouping; fonts and font matching (Task 78); the editor's layout,
+Step 5d positions, bullets, tables; glyph, image and shape removal; `pathA.ts` (stays the placeholder); the chat's
+reading of the PDF text and its language choice (separate tasks); the saved-project format beyond optional fields.
+
+**Verify (user):**
+1. Healing Retreat → **Translate** → **Hindi** → the page reads in Hindi, each text in its own place, the photo
+   untouched → scroll to the next page → it translates too.
+2. **Show original** → English again → **Translate** → **Tamil** → Tamil.
+3. While translated → **Edit text** → click a paragraph → it opens in **English** → **Done**.
+4. Click a piece of text → **Translate** in the menu → a card with its translation; **Meaning** is gone.
+5. **Export PDF** while translated → the downloaded PDF is English.
+6. In an edit box, type or paste **नमस्ते** → the message → **Done** won't save → delete it → **Done** works.
+
+**Known limits:** translations come from Sarvam and can be imperfect; longer translations are drawn smaller and the
+longest may run below their box; text inside pictures and scanned pages is not translated (that needs OCR); the
+translation is not saved in the PDF or in the saved project — it is asked for again after the file is reopened.
+
+**Land:** branch `translate` from `main`. Commit: `Read the PDF in your language on screen, and Indian scripts never
+break a download (Task 79)`. Merge after the checks pass and the user's six steps pass.
 
 ---
