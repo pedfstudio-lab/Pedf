@@ -26,7 +26,7 @@ vi.mock('@/lib/pdf/worker', () => ({pdfjs:{getDocument: () => ({promise:Promise.
 vi.mock('./OverlayLayer', () => ({OverlayLayer: ({preview}:{preview:PagePreviewBridge}) => {mocks.bridge=preview;return null;}}));
 
 const page = {getViewport: ({scale}:{scale:number}) => ({width:600*scale,height:800*scale})} as PDFPageProxy;
-const props = {source:{kind:'pdf' as const,page},pageIndex:0,zoom:1,editMode:true,textAddMode:false,imageMode:false,peek:false,locations:[],locationNames:[]};
+const props = {source:{kind:'pdf' as const,page},pageIndex:0,zoom:1,editMode:true,textAddMode:false,imageMode:false,peek:false};
 const selection = {key:'heading',transientEdits:[],coverIds:['cover'],omitTextIds:[],paintSupported:true};
 const edit:Edit = {kind:'cover',id:'cover',pageIndex:0,z:0,rect:{x:10,y:10,w:30,h:20},color:{r:1,g:1,b:1},sampleBackground:false};
 const result:PagePreviewResult = {bytes:new Uint8Array([1]),clean:true,warnings:[],renderedEditIds:new Set(['cover']),satisfiedCoverIds:new Set(['cover']),timings:{sourceMs:0,rewriteMs:0}};

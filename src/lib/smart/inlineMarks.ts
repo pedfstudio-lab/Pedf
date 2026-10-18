@@ -4,7 +4,6 @@ import type { DetectedDate } from '@/lib/smart/dateDetect';
 export interface InlineSegment {
   readonly text: string;
   readonly span?: TextSpan;
-  readonly location?: string;
   readonly date?: DetectedDate;
 }
 
@@ -17,7 +16,6 @@ interface IndexedSpan {
 interface IndexedMark {
   readonly start: number;
   readonly end: number;
-  readonly location?: string;
   readonly date?: DetectedDate;
 }
 
@@ -33,32 +31,9 @@ function overlaps(marks: readonly IndexedMark[], start: number, end: number): bo
   return marks.some((mark) => start < mark.end && end > mark.start);
 }
 
-function locationMarks(text: string, names: readonly string[]): IndexedMark[] {
-  const result: IndexedMark[] = [];
-  const ordered = [...new Set(names.map((name) => name.trim()).filter(Boolean))]
-    .sort((left, right) => right.length - left.length);
-  for (const name of ordered) {
-    let fromIndex = 0;
-    while (fromIndex < text.length) {
-      const start = text.indexOf(name, fromIndex);
-      if (start < 0) break;
-      const end = start + name.length;
-      fromIndex = end;
-      if (
-        hasWholeWordBoundaries(text, start, end) &&
-        !overlaps(result, start, end)
-      ) {
-        result.push({ start, end, location: name });
-      }
-    }
-  }
-  return result;
-}
-
 function dateMarks(
   text: string,
   dates: readonly DetectedDate[],
-  occupied: readonly IndexedMark[],
 ): IndexedMark[] {
   const result: IndexedMark[] = [];
   const byRaw = new Map<string, DetectedDate[]>();
@@ -81,7 +56,7 @@ function dateMarks(
       if (
         date &&
         hasWholeWordBoundaries(text, start, end) &&
-        !overlaps([...occupied, ...result], start, end)
+        !overlaps(result, start, end)
       ) {
         result.push({ start, end, date });
       }
@@ -127,27 +102,16 @@ function buildSegments(
     result.push({
       text: segmentText,
       ...(sourceSpan ? { span: { ...sourceSpan, text: segmentText } } : {}),
-      ...(mark?.location ? { location: mark.location } : {}),
       ...(mark?.date ? { date: mark.date } : {}),
     });
   }
   return result;
 }
 
-export function markLocationsInLine(
-  text: string,
-  spans: readonly TextSpan[] | undefined,
-  names: readonly string[],
-): InlineSegment[] {
-  return buildSegments(text, spans, locationMarks(text, names));
-}
-
 export function markInlineSmartSegments(
   text: string,
   spans: readonly TextSpan[] | undefined,
-  names: readonly string[],
   dates: readonly DetectedDate[],
 ): InlineSegment[] {
-  const locations = locationMarks(text, names);
-  return buildSegments(text, spans, [...locations, ...dateMarks(text, dates, locations)]);
+  return buildSegments(text, spans, dateMarks(text, dates));
 }

@@ -15,7 +15,6 @@ import { sampleCanvasTextBackground } from '@/lib/export/inkExtent';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { planToGeometry } from '@/state/pagePlan';
-import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { OverlayLayer } from './OverlayLayer';
 
 interface PageCanvasProps {
@@ -24,7 +23,6 @@ interface PageCanvasProps {
   source: { readonly kind: 'pdf'; readonly page: PDFPageProxy }
     | { readonly kind: 'blank'; readonly widthPt: number; readonly heightPt: number };
   pageIndex: number; zoom: number; editMode: boolean; textAddMode: boolean; imageMode: boolean; peek: boolean;
-  locations: readonly DetectedLocation[]; locationNames: readonly string[];
 }
 interface RenderInfo { readonly identity: PageRenderIdentity; readonly viewport: PageViewport; readonly dpr: number; readonly zoom: number }
 interface RenderedPreview { readonly canvas: HTMLCanvasElement; readonly result: PagePreviewResult }
@@ -40,7 +38,7 @@ function editKey(edits: readonly Edit[]): string {
 }
 
 /** Owns ephemeral renders. Sampling continues to read the pristine offscreen raster. */
-export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, imageMode, peek, locations, locationNames, translationEligible = false, translationPrefetch = false }: PageCanvasProps) {
+export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, imageMode, peek, translationEligible = false, translationPrefetch = false }: PageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const originalRef = useRef<HTMLCanvasElement>();
@@ -227,7 +225,7 @@ export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, ima
     <canvas ref={canvasRef} className="block" style={{width:cssWidth,height:cssHeight}} />
     {activeInfo && <OverlayLayer page={page} pageIndex={pageIndex} viewport={activeInfo.viewport} dpr={activeInfo.dpr}
       zoom={zoom} editMode={editMode} textAddMode={textAddMode} imageMode={imageMode} peek={peek}
-      locations={locations} locationNames={locationNames} preview={bridge} translationEligible={translationEligible}
+      preview={bridge} translationEligible={translationEligible}
       translationPrefetch={translationPrefetch} />}
   </div>;
 }

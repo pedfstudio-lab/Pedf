@@ -62,13 +62,11 @@ import { filterCoveredSpans } from '@/lib/smart/coveredSpans';
 import { detectDates } from '@/lib/smart/dateDetect';
 import type { DetectedDate } from '@/lib/smart/dateDetect';
 import { markInlineSmartSegments } from '@/lib/smart/inlineMarks';
-import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { SmartSpanLayer } from './SmartSpanLayer';
 import { DateActionPopover } from './DateActionPopover';
 import { InlineMarkedText } from './InlineMarkedText';
-import { LocationActionPopover } from './LocationActionPopover';
 import { TapPopover } from './TapPopover';
 import { TranslationLayer } from './TranslationLayer';
 import { useTranslation } from '@/state/translationStore';
@@ -89,8 +87,6 @@ interface OverlayLayerProps {
   readonly textAddMode: boolean;
   readonly imageMode: boolean;
   readonly peek: boolean;
-  readonly locations: readonly DetectedLocation[];
-  readonly locationNames: readonly string[];
   readonly preview?: PagePreviewBridge;
 }
 
@@ -116,11 +112,6 @@ interface EditableRuleLine {
   readonly source: RuleLine;
   readonly current: RuleLine;
   readonly removeIds: readonly string[];
-}
-
-interface InlineLocationSelection {
-  readonly detected: DetectedLocation;
-  readonly screenRect: ScreenRect;
 }
 
 interface InlineDateSelection {
@@ -354,8 +345,6 @@ export function OverlayLayer({
   textAddMode,
   imageMode,
   peek,
-  locations,
-  locationNames,
   preview,
   translationEligible = false,
   translationPrefetch = false,
@@ -377,8 +366,6 @@ export function OverlayLayer({
   const [freeDrawRect, setFreeDrawRect] = useState<ScreenRect>();
   const [moveGuideState, setMoveGuideState] = useState<MoveGuideState | null>(null);
   const [activeRuleLine, setActiveRuleLine] = useState<EditableRuleLine | null>(null);
-  const [selectedInlineLocation, setSelectedInlineLocation] =
-    useState<InlineLocationSelection | null>(null);
   const [selectedInlineDate, setSelectedInlineDate] = useState<InlineDateSelection | null>(null);
   const [smartSelectionKey, setSmartSelectionKey] = useState(0);
   const { edits, addEdits, replaceEdits } = useEdits();
@@ -484,7 +471,6 @@ export function OverlayLayer({
   );
   useEffect(() => {
     setSelectedInlineDate(null);
-    setSelectedInlineLocation(null);
     setSmartSelectionKey((value) => value + 1);
   }, [activeBlock, pageCoverEdits]);
   const markedTextEdits = useMemo(() => pageTextEdits.map((edit) => {
@@ -496,9 +482,9 @@ export function OverlayLayer({
     }]);
     return {
       edit,
-      segments: markInlineSmartSegments(edit.text, edit.spans, locationNames, dates),
+      segments: markInlineSmartSegments(edit.text, edit.spans, dates),
     };
-  }), [locationNames, pageTextEdits]);
+  }), [pageTextEdits]);
   const pageLineEdits = useMemo(
     () => edits.filter(
       (edit): edit is LineEdit => edit.kind === 'line' && edit.pageIndex === pageIndex,
@@ -658,10 +644,6 @@ export function OverlayLayer({
     ...pageCoverEdits.map((edit) => edit.rect),
     ...activeCoverRects,
   ], [activeCoverRects, pageCoverEdits]);
-  const visibleLocations = useMemo(
-    () => filterCoveredSpans(locations, smartSpanCoverRects),
-    [locations, smartSpanCoverRects],
-  );
   const visibleDates = useMemo(
     () => filterCoveredSpans(detectedDates, smartSpanCoverRects),
     [detectedDates, smartSpanCoverRects],
@@ -680,26 +662,9 @@ export function OverlayLayer({
     };
   }, []);
 
-  const selectInlineLocation = useCallback((text: string, target: HTMLButtonElement) => {
-    const screenRect = screenRectForInlineTarget(target);
-    if (!screenRect) return;
-    setSelectedInlineDate(null);
-    setSelectedInlineLocation({
-      screenRect,
-      detected: {
-        text,
-        kind: 'location',
-        pageIndex,
-        rect: screenRectToPdfRect(screenRect, viewport, dpr),
-      },
-    });
-    setSmartSelectionKey((value) => value + 1);
-  }, [dpr, pageIndex, screenRectForInlineTarget, viewport]);
-
   const selectInlineDate = useCallback((date: DetectedDate, target: HTMLButtonElement) => {
     const screenRect = screenRectForInlineTarget(target);
     if (!screenRect) return;
-    setSelectedInlineLocation(null);
     setSelectedInlineDate({
       screenRect,
       detected: {
@@ -989,7 +954,7 @@ export function OverlayLayer({
               width: rect.width,
               height: Math.max(rect.height, edit.style.fontSizePt * zoom),
               ...textStyleToCss(edit.style, zoom),
-              // Keep date/location hit targets when the PDF canvas owns glyph paint.
+              // Keep date hit targets when the PDF canvas owns glyph paint.
               ...(isPainted(edit.id) ? {WebkitTextFillColor:'transparent'} : {}),
               textAlign: edit.align ?? 'left',
             }}
@@ -999,7 +964,6 @@ export function OverlayLayer({
               style={edit.style}
               zoom={zoom}
               marksHidden={marksHidden}
-              onLocationClick={selectInlineLocation}
               onDateClick={selectInlineDate}
             />
           </div>
@@ -1036,13 +1000,11 @@ export function OverlayLayer({
 
       <SmartSpanLayer
         dates={visibleDates}
-        locations={visibleLocations}
         viewport={viewport}
         dpr={dpr}
         closeSelectionKey={smartSelectionKey}
         onOpenPopover={() => {
           setSelectedInlineDate(null);
-          setSelectedInlineLocation(null);
         }}
       />
 
@@ -1052,15 +1014,6 @@ export function OverlayLayer({
           screenRect={selectedInlineDate.screenRect}
           pageWidth={viewport.width / dpr}
           onClose={() => setSelectedInlineDate(null)}
-        />
-      )}
-
-      {selectedInlineLocation && (
-        <LocationActionPopover
-          detected={selectedInlineLocation.detected}
-          screenRect={selectedInlineLocation.screenRect}
-          pageWidth={viewport.width / dpr}
-          onClose={() => setSelectedInlineLocation(null)}
         />
       )}
 

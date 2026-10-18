@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PageGeometry } from '@/lib/pdf/types';
 import { planToGeometry } from '@/state/pagePlan';
-import { getDocumentLocations } from '@/lib/smart/locationDetect';
-import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { useDocumentStore } from '@/state/documentStore';
 import { useEdits } from '@/state/editsStore';
 import { PageCanvas } from './PageCanvas';
@@ -34,7 +32,6 @@ export function PdfViewer({
   const viewer = useRef<HTMLDivElement>(null);
   const [visibility, setVisibility] = useState<{ doc: PDFDocumentProxy; pages: readonly number[] }>();
   const visiblePages = visibility?.doc === doc ? visibility.pages : [];
-  const [locations, setLocations] = useState<DetectedLocation[]>([]);
   const { pagePlan } = useEdits();
   const { clearPageCanvases } = useDocumentStore();
   const livePages = useMemo(
@@ -58,35 +55,6 @@ export function PdfViewer({
       cancelled = true;
     };
   }, [doc]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLocations([]);
-    void getDocumentLocations(doc)
-      .then((detected) => {
-        if (!cancelled) setLocations(detected);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) console.warn('location detection unavailable', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [doc]);
-
-  const locationsBySourcePage = useMemo(() => {
-    const grouped = new Map<number, DetectedLocation[]>();
-    for (const location of locations) {
-      const pageLocations = grouped.get(location.pageIndex) ?? [];
-      pageLocations.push(location);
-      grouped.set(location.pageIndex, pageLocations);
-    }
-    return grouped;
-  }, [locations]);
-  const locationNames = useMemo(
-    () => [...new Set(locations.map((location) => location.text))],
-    [locations],
-  );
 
   useEffect(() => {
     clearPageCanvases();
@@ -150,13 +118,6 @@ export function PdfViewer({
               peek={peek}
               translationEligible={translationPages.has(position)}
               translationPrefetch={position === prefetchPage}
-              locations={entry.kind === 'source'
-                ? (locationsBySourcePage.get(entry.sourceIndex) ?? []).map((location) => ({
-                    ...location,
-                    pageIndex: position,
-                  }))
-                : []}
-              locationNames={locationNames}
             />
           </div>
         );

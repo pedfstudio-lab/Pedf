@@ -142,7 +142,7 @@ vi.mock('./ImageOverlay', () => ({ ImageOverlay: () => null }));
 vi.mock('./SmartSpanLayer', () => ({ SmartSpanLayer: () => null }));
 vi.mock('./LineEditOverlay', () => ({ LineEditOverlay: () => null }));
 
-function renderOverlay(preview?: PagePreviewBridge, locationNames: readonly string[] = [], pageViewport = viewport) {
+function renderOverlay(preview?: PagePreviewBridge, pageViewport = viewport) {
   render(
     <OverlayLayer
       page={{ view: [0, 0, 600, 800] } as unknown as PDFPageProxy}
@@ -154,8 +154,6 @@ function renderOverlay(preview?: PagePreviewBridge, locationNames: readonly stri
       textAddMode={false}
       imageMode={false}
       peek={false}
-      locations={[]}
-      locationNames={locationNames}
       preview={preview}
     />,
   );
@@ -292,7 +290,7 @@ describe('OverlayLayer editor top correction', () => {
 
   it('converts the commit baseline through the rotation-aware viewport, not page-height subtraction', async () => {
     const rotated = { ...viewport, convertToViewportPoint: (x: number, y: number) => [800 - y, x] } as PageViewport;
-    renderOverlay(undefined, [], rotated);
+    renderOverlay(undefined, rotated);
     const props = await openEditor(/^Text actions: Heading$/);
     expect(props?.expectedBaselinePx).toBe(20);
   });
@@ -311,10 +309,10 @@ describe('OverlayLayer editor top correction', () => {
 
 describe('OverlayLayer text click targets', () => {
   it('retains inline smart-action hit targets without painting committed glyphs twice', async () => {
-    mocks.edits=[{id:'saved',kind:'text',origin:'free',pageIndex:0,z:2,text:'Jaipur',style,
-      rect:{x:40,y:500,w:100,h:20}}];
-    renderOverlay({state:'committed',renderedEditIds:new Set(['saved']),begin:vi.fn(),warm:vi.fn(),cancel:vi.fn(),commit:vi.fn(),suspend:vi.fn()}, ['Jaipur']);
-    const word=await screen.findByRole('button',{name:'Location actions: Jaipur'});
+    mocks.edits=[{id:'saved',kind:'text',origin:'free',pageIndex:0,z:2,text:'Arrive 23 September 2026',style,
+      rect:{x:40,y:500,w:200,h:20}}];
+    renderOverlay({state:'committed',renderedEditIds:new Set(['saved']),begin:vi.fn(),warm:vi.fn(),cancel:vi.fn(),commit:vi.fn(),suspend:vi.fn()});
+    const word=await screen.findByRole('button',{name:'Date actions: 23 September 2026'});
     expect(word.parentElement?.style.webkitTextFillColor).toBe('transparent');
   });
   it('keeps a dense page target band below the editor while preserving area order', async () => {
