@@ -692,7 +692,7 @@ describe('exportPdf', () => {
     }
   });
 
-  it('still rejects Indic text at the guarded Task 13 boundary', async () => {
+  it.each(['नमस्ते', 'தமிழ்', 'বাংলা', 'తెలుగు', 'मराठी', 'ગુજરાતી', 'ಕನ್ನಡ', 'മലയാളം', 'ਪੰਜਾਬੀ'])('exports an old mixed-script edit without %s, warns by page, and leaves its state untouched', async script => {
     const doc = await makeTwoPageDocument();
     doc.edits = [{
       id: 'indic-text-1',
@@ -700,7 +700,7 @@ describe('exportPdf', () => {
       pageIndex: 0,
       rect: { x: 20, y: 300, w: 180, h: 18 },
       z: 20,
-      text: 'हिन्दी',
+      text: `Hello ${script}`,
       style: {
         fontName: 'Helvetica',
         fontSizePt: 12,
@@ -710,7 +710,16 @@ describe('exportPdf', () => {
       },
     }];
 
-    await expect(exportPdf(doc)).rejects.toThrow(/Not implemented yet: Indic text export/);
+    const before = JSON.stringify(doc.edits);
+    const result = await exportPdf(doc);
+    expect(result.warnings.some(warning => warning.includes('Indian-script text') && warning.includes('page 1'))).toBe(true);
+    const reader = await getDocument({ data: result.bytes.slice(), verbosity: 0 }).promise;
+    try {
+      const content = await (await reader.getPage(1)).getTextContent();
+      const text = content.items.map(item => 'str' in item ? item.str : '').join(' ');
+      expect(text).toContain('Hello'); expect(text).not.toContain(script);
+    } finally { await reader.destroy(); }
+    expect(JSON.stringify(doc.edits)).toBe(before);
   });
 
   it('removes covered old words from raw extraction while keeping the new and untouched text', async () => {

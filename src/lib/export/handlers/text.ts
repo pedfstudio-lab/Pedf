@@ -1,7 +1,6 @@
 import { concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, setCharacterSpacing, setCharacterSqueeze, setTextRenderingMode, setWordSpacing, setLineWidth, setStrokingRgbColor, TextRenderingMode } from 'pdf-lib';
 import type { PDFFont } from 'pdf-lib';
-import { isIndicRun } from '../scriptRouting';
-import { drawIndicTextPatch } from '../pathA';
+import { indicLanguage, withoutIndicText } from '@/lib/translate/indicText';
 import { resolveEnglishFont } from '../englishFont';
 import { drawSpanWithPageFont, measureTextWithPageFont } from '../embeddedFont';
 import type { TextEdit, TextStyle } from '../types';
@@ -106,11 +105,15 @@ function drawPrepared(item: PreparedText, x: number, y: number, context: PageExp
   context.page.pushOperators(popGraphicsState());
 }
 
-/** Draw English with a cached standard font; Indic remains routed to Path A. */
+/** Draw English; old projects containing Indian scripts must not break a download. */
 export const drawText: EditHandler<TextEdit> = async (edit, context) => {
-  // Task 11B rich spans are English-only; Indic keeps the single whole-run Path-A route.
-  if (isIndicRun(edit.text)) {
-    await drawIndicTextPatch(edit, context);
+  if (indicLanguage(edit.text)) {
+    const warning = `Indian-script text in an edit on page ${context.geometry.pageIndex + 1} was left out of this English PDF. Use Translate to read Indian languages on screen.`;
+    if (!context.warnings.includes(warning)) context.warnings.push(warning);
+    const text = withoutIndicText(edit.text);
+    if (text.trim()) await drawText({ ...edit, text, composition: undefined,
+      spans: edit.spans?.map(span => ({ ...span, text: withoutIndicText(span.text) })).filter(span => span.text),
+    }, context);
     return;
   }
 

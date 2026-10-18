@@ -1,4 +1,5 @@
 const ALLOWED_PATHS = new Set([
+  'translate',
   'text-to-speech',
   'speech-to-text',
   'v1/chat/completions',

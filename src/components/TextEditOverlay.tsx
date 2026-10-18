@@ -36,6 +36,7 @@ import {
 import type { MoveGuideState, SnapTarget } from '@/lib/edit/moveSnap';
 import { BULLET_NO_ROOM_MESSAGE, formatBulletEditorText } from '@/lib/pdf/bulletList';
 import { toolbarOffsetInFrame, useElementSize } from '@/lib/edit/floatingToolbar';
+import { indicEditMessage } from '@/lib/translate/indicText';
 import type { ElementSize } from '@/lib/edit/floatingToolbar';
 import {
   editorWidthMeasurementText,
@@ -513,6 +514,7 @@ export function TextEditOverlay({
   });
   const [colorPanelOpen, setColorPanelOpen] = useState(false);
   const [appearanceError, setAppearanceError] = useState<string>();
+  const [scriptError, setScriptError] = useState(() => indicEditMessage(initialText));
   const naturalWidth = usesAlignmentColumn ? initialAlignWidthPt : block.rect.w;
   const widthMeasurementText = editorWidthMeasurementText(block, existing);
   const measuredHeadingWidth = measuredHeading && !existing?.length ? neighbourBoxWidth({
@@ -649,6 +651,9 @@ export function TextEditOverlay({
     if (!editable) return;
     const raw = serializeRichText(editable, style, zoom);
     const serialized = bulletMode ? canonicalBulletValue(raw) : raw;
+    const invalidScript = indicEditMessage(serialized.text);
+    setScriptError(invalidScript);
+    if (invalidScript) return;
     const fontMetrics = paragraphMode ? measureFontMetrics(style, zoom) : undefined;
     const next: NextTextEdit = {
       text: serialized.text,
@@ -803,6 +808,7 @@ export function TextEditOverlay({
     setMeasuredBaselineOffset((current) => current === offset ? current : offset);
   }, [paragraphMode]);
   const visibleError = externalError
+    ?? scriptError
     ?? appearanceError
     ?? (bulletOverflow ? BULLET_NO_ROOM_MESSAGE : undefined);
   const measureFrame = useCallback(() => {
@@ -934,7 +940,10 @@ export function TextEditOverlay({
       paint(word, wordStyle);
     }
   }, [style, zoom]);
-  const handleInput = useCallback(() => { refreshWordFonts(); normalizeParagraphs(); updateParagraphPresentation(); updatePiecePresentation(); resizeToContent(); }, [refreshWordFonts, normalizeParagraphs, updateParagraphPresentation, updatePiecePresentation, resizeToContent]);
+  const handleInput = useCallback(() => {
+    setScriptError(indicEditMessage(editableRef.current?.textContent ?? ''));
+    refreshWordFonts(); normalizeParagraphs(); updateParagraphPresentation(); updatePiecePresentation(); resizeToContent();
+  }, [refreshWordFonts, normalizeParagraphs, updateParagraphPresentation, updatePiecePresentation, resizeToContent]);
 
   const updateBulletPresentation = useCallback(() => {
     if (editableRef.current && bulletMode?.indentPt !== undefined) refreshBulletEditorLayout(editableRef.current,bulletMode.indentPt,
@@ -1323,7 +1332,7 @@ export function TextEditOverlay({
           type="button"
           data-text-edit-done
           onClick={commit}
-          disabled={bulletOverflow || committing}
+          disabled={bulletOverflow || committing || Boolean(scriptError)}
           className="rounded bg-neutral-900 px-2 py-1 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
         >
           Done
@@ -1334,7 +1343,7 @@ export function TextEditOverlay({
         <div
           ref={errorRef}
           role="alert"
-          className="absolute z-30 whitespace-nowrap rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
+          className="absolute z-30 max-w-sm rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
           style={errorOffset}
         >
           {visibleError}

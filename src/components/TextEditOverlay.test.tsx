@@ -110,6 +110,38 @@ function placeCaretAtTextEnd(node: Node): void {
   selection?.addRange(range);
 }
 
+describe('Task 79 English edit guard', () => {
+  it('runs the same guard after the plain-text paste handler inserts Tamil', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor(block('Hello', 24), 1, 0, { onDone, onCancel });
+    const editor = screen.getByRole('textbox');
+    placeCaretAtTextEnd(editor.firstChild!);
+    fireEvent.paste(editor, { clipboardData: { getData: () => ' தமிழ்' } });
+    expect(editor.textContent).toContain('தமிழ்');
+    expect(screen.getByRole('alert').textContent).toContain('in Tamil.');
+    expect((screen.getByRole('button', { name: 'Done' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalledOnce(); expect(onDone).not.toHaveBeenCalled();
+  });
+  it.each(['नमस्ते', 'தமிழ்'])('refuses Done for typed/pasted %s, allows Cancel and recovers after removal', text => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor(block('Hello', 24), 1, 0, { onDone, onCancel });
+    const editor = screen.getByRole('textbox');
+    editor.textContent = `Hello ${text}`;
+    fireEvent.input(editor);
+    expect(screen.getByRole('alert').textContent).toContain('Editing supports English text.');
+    expect((screen.getByRole('button', { name: 'Done' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+    expect(onDone).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    editor.textContent = 'Hello English'; fireEvent.input(editor);
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+});
+
 it('keeps matched-font presentation out of the no-op model and preserves text nodes on input', async () => {
   const value = paragraph('First ordinary line', 'Last ordinary line');
   const fontStyle = { ...style, fontName:'sans-serif', fontIdentity:'Calibri', fontRef:'task78-editor-subset' };
@@ -257,12 +289,17 @@ describe('native input during preview preparation', () => {
     expect(onDone).not.toHaveBeenCalled();
     fireEvent.compositionEnd(editor);
     fireEvent.click(screen.getByRole('button', {name:'Done'}));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Editing supports English text.');
+    // IME text remains intact and cancellable; saving resumes after its removal.
+    editor.textContent = 'English'; fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', {name:'Done'}));
     expect(onDone).toHaveBeenCalledTimes(1);
-    expect(onDone.mock.calls[0]?.[0].text).toBe('English नमस्ते தமிழ்');
+    expect(onDone.mock.calls[0]?.[0].text).toBe('English');
     view.rerender(make(mode, true));
     expect(editor.getAttribute('contenteditable')).toBe('false');
     expect(screen.getByRole('button', {name:'Done'}).hasAttribute('disabled')).toBe(true);
-    expect(editor.textContent).toBe('English नमस्ते தமிழ்');
+    expect(editor.textContent).toBe('English');
   });
 });
 

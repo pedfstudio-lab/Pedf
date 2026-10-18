@@ -3,6 +3,40 @@ import type { ProviderConfig } from './config';
 import { NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
 import { base64ToBytes, SarvamProvider } from './sarvam';
 
+describe('SarvamProvider.translate', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('uses the documented text-only endpoint/model and settings key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ translated_text: 'नमस्ते' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(new SarvamProvider(directConfig()).translate({ text: 'Hello', to: 'hi-IN' })).resolves.toEqual({ text: 'नमस्ते', provider: 'Sarvam' });
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://api.sarvam.ai/translate');
+    expect(JSON.parse(request.body)).toEqual({ input: 'Hello', source_language_code: 'en-IN', target_language_code: 'hi-IN', model: 'sarvam-translate:v1', numerals_format: 'international' });
+    expect(request.headers['api-subscription-key']).toBe('configured-test-key');
+  });
+  it('refuses a missing direct key without making a request', async () => {
+    const request = vi.fn(); vi.stubGlobal('fetch', request);
+    await expect(new SarvamProvider(directConfig('')).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow('Translation needs a Sarvam key in Settings');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('uses the production proxy without putting a key in browser headers', async () => {
+    const request = vi.fn().mockResolvedValue(jsonResponse({ translated_text: 'வணக்கம்' })); vi.stubGlobal('fetch', request);
+    await new SarvamProvider({ ...directConfig(), mode: 'proxy', sarvamBaseUrl: '/api/sarvam' }).translate({ text: 'Hello', to: 'ta-IN' });
+    expect(request.mock.calls[0]![0]).toBe('/api/sarvam/translate');
+    expect(request.mock.calls[0]![1].headers).not.toHaveProperty('api-subscription-key');
+  });
+  it.each([403, 422, 429, 500])('does not echo upstream error text or credentials (%s)', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: { message: 'configured-test-key' } }, status)));
+    await expect(new SarvamProvider(directConfig()).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow(`Translation request failed (${status}).`);
+  });
+  it('sanitises network/JSON failures and validates maximum size', async () => {
+    const request = vi.fn().mockRejectedValue(new Error('configured-test-key')); vi.stubGlobal('fetch', request);
+    await expect(new SarvamProvider(directConfig()).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow('Check your connection');
+    await expect(new SarvamProvider(directConfig()).translate({ text: 'a'.repeat(2001), to: 'hi-IN' })).rejects.toThrow('2,000-character limit');
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+});
+
 const input = {
   question: 'What time is check-in?',
   documentText: '[Page 1]\nCheck-in is at 3 PM.',

@@ -24,6 +24,8 @@ import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
 import { PrefsStoreProvider } from './state/prefsStore';
+import { TranslationStoreProvider, useTranslation } from './state/translationStore';
+import { TranslationPrivacyNote } from './components/TranslationControls';
 import { takePendingFile, takePendingProject } from './lib/site/pendingFile';
 import { setPendingFiles } from './lib/site/pendingFiles';
 import { navigate } from './lib/site/navigate';
@@ -168,6 +170,7 @@ function usePhoneLayout(): boolean {
 }
 
 function EditorApp() {
+  const translation = useTranslation();
   const { document, setDocument, getPageCanvas } = useDocumentStore();
   const {
     edits,
@@ -777,6 +780,7 @@ function EditorApp() {
         zoomOut={zoomOut}
         zoomReset={zoomReset}
         onEditModeChange={(enabled) => {
+          translation?.showOriginal();
           setEditMode(enabled);
           if (enabled) {
             setTextAddMode(false);
@@ -784,6 +788,7 @@ function EditorApp() {
           }
         }}
         onTextAddModeChange={(enabled) => {
+          translation?.showOriginal();
           setTextAddMode(enabled);
           if (enabled) {
             setEditMode(false);
@@ -791,6 +796,7 @@ function EditorApp() {
           }
         }}
         onImageModeChange={(enabled) => {
+          translation?.showOriginal();
           setImageMode(enabled);
           if (enabled) {
             setEditMode(false);
@@ -802,6 +808,7 @@ function EditorApp() {
           setSettingsOpen(false);
           setChatOpen(true);
         }}
+        onTranslate={() => { setEditMode(false); setTextAddMode(false); setImageMode(false); }}
         onOpenSettings={() => {
           setChatOpen(false);
           setSettingsOpen(true);
@@ -812,6 +819,7 @@ function EditorApp() {
         onSave={() => void handleSave()}
         onSaveAndClose={() => void handleSaveAndClose()}
       />
+      <TranslationPrivacyNote />
       <SettingsPanel
         open={settingsOpen}
         fileOpen={Boolean(document)}
@@ -1055,7 +1063,7 @@ function EditorApp() {
         <aside className="fixed bottom-4 right-4 z-[100] max-w-md rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-xl" role="status">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-semibold">Exported with font substitutions</p>
+              <p className="font-semibold">Exported with warnings</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 {warnings.map((warning) => <li key={warning}>{warning}</li>)}
               </ul>
@@ -1082,7 +1090,7 @@ export default function App() {
     <PrefsStoreProvider>
       <DocumentStoreProvider>
         <EditsStoreProvider>
-          <EditorApp />
+          <TranslationStoreProvider><EditorApp /></TranslationStoreProvider>
         </EditsStoreProvider>
       </DocumentStoreProvider>
     </PrefsStoreProvider>

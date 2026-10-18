@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PageGeometry } from '@/lib/pdf/types';
 import { planToGeometry } from '@/state/pagePlan';
@@ -31,6 +31,9 @@ export function PdfViewer({
   onLayout,
 }: PdfViewerProps) {
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
+  const viewer = useRef<HTMLDivElement>(null);
+  const [visibility, setVisibility] = useState<{ doc: PDFDocumentProxy; pages: readonly number[] }>();
+  const visiblePages = visibility?.doc === doc ? visibility.pages : [];
   const [locations, setLocations] = useState<DetectedLocation[]>([]);
   const { pagePlan } = useEdits();
   const { clearPageCanvases } = useDocumentStore();
@@ -95,8 +98,29 @@ export function PdfViewer({
     return () => window.cancelAnimationFrame(frame);
   }, [onLayout, pagePlan, pages, zoom]);
 
+  useEffect(() => {
+    const element = viewer.current;
+    if (!element) return;
+    if (typeof IntersectionObserver === 'undefined') { setVisibility({ doc, pages: [0] }); return; }
+    const visible = new Set<number>();
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const index = Number((entry.target as HTMLElement).dataset.pageIndex);
+        if (entry.isIntersecting) visible.add(index); else visible.delete(index);
+      }
+      setVisibility({ doc, pages: [...visible].sort((a, b) => a - b) });
+    }, { root: element.closest('main'), threshold: 0 });
+    element.querySelectorAll('[data-page-index]').forEach(page => observer.observe(page));
+    return () => observer.disconnect();
+  }, [doc, pages, pagePlan, zoom]);
+  const translationPages = new Set(visiblePages);
+  const lastVisible = visiblePages.at(-1);
+  // The next page is translated ahead of scrolling, after the pages in view.
+  const prefetchPage = lastVisible === undefined ? undefined : lastVisible + 1;
+  if (prefetchPage !== undefined) translationPages.add(prefetchPage);
+
   return (
-    <div className="flex flex-col items-center gap-4 py-4">
+    <div ref={viewer} className="flex flex-col items-center gap-4 py-4">
       {pagePlan.map((entry, position) => {
         const geometry = livePages[position];
         if (!geometry) return null;
@@ -124,6 +148,8 @@ export function PdfViewer({
               textAddMode={textAddMode}
               imageMode={imageMode}
               peek={peek}
+              translationEligible={translationPages.has(position)}
+              translationPrefetch={position === prefetchPage}
               locations={entry.kind === 'source'
                 ? (locationsBySourcePage.get(entry.sourceIndex) ?? []).map((location) => ({
                     ...location,

@@ -70,11 +70,16 @@ import { DateActionPopover } from './DateActionPopover';
 import { InlineMarkedText } from './InlineMarkedText';
 import { LocationActionPopover } from './LocationActionPopover';
 import { TapPopover } from './TapPopover';
+import { TranslationLayer } from './TranslationLayer';
+import { useTranslation } from '@/state/translationStore';
+import type { TranslationBox } from '@/lib/translate/pageTranslation';
 import { TextEditOverlay } from './TextEditOverlay';
 import { ImageOverlay } from './ImageOverlay';
 import { LineEditOverlay } from './LineEditOverlay';
 
 interface OverlayLayerProps {
+  readonly translationEligible?: boolean;
+  readonly translationPrefetch?: boolean;
   readonly page?: PDFPageProxy;
   readonly pageIndex: number;
   readonly viewport: PageViewport;
@@ -352,7 +357,10 @@ export function OverlayLayer({
   locations,
   locationNames,
   preview,
+  translationEligible = false,
+  translationPrefetch = false,
 }: OverlayLayerProps) {
+  const translation = useTranslation();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [sourceBlocks, setBlocks] = useState<TextBlock[]>([]);
@@ -908,6 +916,38 @@ export function OverlayLayer({
   const pendingPaint = commitPending && cleanActive;
   const activeTextIds = new Set(activeExisting?.texts.map((edit)=>edit.id));
   const isPainted = (id:string) => pendingPaint || preview?.renderedEditIds.has(id);
+  const translationBoxes: TranslationBox[] = [];
+  if (translation && translation.language !== 'en-IN') {
+    for (const [index, block] of blocks.entries()) {
+      const list = bulletLists.find(entry => entry.sourceBlock === block);
+      const heading = list ? bulletListHeadingBlock(list) : block;
+      if (heading) {
+        const existing = findExisting(heading);
+        if (!existing || existing.texts.length) translationBoxes.push({ id: `block-${index}`,
+          text: existing ? sourceText(existing.texts) : heading.text,
+          rect: existing ? textBoxRect(existing.texts) : heading.rect,
+          style: existing?.texts[0]?.style ?? heading.style, align: heading.align,
+          selection: selectionFor(heading) });
+      }
+      if (list) {
+        const existing = findExistingBulletList(list);
+        const selection = selectionFor(list.block, list);
+        if (existing?.texts.length) translationBoxes.push({ id: `list-${index}`, text: sourceText(existing.texts),
+          rect: textBoxRect(existing.texts), style: existing.texts[0]!.style, align: list.block.align, selection });
+        else if (!existing) list.items.forEach((item, itemIndex) => {
+          const rects = [...item.lines.map(line => line.rect), item.markerRect];
+          const x = Math.min(...rects.map(rect => rect.x)), y = Math.min(...rects.map(rect => rect.y));
+          translationBoxes.push({ id: `list-${index}-${itemIndex}`, text: item.text, prefix: item.markerSymbol ?? '•',
+            rect: { x, y, w: Math.max(...rects.map(rect => rect.x + rect.w)) - x, h: Math.max(...rects.map(rect => rect.y + rect.h)) - y },
+            style: item.lines[0]?.style ?? list.block.style, align: list.block.align,
+            ...(itemIndex === 0 ? { selection } : {}) });
+        });
+      }
+    }
+    for (const { boxId, texts } of freeTextGroups) translationBoxes.push({ id: `free-${boxId}`,
+      text: sourceText(texts), rect: freeTextBoxRect(texts), style: texts[0]!.style,
+      align: texts[0]!.align, omitTextIds: texts.map(text => text.id) });
+  }
 
   return (
     <div
@@ -915,6 +955,8 @@ export function OverlayLayer({
       className="absolute inset-0"
       aria-label={`Text overlays for page ${pageIndex + 1}`}
     >
+      {translation && !peek && !editMode && !textAddMode && !imageMode && <TranslationLayer boxes={translationBoxes} pageIndex={pageIndex}
+        viewport={viewport} dpr={dpr} zoom={zoom} eligible={translationEligible} prefetch={translationPrefetch} />}
       {pageCoverEdits.filter((edit)=>!isPainted(edit.id)).map((edit) => {
         const rect = pdfRectToScreenRect(edit.rect, viewport, dpr);
         const background = edit.color ?? sampleBackground(edit.rect);
@@ -1233,6 +1275,7 @@ export function OverlayLayer({
           screenRect={popoverTarget.screenRect}
           pageWidth={viewport.width / dpr}
           onEdit={() => {
+            translation?.showOriginal();
             setActiveExisting(popoverTarget.bulletList ? findExistingBulletList(popoverTarget.bulletList) : findExisting(popoverTarget.block));
             setCommitPending(false);
             preview?.begin(selectionFor(popoverTarget.block,popoverTarget.bulletList),closeTextEditor);

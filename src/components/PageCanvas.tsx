@@ -19,6 +19,8 @@ import type { DetectedLocation } from '@/lib/smart/locationDetect';
 import { OverlayLayer } from './OverlayLayer';
 
 interface PageCanvasProps {
+  readonly translationEligible?: boolean;
+  readonly translationPrefetch?: boolean;
   source: { readonly kind: 'pdf'; readonly page: PDFPageProxy }
     | { readonly kind: 'blank'; readonly widthPt: number; readonly heightPt: number };
   pageIndex: number; zoom: number; editMode: boolean; textAddMode: boolean; imageMode: boolean; peek: boolean;
@@ -38,7 +40,7 @@ function editKey(edits: readonly Edit[]): string {
 }
 
 /** Owns ephemeral renders. Sampling continues to read the pristine offscreen raster. */
-export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, imageMode, peek, locations, locationNames }: PageCanvasProps) {
+export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, imageMode, peek, locations, locationNames, translationEligible = false, translationPrefetch = false }: PageCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const originalRef = useRef<HTMLCanvasElement>();
@@ -225,6 +227,7 @@ export function PageCanvas({ source, pageIndex, zoom, editMode, textAddMode, ima
     <canvas ref={canvasRef} className="block" style={{width:cssWidth,height:cssHeight}} />
     {activeInfo && <OverlayLayer page={page} pageIndex={pageIndex} viewport={activeInfo.viewport} dpr={activeInfo.dpr}
       zoom={zoom} editMode={editMode} textAddMode={textAddMode} imageMode={imageMode} peek={peek}
-      locations={locations} locationNames={locationNames} preview={bridge} />}
+      locations={locations} locationNames={locationNames} preview={bridge} translationEligible={translationEligible}
+      translationPrefetch={translationPrefetch} />}
   </div>;
 }

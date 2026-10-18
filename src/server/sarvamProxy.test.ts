@@ -60,8 +60,9 @@ describe('handleSarvamProxy', () => {
     expect([...response.headers.values()]).not.toContain('server-test-key');
   });
 
-  it('allows exactly the three client proxy paths', () => {
+  it('allows only the four client proxy paths, including text translation', () => {
     expect(SARVAM_PROXY_PATHS).toEqual([
+      'translate',
       'text-to-speech',
       'speech-to-text',
       'v1/chat/completions',

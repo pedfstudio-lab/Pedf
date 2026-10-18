@@ -28,6 +28,10 @@ const SARVAM_METHODS = new Set<ProviderMethod>([
 ]);
 
 const CHAT_MODEL = 'sarvam-105b-conversations';
+// https://docs.sarvam.ai/api-reference/text/translate-text (checked 2026-10-17).
+export const TRANSLATE_MODEL = 'sarvam-translate:v1';
+export const TRANSLATE_MAX_CHARS = 2000;
+export const TRANSLATION_KEY_MESSAGE = 'Translation needs a Sarvam key in Settings';
 const CHAT_MAX_TOKENS = 600;
 const SPOKEN_CHAT_MAX_TOKENS = 120;
 const TTS_MODEL = 'bulbul:v3';
@@ -282,8 +286,30 @@ export class SarvamProvider implements ProviderWithCapabilities {
   }
 
   async translate(input: TranslateInput): Promise<TextResult> {
-    void input;
-    throw new NotImplementedError(this.name, 'translate');
+    const key = this.config.getSarvamKey().trim();
+    if (this.config.mode === 'direct' && !key) throw new Error(TRANSLATION_KEY_MESSAGE);
+    if ([...input.text].length > TRANSLATE_MAX_CHARS) throw new Error('Translation text exceeds the 2,000-character limit.');
+    if (!input.text.trim()) return { text: input.text, provider: this.name };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
+    // Never forward upstream error bodies or fetch errors: they can echo credentials.
+    try {
+      const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/translate'), {
+        method: 'POST', headers, signal: input.signal,
+        body: JSON.stringify({ input: input.text, source_language_code: input.from ?? 'en-IN',
+          target_language_code: input.to, model: TRANSLATE_MODEL, numerals_format: 'international' }),
+      });
+      if (response.status === 503 && this.config.mode === 'proxy') throw new Error(TRANSLATION_KEY_MESSAGE);
+      if (!response.ok) throw new Error(`Translation request failed (${response.status}).`);
+      const payload = await response.json() as { translated_text?: unknown };
+      if (typeof payload.translated_text !== 'string' || !payload.translated_text.trim()) throw new Error('Translation returned no text.');
+      return { text: payload.translated_text, provider: this.name };
+    } catch (error) {
+      if (input.signal?.aborted) throw new DOMException('Translation stopped.', 'AbortError');
+      if (error instanceof Error && (error.message === TRANSLATION_KEY_MESSAGE
+        || /^Translation (request failed \(\d+\)\.|returned no text\.)$/.test(error.message))) throw error;
+      throw new Error('Translation is unavailable. Check your connection and try again.');
+    }
   }
 
   async explain(input: ExplainInput): Promise<TextResult> {

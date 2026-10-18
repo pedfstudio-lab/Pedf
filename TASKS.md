@@ -15275,7 +15275,7 @@ Change 0 is reviewed, the checks pass and the user's three steps pass.
 
 ---
 
-### Task 79 — Read the PDF in your language: on-screen translation, and Indian scripts never break a download  🔲 TODO → branch `translate` **from `main`** (Task 80 Fix A is merged: `83a6e0d`)   *(Medium · 3–5 days)*
+### Task 79 — Read the PDF in your language: on-screen translation, and Indian scripts never break a download  🟡 BUILT, mock-verified; live acceptance pending → branch `translate` **from `main`** (Task 80 Fix A is merged: `83a6e0d`)   *(Medium · 3–5 days)*
 
 **The user's decisions (2026-10-15 to 10-17).**
 - Translation is **for reading on screen only**. A translated PDF is **not** downloadable; **Export** always gives the
@@ -15398,6 +15398,15 @@ reading of the PDF text and its language choice (separate tasks); the saved-proj
 **Known limits:** translations come from Sarvam and can be imperfect; longer translations are drawn smaller and the
 longest may run below their box; text inside pictures and scanned pages is not translated (that needs OCR); the
 translation is not saved in the PDF or in the saved project — it is asked for again after the file is reopened.
+
+**Implementation checkpoint (2026-10-18):** Changes 1–6 are built on `translate`, uncommitted. The four mock/browser
+cases are checked: Healing p3 Hindi (5 boxes), Corporate p11 Tamil (27), Ladakh p2 Bengali (5), Rahul résumé p1
+Gujarati (25, including 11 retained bullet markers). All nine scripts render in Windows Chrome. English edit/no-op,
+card Copy, input guard and English export checks pass. Default suite: 1,662 passed, 0 failed; final focused checks:
+200 passed, 0 failed. The 38-switch real-PDF run has 1,745 passed and the two already-documented Task 80/68 failures.
+**Real Sarvam translation/network/cache acceptance and Android font coverage are not verified.** The accessible Chrome
+Settings panel still says `Not set`; no key was copied or logged. Do not mark this task complete or merge from mock
+evidence. Evidence, limitations and exact run scope: [TASK79_REPORT.md](TASK79_REPORT.md). No commit made.
 
 **Land:** branch `translate` from `main`. Commit: `Read the PDF in your language on screen, and Indian scripts never
 break a download (Task 79)`. Merge after the checks pass and the user's six steps pass.

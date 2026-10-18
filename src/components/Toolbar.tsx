@@ -4,6 +4,7 @@ import { ZOOM_MAX, ZOOM_MIN } from '@/lib/pdf/zoom';
 import { useEdits } from '@/state/editsStore';
 import type { SaveStatus } from '@/lib/projects/useProjectAutosave';
 import { savedAgo } from '@/lib/projects/savedTime';
+import { TranslationControls } from './TranslationControls';
 
 interface ToolbarProps {
   onOpen: (file: File) => void;
@@ -27,6 +28,7 @@ interface ToolbarProps {
   onImageModeChange(enabled: boolean): void;
   onOpenSign(): void;
   onOpenChat(): void;
+  onTranslate?(): void;
   onOpenSettings(): void;
   onToggleSavedFiles(): void;
   onPeekChange(peeking: boolean): void;
@@ -61,6 +63,7 @@ export function Toolbar({
   onImageModeChange,
   onOpenSign,
   onOpenChat,
+  onTranslate,
   onOpenSettings,
   onToggleSavedFiles,
   onPeekChange,
@@ -222,6 +225,7 @@ export function Toolbar({
         >
           💬 Ask
         </button>
+        <TranslationControls disabled={!fileName} onTranslate={onTranslate} />
         <button
           type="button"
           onClick={onOpenSettings}

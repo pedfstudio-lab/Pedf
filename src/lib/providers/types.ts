@@ -11,6 +11,7 @@ export interface TranslateInput {
   readonly text: string;
   readonly to: LanguageCode;
   readonly from?: LanguageCode;
+  readonly signal?: AbortSignal;
 }
 
 export interface ExplainInput {
