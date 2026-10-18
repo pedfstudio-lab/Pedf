@@ -3145,24 +3145,6 @@ A modal / drawer opened from a **Settings (⚙)** button in the `Toolbar`, with 
 **Commit:** feature-side (settings UI + prefs store + dev key storage; wires the Task 18 config key stub).
 No export-seam, no AI calls.
 
-### Task 21 — Explain-in-your-language popover  ⏸️ PARKED
-**Not in the main path** — the bot already covers this on request ("read me the 2nd paragraph in Tamil"). The
-one-tap **Listen/Explain** action (tap a block → translate → `speak`) is kept in **"Set aside — Translation"**
-at the end of this phase; enable later if wanted. Touches no export-seam.
-
-### Task 21A — Entity spans: places / names / events (AI · Phase 4)  🔲
-**Goal:** underline **meaningful** places/names/events (not junk words) and offer Search/Maps/Meaning on them
-— the AI-backed half of "tap a place to look it up." (The dates/times half ships earlier, no AI, as Task 11A.)
-**Deliverables:** `lib/smart/entityDetect.ts` — send the page's extracted text to the **provider layer**
-(Anthropic with a small NER-style prompt, or Sarvam if it exposes NER) → `{ text, kind:
-'place'|'person'|'org'|'event', pageIndex, rect }[]`, mapped back to Task 8 run positions; render them in the
-**`SmartSpanLayer`** built in Task 11A (underline); tap menu → **Search Google** / **Open in Maps** (places)
-/ **Meaning** (AI `explain`). Detect **once per document** (cached) to bound cost/latency.
-**Depends on:** Task 18 (provider layer) + Task 24 (AI wired) + Task 11A (span layer). *(Independent optional
-reader add-on — not required for the voice bot.)*
-**Done when:** "Bali" / "Mount Batur" are underlined and tap → Search/Maps that entity; ordinary words like
-"I'm" / "activity" are **not** underlined or offered an action.
-
 ---
 
 #### The bot — stage by stage
@@ -3889,9 +3871,6 @@ finishes (grounded answer + spoken back). The failed `speech-to-text` POST shoul
 > needed for the core. Kept here (recoverable) for a possible later **one-tap reader** action.
 > - **Parked Task 19 — Sarvam Mayura translate / Claude explain:** literal translation / plain-language
 >   "Meaning" of a selected chunk. *(The bot can already do this on request.)*
-> - **Parked Task 21 — Explain-in-your-language popover:** a **Listen/Explain** action in `TapPopover` —
->   translate the tapped block → `speak` it (Task 23). Enable if/when we want the one-tap reader; no
->   export-seam change.
 
 ### Task 25B — Conversational low-latency voice: no dead air + a fast answer  🔲 TODO → on `main`
 > The voice bot goes **silent for 3–5s** after you speak, which breaks the feel of a conversation. Fill that silence
@@ -6009,7 +5988,27 @@ real "•", group short bullet lines into one list, edit via the bullet-list fea
 
 ## Reader — Tap a location to look it up
 
-### Task 46 — Tap a location → Search Google / Open in Google Maps (AI location detection)  ✅ MERGED (`9d218e4`) → branch `tap-location`
+### Task 46 — Tap a location → Search Google / Open in Google Maps (AI location detection)  ⛔ REMOVED for privacy (2026-10-19, `033665d` + `93dbe97`) — was merged as `9d218e4` → branch `tap-location`
+> **⛔ Removed — 2026-10-19 (user: "it destroys our USP, doc stays at local only").** Every time a PDF opened —
+> before the user did anything — the app sent the **whole PDF text** (up to 50,000 characters) to Sarvam's chat to list
+> its place names. That broke the promise that the document stays on the device: text may leave only when the user
+> uses **Ask**, **voice** or **Translate**. Found from the live site's console (`location detection unavailable …
+> PdfViewer.tsx:70`, a 405 there because the server key is off).
+> - *Removed by Claude:* `locationDetect.ts`, `locationLink.ts`, `LocationActionPopover.tsx` and their tests, and the
+>   place parts of `PdfViewer`, `PageCanvas`, `OverlayLayer`, `SmartSpanLayer`, `InlineMarkedText` and `inlineMarks`
+>   (about 840 lines). `033665d` holds the code changes; `93dbe97` deletes the five files the first commit missed.
+> - *Kept:* **date underlines** (found on the device, no network) — tap → Add to Google Calendar / Set Reminder /
+>   Search Google, on the original text and in edited lines.
+> - *Checked:* Healing opened **with a Sarvam key set** → **0** requests to Sarvam (before: the place request on every
+>   open); a new `PdfViewer.test.tsx` case guards that opening a PDF makes no request even with a key; dates tap through
+>   on p17, also after editing "before 25 May"; edited text draws as before; no place underline anywhere; the built app
+>   no longer contains "Open in Google Maps". Full suite **1,708 passed / 0 failed**; typecheck, lint, build. Tested by
+>   the user in Chrome.
+> - *Rule kept for later work:* no feature may send the PDF's text anywhere without a user action (not on open, not on
+>   scroll).
+>
+> *The original record follows.*
+>
 > ✅ **Done & merged to `main`.** AI detects geographic locations via a new raw `provider.complete()` call (Rev 1),
 > underlines them in teal (Rev 3 — the chip from Rev 2 was dropped for covering neighbouring text), tap →
 > Search Google / Open in Google Maps. Locations only (people/orgs/ordinary words filtered); dates unchanged; no
