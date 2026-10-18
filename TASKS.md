@@ -15275,7 +15275,50 @@ Change 0 is reviewed, the checks pass and the user's three steps pass.
 
 ---
 
-### Task 79 — Read the PDF in your language: on-screen translation, and Indian scripts never break a download  🟡 BUILT, mock-verified; live acceptance pending → branch `translate` **from `main`** (Task 80 Fix A is merged: `83a6e0d`)   *(Medium · 3–5 days)*
+### Task 79 — Read the PDF in your language: on-screen translation, and Indian scripts never break a download  ✅ DONE → merged to `main` (`4f43ca3`, 2026-10-18) — Changes 1–6 built by Codex on `translate`, speed Fixes 1–4 by Claude, tested by the user in Chrome with a real Sarvam key; **not working on the live site yet** — the server key is deliberately off (see below)   *(Medium · 3–5 days)*
+
+> **Shipped — 2026-10-18 (`4f43ca3`).** Tested by the user in Chrome at `127.0.0.1:5173` with their own Sarvam key:
+> Corporate p11 and Healing p3 in Hindi, zoom in and out, Hindi → Tamil, Edit text back to English, and the guard
+> (नमस्ते refused, Cancel works, English unchanged). Sarvam keeps the `[[PEDF_BOX_n]]` labels: Corporate p11 + p12
+> took 9 requests, each 1.1–3.1 s. Full suite **1,675 passed / 0 failed**; typecheck, lint, build.
+>
+> **Speed fixes after the first live test — 2026-10-18 (Claude).** The user found translation very slow and a zoom
+> went back to English for about a minute. Measured with a fake Sarvam answering in 1.5 s: Healing p3 showed nothing
+> for **9.6 s** (removing the English 3.5 s and drawing it about 5 s, after Sarvam); Corporate p11 **7 s** (3 requests one
+> after another); a zoom threw the Hindi away and redid all of it for every page in view and the next page, one page at a
+> time. No Sarvam request was repeated — the time was our own.
+> 1. *Zoom keeps the translation:* the words are placed again at the new size and the page behind them is stretched
+>    until it is redrawn — never English, no "Translating…".
+> 2. *Clean each page once:* the page with the English removed is kept while the PDF is open (the 4 most recent,
+>    `src/lib/translate/cleanPages.ts`) and shared by every zoom and language; a zoom only redraws it, Hindi → Tamil only
+>    asks Sarvam for the new words. An edit on the page makes a fresh one.
+> 3. *Requests together, the page in view first:* up to 3 Sarvam requests at once across pages, the pages in view before
+>    the next page (`translationPrefetch`); after a 429, one at a time with one retry. The English is removed while
+>    Sarvam works, not after.
+> 4. *Words before the picture:* the translation shows as soon as Sarvam answers, on patches that hide the English —
+>    the page's own colour where the box is plain text on a flat colour (it already looks final), frosted glass over a
+>    photo or gradient (`src/lib/translate/translationPatch.ts`); the clean page fades in under the words. If the English
+>    cannot be removed safely, the words stay on their patches (before: the page showed "Couldn't translate").
+>
+> Result in the same test: Corporate p11 Hindi at **1.85 s** (was 7 s); Healing p3 Hindi at **1.8 s**, the clean photo at
+> 5.9 s (was 9.6 s for anything); a zoom makes **no** Sarvam request and no new cleaning. Caught while checking: solid
+> patches first showed as dark green blocks over Healing's photo (now frosted unless the whole patch and its margin are
+> one flat colour); on Corporate p11, 25 of 27 patches are plain white.
+>
+> **Live site — translation and Ask do not work there yet (user, 2026-10-18: "leave it").** The live site is a
+> static-assets-only Worker (Task 29A: `wrangler.jsonc` has no `main` script), so the Task 28 proxy — written as a
+> Cloudflare *Pages* Function, `functions/api/sarvam/[[path]].ts` — never runs: every `/api/sarvam/*` request, translate
+> and chat alike, gets **405**. Switching the server key on was left off on purpose: an app-funded key on a public site
+> needs protection first (Task 29's per-IP limit; AI-002's login, per-user allowances and spending cap), and live voice
+> also needs a WebSocket proxy (the app refuses streaming voice in production). Options for later: **A** keep it off and
+> hide Translate and Ask on the live site; **B** a small Worker script sending `/api/sarvam/*` to `handleSarvamProxy`,
+> with a per-IP limit and a daily site-wide cap (the prepaid Sarvam balance is the ceiling) — Translate and typed Ask
+> would work, voice would not; **C** AI-002 first.
+>
+> **Known limits found in testing:** a faint blurred "HEALING RETREAT" stays behind the Hindi heading on Healing p3 — a
+> shadow drawn in the PDF itself, which removing the text does not touch (it is in Codex's screenshot from before the
+> speed fixes too). Sarvam's "no credits" reply (402) shows as the plain "Couldn't translate this page — try again":
+> by the user's choice, users are never told about credits. Android fonts are not checked.
 
 **The user's decisions (2026-10-15 to 10-17).**
 - Translation is **for reading on screen only**. A translated PDF is **not** downloadable; **Export** always gives the
@@ -15407,6 +15450,8 @@ card Copy, input guard and English export checks pass. Default suite: 1,662 pass
 **Real Sarvam translation/network/cache acceptance and Android font coverage are not verified.** The accessible Chrome
 Settings panel still says `Not set`; no key was copied or logged. Do not mark this task complete or merge from mock
 evidence. Evidence, limitations and exact run scope: [TASK79_REPORT.md](TASK79_REPORT.md). No commit made.
+*(Superseded the same day: the user's live Sarvam test passed and the task merged as `4f43ca3` — see the note at the
+top of this task.)*
 
 **Land:** branch `translate` from `main`. Commit: `Read the PDF in your language on screen, and Indian scripts never
 break a download (Task 79)`. Merge after the checks pass and the user's six steps pass.
