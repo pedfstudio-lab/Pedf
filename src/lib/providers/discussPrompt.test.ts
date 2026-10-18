@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { SUPPORTED_LANGUAGES } from '@/state/prefsStore';
 import {
   buildDiscussMessages,
   languageNameFor,
   NOT_IN_DOCUMENT_MARKER,
+  OUTDATED_ANSWER_NOTE,
+  EDITED_DOCUMENT_RULE,
 } from './discussPrompt';
 
 describe('buildDiscussMessages', () => {
@@ -74,13 +77,64 @@ describe('buildDiscussMessages', () => {
     expect(messages[1]?.content).toBe('When are we leaving for Goa?');
     expect(messages[2]?.content).toBe('22 July [Page 1]');
     expect(messages[3]?.content).toBe(
-      '<QUESTION>\nHow is the weather there then?\n</QUESTION>',
+      '<QUESTION>\nHow is the weather there then?\n</QUESTION>\n'
+      + 'Answer in English, even if earlier messages were in another language.',
     );
+  });
+
+  it.each(SUPPORTED_LANGUAGES)('ends each question with the chosen $name rule, preserving history', ({ code, name }) => {
+    const history = [
+      { role: 'user' as const, content: 'पहला विकल्प क्या है?' },
+      { role: 'assistant' as const, content: 'पहला विकल्प गोवा है। [Page 1]' },
+    ];
+    const input = { documentText: '[Page 1]\nGoa and Kerala.', question: 'And the second one?', language: code };
+    const messages = buildDiscussMessages({ ...input, history });
+    const withoutHistory = buildDiscussMessages(input);
+
+    expect(messages.slice(1, -1)).toEqual(history);
+    expect(messages[0]).toEqual(withoutHistory[0]);
+    expect(messages.at(-1)).toEqual({
+      role: 'user',
+      content: `<QUESTION>\nAnd the second one?\n</QUESTION>\nAnswer in ${name}, even if earlier messages were in another language.`,
+    });
+    expect(history[1]?.content).toBe('पहला विकल्प गोवा है। [Page 1]');
   });
 
   it('maps every supported code used by the chat and falls back safely', () => {
     expect(languageNameFor('en-IN')).toBe('English');
     expect(languageNameFor('ta-IN')).toBe('Tamil');
     expect(languageNameFor('unsupported')).toBe('English');
+  });
+
+  it.each([false, true])('annotates stale assistant answers only in the prompt (spoken: %s)', spoken => {
+    const history = [
+      { role: 'user' as const, content: 'What is the fee?' },
+      { role: 'assistant' as const, content: '21,999. [Page 1]', outOfDate: true },
+      { role: 'user' as const, content: 'And now?' },
+      { role: 'assistant' as const, content: '31,999. [Page 1]' },
+    ];
+    const input = { documentText: '[Page 1]\nFee: 31,999', question: 'What is the fee?', language: 'ta-IN', spoken };
+    const messages = buildDiscussMessages({ ...input, history });
+    expect(messages[0]).toEqual(buildDiscussMessages(input)[0]);
+    expect(messages.slice(1, -1)).toEqual([
+      { role: 'user', content: 'What is the fee?' },
+      { role: 'assistant', content: `21,999. [Page 1]\n${OUTDATED_ANSWER_NOTE}` },
+      { role: 'user', content: 'And now?' },
+      { role: 'assistant', content: '31,999. [Page 1]' },
+    ]);
+    expect(messages.at(-1)?.content).toBe('<QUESTION>\nWhat is the fee?\n</QUESTION>\n'
+      + 'Answer in Tamil, even if earlier messages were in another language.\n' + EDITED_DOCUMENT_RULE);
+    expect(history[1]?.content).toBe('21,999. [Page 1]');
+    expect(messages.some(message => 'outOfDate' in message)).toBe(false);
+  });
+
+  it('adds nothing when no answer is stale, including a stale flag on a user message', () => {
+    const input = { documentText: '[Page 1]\nFee: 31,999', question: 'What is the fee?' };
+    const plain = [{ role: 'user' as const, content: 'Earlier question' }, { role: 'assistant' as const, content: 'Earlier answer' }];
+    expect(buildDiscussMessages({ ...input, history: plain.map(message => ({ ...message, outOfDate: false })) }))
+      .toEqual(buildDiscussMessages({ ...input, history: plain }));
+    expect(buildDiscussMessages({ ...input, history: [{ role: 'user', content: 'Earlier question', outOfDate: true }] }).at(-1))
+      .toEqual(buildDiscussMessages(input).at(-1));
+    expect(buildDiscussMessages(input).at(-1)?.content).not.toContain(EDITED_DOCUMENT_RULE);
   });
 });

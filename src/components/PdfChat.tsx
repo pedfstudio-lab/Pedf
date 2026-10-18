@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { HandsFreeVoiceOverlay } from '@/components/HandsFreeVoiceOverlay';
-import { getDocumentText } from '@/lib/pdf/documentText';
+import { getEditedDocumentText } from '@/lib/pdf/editedDocumentText';
 import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
-import { recentChatHistory } from '@/lib/providers/chatHistory';
+import { fingerprintDocumentText, recentChatHistory } from '@/lib/providers/chatHistory';
 import { NOT_IN_DOCUMENT_MARKER } from '@/lib/providers/discussPrompt';
 import { getSarvamKey } from '@/lib/providers/keys';
 import {
@@ -48,6 +48,7 @@ import {
   usePrefs,
 } from '@/state/prefsStore';
 import type { SupportedLanguageCode } from '@/state/prefsStore';
+import { useEdits } from '@/state/editsStore';
 
 interface PdfChatProps {
   readonly open: boolean;
@@ -62,6 +63,7 @@ interface ChatEntry {
   readonly text: string;
   readonly grounded?: boolean;
   readonly language?: string;
+  readonly documentFingerprint?: string;
 }
 
 type MicState = 'idle' | 'requesting' | 'recording' | 'transcribing';
@@ -110,6 +112,7 @@ function microphoneError(error: unknown): string {
 
 export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const { preferredLanguage, setPreferredLanguage } = usePrefs();
+  const { edits, pagePlan } = useEdits();
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [question, setQuestion] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -396,7 +399,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     const nextQuestion = questionText.trim();
     if (!doc || !nextQuestion || thinking || keyMissing) return;
     if (!options.spoken) stopPlayback();
-    const history = recentChatHistory(entries);
     const request = askRequest.current + 1;
     askRequest.current = request;
     const answerLanguage = preferredLanguage;
@@ -411,8 +413,10 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     setThinking(true);
 
     try {
-      const documentText = await getDocumentText(doc);
+      const documentText = await getEditedDocumentText(doc, edits, pagePlan);
+      const documentFingerprint = await fingerprintDocumentText(documentText.full);
       if (askRequest.current !== request) return;
+      const history = recentChatHistory(entries, documentFingerprint);
       const voiceState = options.spoken && options.voiceRequest !== undefined
         ? voicePlayback.current
         : null;
@@ -506,6 +510,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         text: result.answer,
         grounded: result.grounded,
         language: answerLanguage,
+        documentFingerprint,
       };
       setEntries((current) => [...current, answer]);
       if (

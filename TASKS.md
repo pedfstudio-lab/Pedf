@@ -15457,3 +15457,147 @@ top of this task.)*
 break a download (Task 79)`. Merge after the checks pass and the user's six steps pass.
 
 ---
+
+### Task 81 — Ask answers in the language you just chose, from the page as it is now  🔲 TODO → branch `chat-fresh` **from `main`** (Task 79 is merged: `4f43ca3`, `1014645`)   *(Medium · 1–2 days)*
+
+**The user's decisions (2026-10-17 to 10-18).**
+- These are the two chat fixes kept out of Task 79. They are **one task with two independent changes**: Change 1 is
+  small and goes first, and may be committed on its own before Change 2 is done.
+- The chat keeps its memory of the conversation, so a follow-up like "and the second one?" still makes sense. Only
+  where the language rule sits changes.
+- One fix covers typed and spoken questions: both go through the same `ask()` → `discuss` call.
+
+**What the user hit.**
+1. *Language:* ask a question, change **Answer language** in the chat (e.g. Hindi → Tamil), ask again → the answer
+   comes in **Hindi** again. Only a page refresh makes it switch. In voice it is worse: the Tamil voice reads a Hindi
+   answer.
+2. *Edits:* change "Rs. 5,000" to "Rs. 7,500" in a paragraph, then ask "What is the fee?" → the answer says
+   **Rs. 5,000**. Typed and voice questions alike.
+
+**Today** (read from the code, 2026-10-18):
+- `PdfChat.tsx`, `ask()`: `answerLanguage = preferredLanguage` is read fresh for every question;
+  `history = recentChatHistory(entries)` sends the last 8 messages (`CHAT_HISTORY_TURNS` in `chatHistory.ts`);
+  `documentText = await getDocumentText(doc)` — `doc` is the PDF **as it was opened**, so edits are never seen; then
+  `defaultProviders().discuss({ question, documentText: documentText.full, language, history, spoken })`. Typed,
+  push-to-talk and hands-free questions all go through `ask()`.
+- `discussPrompt.ts`, `buildDiscussMessages`: one system message — the instructions, including
+  `Answer concisely in ${languageName}.`, then the **whole DOCUMENT** — then the history, then
+  `<QUESTION>…</QUESTION>`. The language rule sits only at the top, before thousands of words of document text, while
+  up to 8 messages in the old language sit right next to the new question; the model carries on in that language.
+  A refresh "fixes" it only because it empties `entries`.
+- Changing the language already stops a hands-free conversation (the effect on `preferredLanguage`); the next
+  conversation listens in the new language, and spoken answers already use the new voice.
+
+**Change 1 — the language you choose is the language of the next answer.**
+In `buildDiscussMessages`, the last user message ends with the rule, after `</QUESTION>`:
+`Answer in ${languageName}, even if earlier messages were in another language.` — for every language, English
+included. The system prompt keeps its own rule; the history is still sent unchanged. Size: about 15 words on top of
+the whole PDF text, under 1 % — no noticeable effect on waiting time, answer length or cost (the user asked).
+Only `discussPrompt.ts` and its test change.
+
+**Change 2 — Ask reads the page as it is now.**
+A new function builds the chat's document text from the open document **with its edits**, used by `ask()` in place
+of `getDocumentText(doc)`:
+1. *Pages:* the pages and order of the current page plan — a deleted page is gone, an inserted blank page appears
+   (with any text added on it), a duplicated page appears twice, a moved page reads in its new place. `[Page N]`
+   markers use the page numbers the user sees now.
+2. *Text:* on each page, text replaced by an edit is gone and the edit's text reads **in its place** in the reading
+   order (an edited paragraph between the same neighbours as the original); text the user deleted is gone; text the
+   user added (**Add text**) is included where it sits. Codex reads the edit model (text edits, covers and what they
+   replace) and chooses the mapping; the behaviour above is the requirement.
+3. *No edits → no change:* for a PDF without edits the result is exactly what `getDocumentText` gives today — same
+   text, same order, same markers.
+4. *Speed:* built when a question is asked, not on every keystroke; pages without edits reuse today's extracted text,
+   so only edited pages are rebuilt. An unedited PDF is as fast as today.
+5. `getDocumentText` itself does not change — its other callers (location detection, search) keep reading the
+   original.
+
+**Change 3 — an answer from before an edit is marked out of date** *(added 2026-10-18, after the user tested Changes
+1–2, built by Codex on `chat-fresh`, uncommitted).*
+- *What the user hit:* Healing p17 — edit the price 10,999 → 21,999, ask "what is the cost for the trip?" → 21,999 ✓;
+  edit the same price again → 31,999, ask the same question → **21,999** again. The Rahul résumé — ask the phone
+  number → 7878891677; change it to 9414680454; ask "what is his phone number?" → **7878891677** again.
+- *Measured (Claude, 2026-10-18, the real editor with a mocked Sarvam reply, capturing exactly what is sent):* with the
+  second question the page text had **31,999** and not 21,999 — Change 2 works. The old value reached Sarvam only
+  inside the chat history: its own earlier answer "…21,999…", sent beside the same question. Sarvam repeats that answer
+  instead of reading the DOCUMENT again. The first question after an edit is right only because no earlier answer about
+  it exists yet.
+- *The rule:* each chat answer remembers the document text it was based on (a fingerprint of the `documentText.full`
+  sent with its question). When a new question is asked, every earlier answer whose text differs from the text sent
+  now goes into the history with a hidden note, and the last message gets one more line after Change 1's language rule:
+  - after such an answer: `(Note: the DOCUMENT was edited after this answer; it may be out of date.)`
+  - at the end of the last message: `The DOCUMENT has been edited since some earlier answers. Use only the current
+    DOCUMENT for facts; answer normally and do not mention this note.`
+1. *Words only:* an edit that changes no words (moving or cropping a picture, adding a signature) adds no note — the
+   fingerprint is the same.
+2. *Any edit, not only the second:* whenever the words changed after an answer, that answer is marked, whether it is the
+   1st, 2nd or 10th edit; an answer given after the latest change is not marked. Undo counts as a change (the words
+   changed back).
+3. *Nothing changed → nothing added:* no edit since an answer, or no earlier answers, adds no note and no line — the
+   prompt is exactly Change 1's. Another PDF starts a fresh chat, as today.
+4. *Memory kept:* the history and `CHAT_HISTORY_TURNS` are unchanged, so follow-ups ("and his email?") still work.
+5. *Never shown:* the notes appear nowhere on screen — not in the chat panel, not on the page, not in the PDF. Typed and
+   spoken questions alike.
+6. *Size:* a few words per marked answer, only after an edit — no noticeable effect on waiting time or cost; an unedited
+   PDF's chat is unchanged (the user asked).
+
+**Privacy.** Unchanged: the page **text** (now as edited) goes to Sarvam as Ask's questions already do; the PDF file
+never leaves the device.
+
+**Checks**
+- *Change 1:* `buildDiscussMessages` ends the last user message with the rule naming the chosen language, for all ten
+  languages; the history and the rest of the prompt are unchanged; Hindi history + Tamil chosen → the last line says
+  Tamil.
+- *Change 2:* no edits → byte-equal to `getDocumentText` on Healing, Corporate, Ladakh and the Rahul résumé; one edited
+  paragraph → the new text is present, the old text absent, between the same neighbours; deleted text gone; added text
+  present; a deleted page gone and the markers renumbered; inserted, duplicated and moved pages; an edit on page 3
+  leaves pages 1–2 unchanged.
+- *PdfChat:* after an edit, `discuss` receives the edited text — typed and spoken paths; after a language change, the
+  next `discuss` gets the new language.
+- *Change 3:* ask → edit the words → ask: the second `discuss` call has the new text, the earlier answer carries the
+  note and the last message the extra line; ask → ask with no edit → no note, the prompt equal to Change 1's; an
+  answer given after the latest edit → not marked; a picture-only edit → no note; Undo → note; the chat panel never
+  shows a note. Typed and spoken paths.
+- *Speed:* time to build the text for a question on Corporate with and without edits (report both).
+- *Unchanged elsewhere:* full suite; typecheck; lint; build.
+
+**New files**
+
+| File | Why |
+|---|---|
+| `src/lib/pdf/editedDocumentText.ts` (name is Codex's choice) + test | The chat's text with the edits in place (Change 2) |
+
+**Existing files that change**
+
+| File | Change |
+|---|---|
+| `src/lib/providers/discussPrompt.ts` + test | The language rule next to each question (Change 1); the out-of-date notes (Change 3) |
+| `src/components/PdfChat.tsx` + test | `ask()` uses the edited text (Change 2); each answer keeps the fingerprint of its text (Change 3) |
+| `src/lib/providers/chatHistory.ts` + test, if Codex routes the mark through it | Which earlier answers are out of date (Change 3) |
+
+**Files that must not change:** `getDocumentText` and its other callers; the edit store and the saved-project format;
+export; translation (Task 79); the voice connection (speech-to-text, text-to-speech, conversation session); the chat's
+look and buttons; `CHAT_HISTORY_TURNS`.
+
+**Verify (user)** at `http://127.0.0.1:5173`:
+1. Open a PDF → **Ask** in **Hindi** → a Hindi answer → switch **Answer language** to **Tamil** → ask again → a Tamil
+   answer, no refresh → ask a follow-up ("and the second one?") → it is understood.
+2. Voice: start hands-free in Hindi → switch to **English** → start again → an English answer in an English voice.
+3. **Edit text** → change a price or date in a paragraph → **Done** → ask about it → the **new** value. Ask the same by
+   voice → the new value.
+4. A PDF with no edits → answers as before.
+5. *Change 3:* Healing p17 → edit the price → ask the cost → edit the same price again → ask the same question → the
+   **newest** price. The Rahul résumé → ask the phone number → change it → ask again → the **new** number. The same by
+   voice.
+6. Ask the same question twice with no edit in between → the answer reads naturally, with no "may be out of date"
+   remark.
+
+**Known limits:** text inside pictures and scanned pages is not read (that needs OCR); on the live site Ask does not
+work yet — the server key is off (see Task 79).
+
+**Land:** branch `chat-fresh` from `main`. Change 1 may land alone: `The chat answers in the language you just chose
+(Task 81, Change 1)`. Change 2: `Ask answers from the page as it is now (Task 81, Change 2)`. Change 3, with Change 2
+or after it: `An answer from before an edit no longer overrides the page (Task 81, Change 3)`. Merge after the checks
+pass and the user's steps pass.
+
+---

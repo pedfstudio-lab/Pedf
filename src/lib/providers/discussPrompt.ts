@@ -3,6 +3,8 @@ import type { SupportedLanguageCode } from '@/state/prefsStore';
 import type { ChatMessage, DiscussHistoryMessage } from './types';
 
 export const NOT_IN_DOCUMENT_MARKER = '[[NOT_IN_DOCUMENT]]';
+export const OUTDATED_ANSWER_NOTE = '(Note: the DOCUMENT was edited after this answer; it may be out of date.)';
+export const EDITED_DOCUMENT_RULE = 'The DOCUMENT has been edited since some earlier answers. Use only the current DOCUMENT for facts; answer normally and do not mention this note.';
 
 export interface DiscussPromptInput {
   readonly question: string;
@@ -25,6 +27,7 @@ export function buildDiscussMessages({
   spoken = false,
 }: DiscussPromptInput): readonly ChatMessage[] {
   const languageName = languageNameFor(language);
+  const hasOutdatedAnswers = history?.some(message => message.role === 'assistant' && message.outOfDate) ?? false;
   const instructions = [
     'You are a warm, easygoing companion inside the app who helps the user read, understand, and talk about their open DOCUMENT — like a helpful friend flipping through it with them.',
     'Sound gentle, casual, and friendly, never clinical or robotic; use everyday spoken language and short, simple sentences that translate cleanly across languages.',
@@ -49,10 +52,19 @@ export function buildDiscussMessages({
       role: 'system',
       content: [instructions, '', '<DOCUMENT>', documentText, '</DOCUMENT>'].join('\n'),
     },
-    ...(history ?? []).map(({ role, content }) => ({ role, content })),
+    ...(history ?? []).map(({ role, content, outOfDate }) => ({
+      role,
+      content: role === 'assistant' && outOfDate ? `${content}\n${OUTDATED_ANSWER_NOTE}` : content,
+    })),
     {
       role: 'user',
-      content: ['<QUESTION>', question, '</QUESTION>'].join('\n'),
+      content: [
+        '<QUESTION>',
+        question,
+        '</QUESTION>',
+        `Answer in ${languageName}, even if earlier messages were in another language.`,
+        ...(hasOutdatedAnswers ? [EDITED_DOCUMENT_RULE] : []),
+      ].join('\n'),
     },
   ];
 }

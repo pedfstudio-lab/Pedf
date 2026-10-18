@@ -46,6 +46,8 @@ export interface TranscribeStreamInput {
 export interface DiscussHistoryMessage {
   readonly role: 'user' | 'assistant';
   readonly content: string;
+  /** Prompt-only metadata: this answer used different document text. Never display it. */
+  readonly outOfDate?: boolean;
 }
 
 export interface DiscussInput {
