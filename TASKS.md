@@ -15458,7 +15458,33 @@ break a download (Task 79)`. Merge after the checks pass and the user's six step
 
 ---
 
-### Task 81 — Ask answers in the language you just chose, from the page as it is now  🔲 TODO → branch `chat-fresh` **from `main`** (Task 79 is merged: `4f43ca3`, `1014645`)   *(Medium · 1–2 days)*
+### Task 81 — Ask answers in the language you just chose, from the page as it is now  ✅ DONE → merged to `main` (`96e6215`, 2026-10-19) — Changes 1–3 built by Codex on `chat-fresh`, checked by Claude, tested by the user in Chrome with a real Sarvam key; on the live site Ask still waits for the server key (see Task 79)   *(Medium · 1–2 days)*
+
+> **Shipped — 2026-10-19 (`96e6215`).** Tested by the user in Chrome at `127.0.0.1:5173` with their own Sarvam key:
+> the answer language switched mid-chat without a refresh (typed and voice), edited facts answered with the new value,
+> and — after Change 3 — a price edited several times and the Rahul résumé's changed phone number answered with the
+> newest value; an unedited PDF answered as before. "Everything is working."
+>
+> **Claude's check — 2026-10-19.** Code read against this task: only the chat's text, its history and the prompt
+> changed; translation, export, editing, the saved-project format and the voice connection did not. In the real
+> editor with a mocked Sarvam reply, capturing exactly what is sent (Healing p17): no edits → 10,999, no note and no
+> extra line; 1st edit → **21,999**, the 10,999 answer marked; 2nd edit → **31,999**, both earlier answers marked; the
+> same question with no edit → the 31,999 answer not marked; Undo → **21,999**, that answer current again (not
+> marked). The chat panel never showed a note. Full suite **1,716 passed / 0 failed** (118 skipped — the optional
+> real-PDF switches); typecheck, lint, build. Codex's reports: `TASK81_REPORT.md`, `TASK81_CHANGE3_REPORT.md`
+> (uncommitted, as with earlier tasks).
+>
+> **Known limits found in testing:**
+> - *Side-by-side cards are read row by row* (older than this task, also on unedited pages): on Healing p17 the chat's
+>   text reads `21,999 / 11,999/- / If booked on or / If booked 26 / before 25 May / May onwards…`, so Sarvam can pair a
+>   price with the wrong date — with 21,999 it paired them the wrong way round. Reading each card or column top to
+>   bottom would fix it, but the app has no "this is a table" detector (Task 70 only splits cells), so tables could be
+>   read column by column instead; it would need a measure-only Change 0 across the test PDFs proving no table changes.
+>   **Left by the user (2026-10-18: "leave this").**
+> - *Fingerprints need a secure page:* Change 3's fingerprint uses the browser's `crypto.subtle`, which exists only on
+>   HTTPS, `localhost` and `127.0.0.1` — so the live site and local testing are fine. Opened over plain `http://` on a
+>   network address (e.g. a phone on Wi-Fi), Ask would fail; a small fallback fingerprint would prevent that. Not
+>   built.
 
 **The user's decisions (2026-10-17 to 10-18).**
 - These are the two chat fixes kept out of Task 79. They are **one task with two independent changes**: Change 1 is
