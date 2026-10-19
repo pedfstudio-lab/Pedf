@@ -14,7 +14,7 @@ describe('Toolbar signature action', () => {
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(), onEditModeChange: vi.fn(),
       onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(), onOpenSign: openSign, onOpenChat: vi.fn(),
       onOpenSettings: vi.fn(), onPeekChange: vi.fn(), onExport: vi.fn(),
-      saveStatus: 'idle' as const, savedAt: undefined, onSave: vi.fn(), onSaveAndClose: vi.fn(),
+      saveStatus: 'idle' as const, savedAt: undefined, onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
     };
     const { rerender } = render(<EditsStoreProvider><Toolbar {...props} fileName={null} /></EditsStoreProvider>);
@@ -35,7 +35,7 @@ describe('Toolbar signature action', () => {
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
           onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
-          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={onSave} onSaveAndClose={vi.fn()}
+          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={onSave} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
     );
@@ -55,7 +55,7 @@ describe('Toolbar signature action', () => {
       savedAt: Date.now(), zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
       onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
-      onExport: vi.fn(), onSave, onSaveAndClose,
+      onExport: vi.fn(), onSave, onSaveAndClose, onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
     };
     render(<EditsStoreProvider><Toolbar {...props} /></EditsStoreProvider>);
@@ -83,7 +83,7 @@ describe('Toolbar signature action', () => {
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
           onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
-          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()}
+          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
     );
@@ -100,7 +100,7 @@ describe('Toolbar signature action', () => {
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
           onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
-          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()}
+          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
     );
@@ -120,7 +120,7 @@ describe('Toolbar signature action', () => {
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
           onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
-          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()}
+          onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
     );
@@ -135,7 +135,7 @@ describe('Toolbar signature action', () => {
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
       onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
-      onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(),
+      onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles,
     };
     const { rerender } = render(
@@ -150,5 +150,25 @@ describe('Toolbar signature action', () => {
       <EditsStoreProvider><Toolbar {...props} savedFilesOpen={false} /></EditsStoreProvider>,
     );
     expect(screen.getByRole('button', { name: 'Saved files' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('makes the PEDF Studio logo a button that goes home (Task 82)', () => {
+    const onHome = vi.fn();
+    const onSaveAndClose = vi.fn();
+    const props = {
+      onOpen: vi.fn(), fileName: 'contract.pdf', editMode: true, textAddMode: false,
+      imageMode: false, hasEdits: true, exporting: false, saveStatus: 'saved' as const,
+      zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
+      onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose, onHome,
+      savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
+    };
+    render(<EditsStoreProvider><Toolbar {...props} /></EditsStoreProvider>);
+    const logo = screen.getByRole('button', { name: 'PEDF Studio' });
+    expect(logo.getAttribute('title')).toBe('Save and go to the home page');
+    fireEvent.click(logo);
+    expect(onHome).toHaveBeenCalledTimes(1);
+    expect(onSaveAndClose).not.toHaveBeenCalled();
   });
 });

@@ -15626,3 +15626,59 @@ or after it: `An answer from before an edit no longer overrides the page (Task 8
 pass and the user's steps pass.
 
 ---
+
+### Task 82 — The logo takes you home: click "PEDF Studio" to save and go to the landing page  ✅ DONE → merged to `main` (2026-10-19) — built by Claude on branch `logo-home` from `main` (`c7eaf67`), tested by the user in Chrome ("it is working")   *(Easy · half a day)*
+
+> **Built and checked — 2026-10-19 (Claude).** In the browser (Ladakh): an edit, then the logo → the landing page with
+> *"Continue editing ladakh.pdf? Saved just now · 1 change"*; typing left in an open box (Done not pressed), then the
+> logo → the landing page with *"2 changes"*, and reopening shows the typed text on the page; with no PDF open (after
+> Save & close) the logo → the landing page. Hand cursor and the tooltip on the logo. New tests: the logo button
+> (`Toolbar.test.tsx`), and in `App.projects.test.tsx` a change → saved and `/`, a box that cannot be finished → the
+> message and still `/app`, no PDF → `/`. Full suite **1,712 passed / 0 failed**; typecheck, lint, build.
+
+**The user's request (2026-10-19).** "Make our logo clickable … if the user is editing something and wants to go to the
+home page, he can simply click the logo — root the logo directly to the landing page." The user asked Claude to build
+it ("do it yourself") and to record it here.
+
+**Today** (read from the code, 2026-10-19):
+- The editor's top bar (`src/components/Toolbar.tsx`) shows **PEDF Studio** as plain text — clicking it does nothing.
+- The landing page is the site's home (`/`, `Landing` in `src/routes.tsx`); the editor is `/app`. Pages change with
+  `navigate()` from `src/lib/site/navigate.ts`.
+- **Save & close** (`handleSaveAndClose` in `src/App.tsx`) already: presses **Done** on an open text box so its typing
+  is kept (`finishOpenTextBox`), refuses with *"Finish or cancel the open text box…"* when that box cannot be finished
+  (e.g. Indian script typed — the Task 79 guard), saves the project, then closes the file. A saved file is then
+  offered on the landing page under **Continue editing**.
+
+**The change.** **PEDF Studio** in the top bar becomes a button: hand cursor, the tooltip *"Save and go to the home
+page"*, the same look as today. Clicking it does **Save & close, then opens the landing page**:
+
+| Situation | Logo click |
+|---|---|
+| A PDF is open, edits done | save every change → close the file → landing page (the file waits under **Continue editing**) |
+| A text box is open and can be finished | its **Done** is pressed for the user, so the typing is kept → save → landing page |
+| A text box is open and cannot be finished | the message *"Finish or cancel the open text box, then click PEDF Studio again."*; stays on the page, nothing lost |
+| Saving fails (device full / storage unavailable) | the existing save-failure message; stays on the page |
+| No PDF open | straight to the landing page |
+
+Never leave without saving: going home directly could lose the last change or an open box's typing.
+
+**Files that change:** `src/components/Toolbar.tsx` + test (the logo button, `onHome`); `src/App.tsx` +
+`src/App.projects.test.tsx` (Save & close tells whether it closed; the logo then calls `navigate('/')`).
+**Must not change:** what Save & close itself does, autosave, the saved-project format, editing, export, translation,
+chat.
+
+**Checks:** the logo is a button that calls `onHome`; with a change → saved, closed, the address is `/`; an open box
+that cannot be finished → the message, still in the editor, nothing saved over it; no PDF open → `/`; Save & close
+unchanged (its existing tests); full suite; typecheck; lint; build.
+
+**Verify (user)** at `http://127.0.0.1:5173`:
+1. Open a PDF → edit a word → **Done** → click **PEDF Studio** → the landing page; the file is offered under
+   **Continue editing** with the edit.
+2. Open a PDF → start typing in a text box (don't press Done) → click **PEDF Studio** → the landing page, and the
+   typing was kept.
+3. With no PDF open (the editor's start screen) → click **PEDF Studio** → the landing page.
+
+**Land:** branch `logo-home` from `main`. Commit: `The logo takes you home: click PEDF Studio to save and go to the
+landing page (Task 82)`. Merge after the checks and the user's steps pass.
+
+---

@@ -711,23 +711,25 @@ function EditorApp() {
     setClosedNote(note);
   }, [closeTransientUi, resetDocument, setDocument]);
 
-  /** The Save & close button: save every change, then go back to the start screen. */
-  const handleSaveAndClose = useCallback(async () => {
+  /** The Save & close button: save every change, then go back to the start screen. True once closed. */
+  const handleSaveAndClose = useCallback(async (retry = 'press Save & close again'): Promise<boolean> => {
     const fileName = latest.current.document?.fileName;
-    if (!fileName || saveBusy.current) return;
+    if (!fileName || saveBusy.current) return false;
     saveBusy.current = true;
     try {
       if (!(await finishOpenTextBox())) {
-        setError('Finish or cancel the open text box, then press Save & close again.');
-        return;
+        setError(`Finish or cancel the open text box, then ${retry}.`);
+        return false;
       }
       const outcome = await saveProjectNow();
       if (outcome === 'saved') {
         closeDocument(`Saved ${fileName} on this device — continue editing anytime.`);
+        return true;
       } else if (outcome === 'no-changes') {
         closeDocument(`No changes to save — closed ${fileName}.`);
+        return true;
       } else if (outcome === 'draft') {
-        setError('Finish or cancel the open text box, then press Save & close again.');
+        setError(`Finish or cancel the open text box, then ${retry}.`);
       } else if (outcome === 'full' || outcome === 'unavailable') {
         setPendingSwitch(null);
         setSaveFailure(outcome);
@@ -735,10 +737,20 @@ function EditorApp() {
         setPendingSwitch(null);
         setSaveFailure('unavailable');
       }
+      return false;
     } finally {
       saveBusy.current = false;
     }
   }, [closeDocument, finishOpenTextBox, saveProjectNow]);
+
+  /** The logo: Save & close, then the landing page. Never leaves without saving (Task 82). */
+  const goHome = useCallback(async () => {
+    if (!latest.current.document) {
+      navigate('/');
+      return;
+    }
+    if (await handleSaveAndClose('click PEDF Studio again')) navigate('/');
+  }, [handleSaveAndClose]);
 
   const addSignature = useCallback((signature: SignatureAsset) => {
     if (!document) return;
@@ -818,6 +830,7 @@ function EditorApp() {
         onExport={() => void handleExport()}
         onSave={() => void handleSave()}
         onSaveAndClose={() => void handleSaveAndClose()}
+        onHome={() => void goHome()}
       />
       <TranslationPrivacyNote />
       <SettingsPanel

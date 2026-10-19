@@ -37,6 +37,8 @@ interface ToolbarProps {
   onSave(): void;
   /** The Save & close button: save every change, then close the file. */
   onSaveAndClose(): void;
+  /** The logo: Save & close, then the landing page. */
+  onHome(): void;
 }
 
 const SAVE_TOOLTIP = 'Saved only in this browser on this device. Clearing browser data removes it.';
@@ -70,6 +72,7 @@ export function Toolbar({
   onExport,
   onSave,
   onSaveAndClose,
+  onHome,
 }: ToolbarProps) {
   const { undo, redo, canUndo, canRedo } = useEdits();
   const [, refreshSavedTime] = useState(0);
@@ -111,7 +114,14 @@ export function Toolbar({
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
-      <span className="text-lg font-semibold tracking-tight text-neutral-900">PEDF Studio</span>
+      <button
+        type="button"
+        onClick={onHome}
+        title="Save and go to the home page"
+        className="cursor-pointer rounded text-lg font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        PEDF Studio
+      </button>
       {fileName && (
         <span className="max-w-[45%] truncate text-sm text-neutral-500" title={fileName}>
           {fileName}

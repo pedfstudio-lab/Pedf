@@ -213,6 +213,52 @@ describe('App saved projects', () => {
     expect(mocks.projectStore.delete).not.toHaveBeenCalled();
   });
 
+  describe('the PEDF Studio logo (Task 82)', () => {
+    beforeEach(() => window.history.pushState({}, '', '/app'));
+    afterEach(() => window.history.pushState({}, '', '/'));
+
+    it('saves a change, closes the file and opens the landing page', async () => {
+      setPendingFile(new File(['%PDF-1.7'], 'Contract.pdf', { type: 'application/pdf' }));
+      render(<App />);
+      expect(await screen.findByText('Contract.pdf')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Make test change' }));
+
+      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+
+      await waitFor(() => expect(window.location.pathname).toBe('/'));
+      expect(mocks.projectStore.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays, with the message, when an open text box cannot be finished', async () => {
+      setPendingFile(new File(['%PDF-1.7'], 'Contract.pdf', { type: 'application/pdf' }));
+      render(<App />);
+      expect(await screen.findByText('Contract.pdf')).toBeTruthy();
+      const editable = document.createElement('div');
+      editable.setAttribute('contenteditable', 'true');
+      const done = document.createElement('button');
+      done.setAttribute('data-text-edit-done', '');
+      done.disabled = true;
+      document.body.append(editable, done);
+
+      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+
+      expect(await screen.findByText('Finish or cancel the open text box, then click PEDF Studio again.')).toBeTruthy();
+      expect(window.location.pathname).toBe('/app');
+      expect(screen.getAllByText('Contract.pdf').length).toBeGreaterThan(0);
+      editable.remove(); done.remove();
+    });
+
+    it('goes straight to the landing page when no PDF is open', async () => {
+      render(<App />);
+      expect(await screen.findByRole('region', { name: 'PDF drop area' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+
+      expect(window.location.pathname).toBe('/');
+      expect(mocks.projectStore.create).not.toHaveBeenCalled();
+    });
+  });
+
   it('Ctrl+S reports no changes without writing an unchanged PDF', async () => {
     const file = new File(['%PDF-1.7'], 'Unchanged.pdf', { type: 'application/pdf' });
     setPendingFile(file);
