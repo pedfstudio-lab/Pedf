@@ -3,7 +3,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { PdfRect, Rgb, TextEdit, TextStyle, PositionedTextPiece } from '@/lib/export/types';
+import type { PdfRect, Rgb, TextEdit, TextStyle, PositionedTextPiece, TextParagraphLayout } from '@/lib/export/types';
 import type { TextBlock } from '@/lib/pdf/textContent';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import { textBlockLineHeight } from '@/lib/edit/buildTextEdits';
@@ -61,6 +61,7 @@ import { hasLetterSpacedHeading } from '@/lib/edit/letterSpacedHeading';
 import { effectiveTextSpans } from '@/lib/edit/richText';
 import { readParagraphLayout } from '@/lib/edit/paragraphDom';
 import { bulletEditorHtml, canonicalBulletValue, insertBulletItems, refreshBulletEditorLayout } from '@/lib/edit/bulletEditorPresentation';
+import { cornerDragFactor, scaleTextBox } from '@/lib/edit/scaleTextBox';
 
 /** Widths are measured at 1 PDF point per CSS pixel, independent of zoom/layout. */
 function measurePieceWithCanvas(text: string, style: TextStyle, source?: PositionedTextPiece): number {
@@ -437,7 +438,7 @@ export function TextEditOverlay({
   const paragraphMode = !bulletMode && !markerList && !measuredHeading && !usesAlignmentColumn
     && (existing?.length ? existing[0]?.boxParagraphs !== undefined : block.lines.length > 0);
   const initialParagraphs = paragraphMode ? existing?.[0]?.boxParagraphs ?? sourceParagraphs(block).layouts : undefined;
-  const paragraphCacheRef = useRef(new Map(initialParagraphs?.map((layout, index) => [`source-${index}`, layout] as const) ?? []));
+  const paragraphCacheRef = useRef(new Map<string, TextParagraphLayout>(initialParagraphs?.map((layout, index) => [`source-${index}`, layout] as const) ?? []));
   const paragraphGap = paragraphGapPreset(initialParagraphs ?? []);
   const editingRect = existing?.length
     ? savedEditingRect(existing, block, initialAlign, initialAlignLeftPt, initialAlignWidthPt)
@@ -559,6 +560,8 @@ export function TextEditOverlay({
   const initializedRef = useRef(false);
   const composingRef = useRef(false);
   const initialPresentedValueRef = useRef<ReturnType<typeof serializeRichText>>();
+  const stopCornerDragRef = useRef<(() => void) | undefined>();
+  useEffect(() => () => stopCornerDragRef.current?.(), []);
 
   const beginWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -1143,6 +1146,54 @@ export function TextEditOverlay({
     resizeToContent();
   };
 
+  const captureResize = () => {
+    const editable = editableRef.current;
+    return editable ? { ...serializeRichText(editable, style, zoom), width, html: editable.innerHTML } : undefined;
+  };
+
+  const applyCornerScale = (start: NonNullable<ReturnType<typeof captureResize>>, factor: number) => {
+    const editable = editableRef.current;
+    if (!editable) return;
+    const next = scaleTextBox(start, factor);
+    // Only the explicit corner gesture rebuilds the size-scaled runs. Ordinary
+    // typing and A+/A− retain their existing paths, and the width never changes.
+    editable.innerHTML = next.factor === 1 ? start.html : bulletMode
+      ? bulletEditorHtml(next.text, next.style, next.spans, zoom, bulletMode.indentPt ?? 0)
+      : richTextToHtml(next.text, next.style, next.spans, zoom, paragraphMode ? next.paragraphs : undefined);
+    if (paragraphMode) {
+      paragraphCacheRef.current = new Map([...editable.querySelectorAll<HTMLElement>('[data-pdf-paragraph]')]
+        .map(paragraph => [paragraph.dataset.paragraphId!, readParagraphLayout(paragraph)]));
+    }
+    selectionRangeRef.current = null;
+    setStyle(next.style);
+    setSelectionStyle(value => ({ ...value, fontSizePt: next.style.fontSizePt }));
+  };
+
+  const beginCornerDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (committing || composingRef.current || event.button !== 0) return;
+    event.preventDefault();
+    const start = captureResize();
+    if (!start) return;
+    stopCornerDragRef.current?.();
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const x = event.clientX, y = event.clientY;
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== event.pointerId) return;
+      applyCornerScale(start, cornerDragFactor(moveEvent.clientX - x, moveEvent.clientY - y, start.style.fontSizePt, zoom));
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      stopCornerDragRef.current = undefined;
+    };
+    stopCornerDragRef.current = stop;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  };
+
   const changeFontFamily = (family: FamilyKey) => {
     const editable = editableRef.current;
     const range = editableRange();
@@ -1435,6 +1486,22 @@ export function TextEditOverlay({
         onPointerDown={beginWidthDrag}
         style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height / 2 - 5 }}
         className="absolute z-10 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+      />
+      <button
+        type="button"
+        aria-label="Drag to resize text"
+        title="Drag to resize text; arrow keys resize, Shift for bigger steps"
+        disabled={committing}
+        onPointerDown={beginCornerDrag}
+        onKeyDown={(event) => {
+          const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+          if (!direction || composingRef.current) return;
+          event.preventDefault();
+          const start = captureResize();
+          if (start) applyCornerScale(start, (start.style.fontSizePt + direction * (event.shiftKey ? 10 : 1)) / start.style.fontSizePt);
+        }}
+        style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height - 5 }}
+        className="absolute z-20 h-2.5 w-2.5 touch-none cursor-nwse-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
       />
       <button
         type="button"

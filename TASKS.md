@@ -15682,3 +15682,170 @@ unchanged (its existing tests); full suite; typecheck; lint; build.
 landing page (Task 82)`. Merge after the checks and the user's steps pass.
 
 ---
+
+### Task 83 — Drag a corner to resize text, like PowerPoint: up-left smaller, down-right bigger  ✅ DONE → merged to `main` (2026-10-21) — Revision 1 (fixed width, re-wraps and grows **down**, like Word) built by Codex on `corner-resize`, tested by the user in Chrome ("it is working"); Claude's check: full suite 1,733 passed / 0 failed, typecheck, lint, build   *(Medium · about 1 day)*
+
+> **Revision 1 — 2026-10-20: grow down like Word, not sideways. Supersedes "same line breaks" (step 3 below), the
+> corner-only exact-row extension, and the corner's width/indent/spacing scaling.**
+>
+> *What the user found testing the first build:* dragging the corner bigger makes the box spread **sideways** — the
+> same words stay on each line, so the box gets wider. In Word and PowerPoint the box keeps its **width**, the words
+> that no longer fit move to the next line, and the box grows **down** (smaller: words move up, the box gets shorter).
+> The user chose the Word way: it is what people know, and it is simpler and safer — the core paragraph-layout code
+> is not touched.
+>
+> *The behaviour — a smooth A+/A−:*
+> 1. *Size only.* The corner changes the text size; **the box width stays as it is**. Every size in the box scales by
+>    the same factor (words made bigger or smaller with A+/A− on a selection keep their proportions), within the
+>    existing 4–400 pt limits (one factor for the whole box, as now). Weight, font, colour, alignment and position do
+>    not change.
+> 2. *Re-wrap like A+/A−.* The text re-wraps at the unchanged width through the **existing** A+/A− path; the height
+>    stays automatic (Task 10E). Paragraph gaps and a bullet list's **indent stay as they are**. **User clarification
+>    (2026-10-20): match existing A+/A− exactly**, including its current font-size-based item-spacing rule; do not
+>    add a fixed-gap exception. Bullet dots use the existing marker-size rule — exactly what A+/A− do today.
+> 3. *The drag.* **Down or right → bigger, up or left → smaller**, live. Both directions count **equally** (the first
+>    build reacted mostly to sideways movement on wide boxes); dragging back to the start returns to the start size.
+>    Codex chooses a smooth rate (e.g. about 1 pt per 8–10 screen pixels, adjusted for zoom). The arrow keys stay as
+>    built (→/↓ bigger, ←/↑ smaller, Shift = bigger steps).
+> 4. *Unchanged from the first build:* the bottom-right handle and diagonal cursor, the label and tooltip, Cancel
+>    discards, Done = one Undo, the export draws the new size through the existing path.
+>
+> *Remove from the first build:* the corner-only exact-row extension — `src/lib/edit/cornerParagraphLayout.ts` and its
+> test, and its hooks in `paragraphLayout.ts` and `buildTextEdits.ts`; the corner's width scaling; the corner's
+> bullet indent/spacing scaling (`resizedBullet` and the saved `boxParagraphs` indent for lists, and the
+> `OverlayLayer.tsx` bullet-mode changes that read them). **`src/lib/edit/paragraphLayout.ts`,
+> `src/lib/edit/buildTextEdits.ts` and `src/components/OverlayLayer.tsx` end byte-identical to `main`** unless Codex
+> shows a change is still needed for the grows-down behaviour — then it is reported and explained before building it.
+> (The user had approved the bullet save/indent changes for the sideways version; they are not needed when indent and
+> spacing do not change.)
+>
+> *What it affects (the user asked, case by case — all the same as A+/A− today):* a normal paragraph grows down and
+> may overlap the text below; a justified paragraph is re-justified by the app (spacing may differ slightly from the
+> PDF's, as with A−); centred/right text stays centred/right and grows down; a one-line heading first grows on one
+> line (its editor box already reaches the next text or the page edge) and wraps only after that; a bullet list's dots
+> use the existing rule, indent stays, item gaps follow A+/A−, and a list that would hit the next section is stopped at **Done** by the existing *"No
+> room — the next section is in the way"*; a table cell wraps inside its width and may overlap the row below; an "Add
+> text" box behaves like a paragraph; smaller text leaves the box shorter. Download, re-editing, saved files,
+> Done/Cancel/Undo, translation, chat, other boxes and pages: unaffected.
+>
+> *Checks for Revision 1:*
+> - `git diff main -- src/lib/edit/paragraphLayout.ts src/lib/edit/buildTextEdits.ts src/components/OverlayLayer.tsx`
+>   is empty (or each remaining line is reported and justified).
+> - The corner gives the same result as A+/A− to the same size: same text, wrapping, height and saved edit.
+> - Width unchanged after a corner drag; down/right bigger, up/left smaller with equal weight; back to start = start
+>   size; mixed sizes keep proportions; limits hold; Cancel = no change.
+> - On every test PDF: edit → corner bigger → **Done** → download → reopen → edit again; the same smaller. A bullet
+>   list bigger until "No room" appears; a one-line heading grows on one line before wrapping.
+> - Full suite; typecheck; lint; build.
+>
+> *Verify (user) for Revision 1* at `http://127.0.0.1:5173`:
+> 1. Healing p3 → **Edit text** → the paragraph → drag the corner **down** → the text gets bigger and the box grows
+>    **down**, same width; drag **up** → smaller, the box gets shorter.
+> 2. Drag **right** and **left** → the same, bigger and smaller.
+> 3. A heading → drag bigger → it grows on one line first.
+> 4. The Rahul résumé → a bullet list → bigger → the dots grow, the indent stays, the items re-wrap → **Done**.
+> 5. **Download** → reopen → edit a resized box again → it opens at its new size.
+> 6. Drag, then **Cancel** → nothing changed; the width handle and the move button still work.
+>
+> *The original task follows; Revision 1 overrides it where they differ.*
+
+**Revision 1 progress (2026-10-20, uncommitted).** The corner scales text sizes only, at a fixed box width; ordinary
+wrapping and automatic height take over. The superseded exact-row module/hooks and bullet save/indent extension were removed
+(recoverable copies retained under `tmp/task83/revision1/previous-build/`). `paragraphLayout.ts`, `buildTextEdits.ts` and
+`OverlayLayer.tsx` have an empty diff against `main`. Sixteen revised editor assertions cover size-control parity, equal drag
+axes, fixed width, mixed sizes, typing, Cancel and restoration. Before/after: all 208 ordinary assertion results unchanged;
+all eight captured artifacts, including four complete PDFs, byte-identical. The 47-file corpus yields 76 passed smaller/larger
+export/reopen checks across 38 text-bearing files; nine image-only files have no editable text. Browser checks confirm
+downward growth, fixed indentation, the bullet no-room guard and no-op Done after reopening. Corporate p18's existing
+25-versus-24-line failure remains unchanged. Final retest results and the separately rerun patch guard are in
+`TASK83_REPORT.md`. **Not committed; user verification and any merge remain separate.**
+
+**Fresh retest (2026-10-20):** combined suite plus isolated patch file: **1,771 passed, 1 unchanged baseline failure,
+80 skipped**. The only failure is Corporate p18's 25-versus-24-line check. The original patch-sweep timeout is resolved by
+the unchanged isolated rerun: **335/335 covers skipped, 0 painted patches, 0 refused pages**. All 76 resize round trips pass
+again; all eight regenerated scope artifacts remain byte-identical to baseline. Typecheck, lint and build pass. No new
+application changes, no commit. See `tmp/task83/revision1/retest/summary.json` and `TASK83_REPORT.md`.
+
+**The user's request (2026-10-19).** "In PowerPoint you get a diagonal cursor on the corner of the box. Drag it upwards
+diagonally → the text gets smaller; drag it downwards diagonally → the text gets bigger." *Bigger* means a larger font
+size — **not** a bolder weight. The user asked for this as a task for Codex.
+
+**Today** (read from the code, 2026-10-19 — `src/components/TextEditOverlay.tsx`):
+- **Width handle** — the small blue square on the right edge (`beginWidthDrag`): drag left/right → the text wraps more
+  or spreads out. Size unchanged.
+- **Move button** — the round blue button (`beginMoveDrag`, arrow keys move one pixel): drags the whole box.
+- **Height is automatic** (Task 10E: the box always grows to show all the text; a manual height handle was removed so
+  text is never hidden).
+- **A+ / A−** (`applyFontSize`): with no selection they change the box's size (`style.fontSizePt`); with a selection
+  they wrap it in a span with its own size. Limits `MIN_FONT_SIZE_PT = 4`, `MAX_FONT_SIZE_PT = 400`
+  (`src/lib/edit/fontSize.ts`).
+- When a box's style changes, its paragraphs are laid out afresh (`sameStyle` in `paragraphLayout.ts` /
+  `lineComposition.ts`): the PDF's own glyphs and row spacing are kept only for unchanged text — exactly what A−/A+
+  already do.
+
+**The change — a corner handle that resizes the text.**
+1. *The handle:* a small square at the **bottom-right corner** of the edit box frame (`visualFrame`), the same look as
+   the width handle, with a **diagonal cursor** (`cursor-nwse-resize`) and the label "Drag to resize text".
+2. *Drag:* **down-right → bigger, up-left → smaller**, live while dragging. The amount follows the drag along the
+   diagonal relative to the box's size (Codex chooses the exact formula; dragging back to the start returns to the
+   start size). **Arrow keys** on the focused handle change the size one step at a time, like the move button's
+   arrows (Shift = bigger steps).
+3. *What scales, all by the same factor:* the box's font size, **every size inside it** (words made bigger or smaller
+   with A+/A− on a selection keep their proportions), the **box width** — so the paragraph keeps the **same line
+   breaks**, like resizing a picture — and a bullet list's **marker indent and item spacing**. Weight, font, colour,
+   alignment and position do not change. Height stays automatic.
+4. *Limits:* no size goes below 4 pt or above 400 pt (the existing limits); when one piece reaches a limit the whole
+   box stops scaling in that direction, so the proportions never break.
+5. *Same as A−/A+ from there on:* the size readout shows the new size; **Cancel** discards the resize with the rest of
+   the edit; **Done** saves it as part of the one edit (one **Undo** step); the export draws the new size through the
+   existing path.
+
+**What it does not affect** (checked 2026-10-19):
+- Editing **without** touching the corner — nothing changes; the handle acts only when dragged.
+- The width handle, the move button, A+/A−, bold/italic/colour/font choice, Done/Cancel/Undo.
+- Translation (Task 79), chat and voice (Task 81 reads words, not sizes), saved files (the size is stored as A−/A+
+  store it today — no format change), other boxes, pages and PDFs.
+
+**What it does affect — only a box that is resized:**
+- The downloaded PDF has the new size (existing export path, as A−/A+).
+- The paragraph is redrawn by the app at the new size: like A− today, the PDF's own original letters for that
+  paragraph are not kept once its size changes; same font (Task 78), but a justified paragraph's word spacing may
+  differ slightly from the original. Untouched paragraphs are unaffected.
+- Bigger text can overlap what is below it (as A+ can today); for a bullet list the existing *"No room — the next
+  section is in the way"* still stops **Done**.
+
+**Checks**
+- *Scaling:* one factor scales the base size, every span size, the width, and bullet indent/spacing; the line breaks
+  are the same before and after on a plain paragraph, a mixed-size paragraph and a bullet list; the 4 pt / 400 pt
+  limits hold and keep the proportions; dragging back returns to the start size; Cancel leaves no change.
+- *Handle:* drag down-right → bigger, up-left → smaller; arrow keys step; the width handle and the move button
+  unchanged; height still automatic.
+- *Real PDFs:* on **every** test PDF in `tmp/` (at least Healing, Corporate, Ladakh, the Rahul résumé): edit →
+  resize smaller → **Done** → download → reopen → edit again; and the same with bigger. The reopened size equals the
+  saved size; no glyph doubling or missing text; untouched paragraphs byte-identical in the export.
+- *Unchanged elsewhere:* full suite; typecheck; lint; build.
+
+**Files that change**
+
+| File | Change |
+|---|---|
+| `src/components/TextEditOverlay.tsx` + test | The corner handle, its drag and keys (steps 1–2, 5) |
+| `src/lib/edit/scaleTextBox.ts` (name is Codex's choice) + test | One factor applied to size, spans, width and bullet spacing, with the limits (steps 3–4) |
+
+**Must not change:** the width handle, the move button, A+/A− behaviour, Task 10E's automatic height, export handlers,
+the saved-project format, text grouping, fonts and font matching (Task 78), Step 5d's rules for untouched text,
+translation, chat.
+
+**Verify (user)** at `http://127.0.0.1:5173`:
+1. **Edit text** → click a paragraph → a small square appears on its bottom-right corner; hovering shows the diagonal
+   cursor.
+2. Drag it **up-left** → the text gets smaller live, same line breaks → **Done** → it stays smaller.
+3. Drag another paragraph's corner **down-right** → bigger → **Done** → bigger.
+4. **Download** → the PDF shows both new sizes → reopen it → edit one of them again → it opens at its new size.
+5. A bullet list → drag the corner → markers and text shrink together.
+6. Drag, then **Cancel** → nothing changed. The width handle and the move button still work as before.
+
+**Land:** branch `corner-resize` from `main`. Commit: `Drag a corner to resize text, like PowerPoint (Task 83)`. Merge
+after the checks pass and the user's steps pass.
+
+---

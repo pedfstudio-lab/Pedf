@@ -13,6 +13,7 @@ import { detectRuleLines } from '@/lib/pdf/ruleLines';
 import { detectPageGraphicRegions } from '@/lib/pdf/shapeMarkers';
 import { extractTextRuns, groupRunsIntoBlocks } from '@/lib/pdf/textContent';
 import { TextEditOverlay } from './TextEditOverlay';
+import { wrapTextParagraphs } from '@/lib/edit/paragraphLayout';
 
 const task74Fixture = 'tmp/compress-tests/rishi-ilovepdf.pdf';
 const task74RealEnabled = process.env.TASK74_REAL === '1' && existsSync(task74Fixture);
@@ -954,6 +955,130 @@ describe('Task 74 Step 5c.1 measured baseline', () => {
       expect(outputs[1]).toEqual(outputs[0]);
     },
   );
+});
+
+
+describe('Task 83 revision 1 grows-down corner resize', () => {
+  function drag(handle: HTMLElement, dx: number, dy: number, back = false) {
+    handle.setPointerCapture = vi.fn();
+    fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientX: 300, clientY: 200, button: 0 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 300 + dx, clientY: 200 + dy }));
+    if (back) fireEvent(window, new MouseEvent('pointermove', { clientX: 300, clientY: 200 }));
+    fireEvent(window, new MouseEvent('pointerup'));
+  }
+
+  it.each([[100, 0, 30], [0, 100, 30], [-100, 0, 10], [0, -100, 10], [50, 50, 30]])(
+    'drag (%s, %s) changes size to %s pt with the same width', (dx, dy, size) => {
+      const onDone = vi.fn();
+      renderEditor(block('Heading', 24), 1, 0, { onDone });
+      const frame = screen.getByTestId('text-editor-frame');
+      const handle = screen.getByRole('button', { name: 'Drag to resize text' });
+      expect(handle.className).toContain('cursor-nwse-resize');
+      expect(Number.parseFloat(handle.style.top)).toBeCloseTo(Number.parseFloat(frame.style.top) + Number.parseFloat(frame.style.height) - 5);
+      drag(handle, dx!, dy!);
+      expect(Number((screen.getByRole('combobox', { name: 'Font size' }) as HTMLInputElement).value)).toBe(size);
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(onDone).toHaveBeenCalledOnce();
+      expect(onDone.mock.calls[0]![0]).toMatchObject({ style: { fontSizePt: size, bold: false }, width: 240, dx: 0, dy: -0 });
+    },
+  );
+
+  it.each(['paragraph', 'justify', 'center', 'right', 'heading', 'bullet'] as const)(
+    'matches the existing whole-box size control for %s, including the saved edit', kind => {
+      const source = kind === 'heading' ? block('One line heading', 24) : paragraph('First sentence continues', 'on its second line.');
+      const aligned = kind === 'justify' || kind === 'center' || kind === 'right'
+        ? { ...source, align: kind, alignLeftPt: 40, alignWidthPt: 240 } : source;
+      const measureTextWidth = (text: string) => text.length * 7;
+      const outputs: unknown[] = [];
+      for (const control of ['toolbar', 'corner']) {
+        const onDone = vi.fn();
+        const view = renderEditor(aligned, 1, 0, { onDone, measureTextWidth,
+          ...(kind === 'bullet' ? { bulletMode: { items: ['First sentence continues', 'on its second line.'],
+            indentPt: 20, itemSpacingPt: 6, maxHeightPt: 500 } } : {}) });
+        window.getSelection()?.removeAllRanges();
+        if (control === 'corner') {
+          fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to resize text' }), { key: 'ArrowDown', shiftKey: true });
+        } else {
+          fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '30' } });
+          fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+        }
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(onDone).toHaveBeenCalledOnce();
+        const next = onDone.mock.calls[0]![0];
+        const rows = wrapTextParagraphs(next, text => text.length * 7, aligned);
+        const built = buildTextBlockEdits(aligned, next, rows, 0);
+        outputs.push({ next, rows, edits: built.texts.map(edit => ({ ...edit, id: 'normalized-test-id' })) });
+        view.unmount();
+      }
+      expect(outputs[1]).toEqual(outputs[0]);
+    },
+  );
+
+  it('rewraps at the unchanged paragraph width and still wraps normally after typing', () => {
+    const onDone = vi.fn(), source = paragraph('alpha beta', 'gamma delta');
+    renderEditor(source, 1, 0, { onDone, measureTextWidth: text => text.length * 2 });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to resize text' }), { key: 'ArrowDown', shiftKey: true });
+    const editor = screen.getByRole('textbox');
+    const part = editor.querySelector('[data-pdf-paragraph]') ?? editor;
+    part.append(document.createTextNode(' added')); fireEvent.input(editor);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    const next = onDone.mock.calls[0]![0];
+    expect(next.width).toBe(240);
+    expect(next.text).toBe('alpha beta gamma delta added');
+    expect(next.style.fontSizePt).toBe(30);
+    expect(next).not.toHaveProperty('cornerParagraphLayout');
+    const measure = (text: string) => text.length * next.style.fontSizePt / 2;
+    const rows = wrapTextParagraphs(next, measure, source);
+    expect(rows.map(row => row.text)).toEqual(['alpha beta gamma', 'delta added']);
+  });
+
+  it('scales explicit selected-word sizes proportionally, without changing width', () => {
+    const onDone = vi.fn();
+    renderEditor(block('Normal Large', 24), 1, 0, { onDone });
+    const editor = screen.getByRole('textbox');
+    editor.innerHTML = 'Normal <span data-font-size-pt="40" style="font-size:40px;font-weight:bold">Large</span>';
+    const range = document.createRange(); range.selectNodeContents(editor.lastChild!);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to resize text' }), { key: 'ArrowUp', shiftKey: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]![0]).toMatchObject({ style: { fontSizePt: 10 }, width: 240,
+      spans: [{ text: 'Normal ', bold: false }, { text: 'Large', fontSizePt: 20, bold: true }] });
+  });
+
+  it('dragging back restores exact source markup and Done is a no-op', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor(paragraph('First sentence continues', 'on its second line.'), 1, 0, { onDone, onCancel });
+    const editor = screen.getByRole('textbox'), html = editor.innerHTML;
+    drag(screen.getByRole('button', { name: 'Drag to resize text' }), 80, 50, true);
+    expect(editor.innerHTML).toBe(html);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled(); expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('Cancel discards a resize and keyboard arrows use 1pt / Shift 10pt steps', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor(block('Heading', 24), 1, 0, { onDone, onCancel });
+    const handle = screen.getByRole('button', { name: 'Drag to resize text' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect((screen.getByRole('combobox', { name: 'Font size' }) as HTMLInputElement).value).toBe('21');
+    fireEvent.keyDown(handle, { key: 'ArrowDown', shiftKey: true });
+    expect((screen.getByRole('combobox', { name: 'Font size' }) as HTMLInputElement).value).toBe('31');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onDone).not.toHaveBeenCalled(); expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('keeps bullet indent fixed and uses the existing A+/A− item spacing', () => {
+    const onDone = vi.fn();
+    renderEditor(paragraph('First item', 'Second item'), 1, 0, { onDone,
+      bulletMode: { items: ['First item', 'Second item'], indentPt: 20, itemSpacingPt: 6, maxHeightPt: 500 } });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to resize text' }), { key: 'ArrowUp', shiftKey: true });
+    const items = screen.getByRole('textbox').children;
+    expect((items[0] as HTMLElement).style.paddingLeft).toBe('20px');
+    expect((items[1] as HTMLElement).style.marginTop).toBe('3px');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]![0]).toMatchObject({ width: 240, style: { fontSizePt: 10 } });
+    expect(onDone.mock.calls[0]![0]).not.toHaveProperty('resizedBullet');
+  });
 });
 
 describe('TextEditOverlay width measurement', () => {
