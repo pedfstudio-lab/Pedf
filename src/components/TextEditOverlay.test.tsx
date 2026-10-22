@@ -1604,3 +1604,41 @@ describe.skipIf(!task74RealEnabled)('TextEditOverlay Task 74 real re-edit box', 
     }
   }, 60_000);
 });
+
+describe('the move handle in the toolbar', () => {
+  function dragFrom(handle: HTMLElement, dx: number, dy: number) {
+    handle.setPointerCapture = vi.fn();
+    fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientX: 300, clientY: 200, button: 0 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 300 + dx, clientY: 200 + dy }));
+    fireEvent(window, new MouseEvent('pointerup'));
+  }
+  function moved(handleName: string, action: (handle: HTMLElement) => void) {
+    const onDone = vi.fn();
+    const view = renderEditor(block('Heading', 24), 1, 0, { onDone });
+    const handle = screen.getByRole('button', { name: handleName });
+    act(() => action(handle));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    const result = onDone.mock.calls[0]?.[0];
+    view.unmount();
+    return result;
+  }
+
+  it('sits in the formatting toolbar and moves the box exactly like the round handle', () => {
+    renderEditor(block('Heading', 24), 1, 0);
+    const toolbar = screen.getByRole('toolbar', { name: 'Text formatting' });
+    expect(toolbar.querySelector('button[aria-label="Move text box"]')).toBeTruthy();
+    cleanup();
+
+    const fromToolbar = moved('Move text box', handle => dragFrom(handle, -40, 25));
+    const fromRound = moved('Drag to move', handle => dragFrom(handle, -40, 25));
+    expect(fromToolbar).toEqual(fromRound);
+    expect(fromToolbar).toMatchObject({ dx: -40, dy: -25 });
+  });
+
+  it('nudges with the arrow keys like the round handle', () => {
+    const fromToolbar = moved('Move text box', handle => fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true }));
+    const fromRound = moved('Drag to move', handle => fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true }));
+    expect(fromToolbar).toEqual(fromRound);
+    expect(fromToolbar).toMatchObject({ dx: -10 });
+  });
+});

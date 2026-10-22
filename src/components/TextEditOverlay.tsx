@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   ClipboardEvent as ReactClipboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { PdfRect, Rgb, TextEdit, TextStyle, PositionedTextPiece, TextParagraphLayout } from '@/lib/export/types';
@@ -644,6 +645,20 @@ export function TextEditOverlay({
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
     window.addEventListener('pointercancel', stop);
+  };
+
+  /** Arrow keys on either move handle nudge the box one pixel; Shift moves ten. */
+  const nudgeMove = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const step = event.shiftKey ? 10 : 1;
+    const delta = {
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
+      ArrowUp: { x: 0, y: -step },
+      ArrowDown: { x: 0, y: step },
+    }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    setMoveOffset((value) => ({ x: value.x + delta.x, y: value.y + delta.y }));
   };
 
   const bulletRoomPt = bulletMode
@@ -1310,6 +1325,18 @@ export function TextEditOverlay({
           }
         }}
       >
+        {/* The toolbar always stays on the page, so this handle is reachable even when the box is dragged off it. */}
+        <button
+          type="button"
+          aria-label="Move text box"
+          title="Hold and drag to move the box; arrow keys move one pixel"
+          onPointerDown={beginMoveDrag}
+          onKeyDown={nudgeMove}
+          className="cursor-move touch-none rounded px-2 py-1 text-base leading-none text-neutral-700 hover:bg-neutral-100"
+        >
+          ✥
+        </button>
+        <span aria-hidden="true" className="h-5 w-px bg-neutral-200" />
         {bulletMode && (
           <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
         )}
@@ -1517,18 +1544,7 @@ export function TextEditOverlay({
         aria-label="Drag to move"
         title="Drag to move; arrow keys move one pixel"
         onPointerDown={beginMoveDrag}
-        onKeyDown={(event) => {
-          const step = event.shiftKey ? 10 : 1;
-          const delta = {
-            ArrowLeft: { x: -step, y: 0 },
-            ArrowRight: { x: step, y: 0 },
-            ArrowUp: { x: 0, y: -step },
-            ArrowDown: { x: 0, y: step },
-          }[event.key];
-          if (!delta) return;
-          event.preventDefault();
-          setMoveOffset((value) => ({ x: value.x + delta.x, y: value.y + delta.y }));
-        }}
+        onKeyDown={nudgeMove}
         style={{ left: visualFrame.left + moveHandleOffset.left, top: visualFrame.top + moveHandleOffset.top }}
         className="absolute z-20 h-4 w-4 cursor-move rounded-full border border-white bg-blue-600 text-[10px] font-bold leading-none text-white shadow hover:bg-blue-700"
       >
