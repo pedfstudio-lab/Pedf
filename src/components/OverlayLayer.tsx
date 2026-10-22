@@ -1469,6 +1469,7 @@ export function OverlayLayer({
             pageWidthPt={viewport.width / (zoom * dpr)}
             pageSizePx={{ width: viewport.width / dpr, height: viewport.height / dpr }}
             backgroundColor="transparent"
+            boxMinHeightPt={block.rect.h}
             verticalTargets={verticalTargets}
             horizontalTargets={horizontalTargets}
             onMoveStateChange={setMoveGuideState}

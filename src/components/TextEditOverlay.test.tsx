@@ -70,6 +70,7 @@ interface RenderEditorOptions {
   readonly onCancel?: ReturnType<typeof vi.fn>;
   readonly measureTextWidth?: (line: string) => number;
   readonly scaleInlineSizes?: boolean;
+  readonly boxMinHeightPt?: number;
 }
 
 function renderEditor(
@@ -97,6 +98,7 @@ function renderEditor(
       bulletMode={options.bulletMode}
       measureTextWidth={options.measureTextWidth}
       scaleInlineSizes={options.scaleInlineSizes}
+      boxMinHeightPt={options.boxMinHeightPt}
       onMoveStateChange={vi.fn()}
       onDone={options.onDone ?? vi.fn()}
       onCancel={options.onCancel ?? vi.fn()}
@@ -1640,5 +1642,64 @@ describe('the move handle in the toolbar', () => {
     const fromRound = moved('Drag to move', handle => fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true }));
     expect(fromToolbar).toEqual(fromRound);
     expect(fromToolbar).toMatchObject({ dx: -10 });
+  });
+});
+
+describe('Add Text keeps the box the user drew', () => {
+  const drawn: TextBlock = {
+    pageIndex: 0, text: '', rect: { x: 40, y: 400, w: 300, h: 180 }, topBaselineY: 566,
+    lineHeightPt: 16.8, style: block('x', 14).style, lines: [],
+  };
+  function dragHandle(handle: HTMLElement, dy: number) {
+    handle.setPointerCapture = vi.fn();
+    fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientX: 200, clientY: 300, button: 0 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 200, clientY: 300 + dy }));
+    fireEvent(window, new MouseEvent('pointerup'));
+  }
+
+  it('shows the whole drawn box, with a height handle on its bottom edge', () => {
+    renderEditor(drawn, 1, 0, { boxMinHeightPt: 180 });
+    const frame = screen.getByTestId('text-editor-frame');
+    expect(frame.style.width).toBe('300px');
+    expect(frame.style.height).toBe('180px');
+    const heightHandle = screen.getByRole('button', { name: 'Drag to change box height' });
+    expect(heightHandle.style.top).toBe('175px');
+    expect(heightHandle.style.left).toBe('145px');
+    expect(screen.getByRole('button', { name: 'Drag to resize text' }).style.top).toBe('175px');
+  });
+
+  it('never makes the box shorter than its text, and saves the box height', () => {
+    const onDone = vi.fn();
+    renderEditor(drawn, 1, 0, { boxMinHeightPt: 180, onDone });
+    const editor = screen.getByRole('textbox');
+    editor.append(document.createTextNode('Added words'));
+    fireEvent.input(editor);
+    dragHandle(screen.getByRole('button', { name: 'Drag to change box height' }), -500);
+    const frame = screen.getByTestId('text-editor-frame');
+    expect(Number.parseFloat(frame.style.height)).toBeGreaterThan(0);
+    expect(Number.parseFloat(frame.style.height)).toBeLessThan(180);
+    dragHandle(screen.getByRole('button', { name: 'Drag to change box height' }), 100);
+    const shown = Number.parseFloat(frame.style.height);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDone.mock.calls[0]?.[0].height).toBeCloseTo(shown, 5);
+  });
+
+  it('reopens at the saved size, and an unchanged Done changes nothing', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    const saved: TextEdit = { id: 'added', kind: 'text', origin: 'free', boxId: 'box', pageIndex: 0, z: 2,
+      text: 'Saved words', boxText: 'Saved words', boxHeight: 120, style: drawn.style,
+      rect: { x: 40, y: 566, w: 300, h: 14 } };
+    renderEditor({ ...drawn, text: 'Saved words', rect: { x: 40, y: 460, w: 300, h: 120 } }, 1, 0,
+      { boxMinHeightPt: 120, existing: [saved], onDone, onCancel });
+    expect(screen.getByTestId('text-editor-frame').style.height).toBe('120px');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the PDF’s own text boxes as they were: no height handle', () => {
+    renderEditor(block('Heading', 24), 1, 0);
+    expect(screen.queryByRole('button', { name: 'Drag to change box height' })).toBeNull();
   });
 });

@@ -383,6 +383,8 @@ interface TextEditOverlayProps {
   readonly externalError?: string;
   /** Date ordinals retain their relative size when the whole date's size changes. */
   readonly scaleInlineSizes?: boolean;
+  /** Add Text only: the drawn (or saved) box height. The box shows at least this tall, never shorter than its text. */
+  readonly boxMinHeightPt?: number;
   onMoveStateChange(state: MoveGuideState | null): void;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
@@ -409,6 +411,7 @@ export function TextEditOverlay({
   measureTextWidth,
   externalError,
   scaleInlineSizes = false,
+  boxMinHeightPt,
   onMoveStateChange,
   onDone,
   onCancel,
@@ -548,6 +551,9 @@ export function TextEditOverlay({
   const initialHeight = Math.max(existing?.[0]?.boxHeight ?? block.rect.h, MIN_BOX_HEIGHT);
   const [width, setWidth] = useState(initialWidth);
   const [height, setHeight] = useState(initialHeight);
+  // Add Text: the box the user drew (or last left), never shorter than its text.
+  const [boxHeight, setBoxHeight] = useState(boxMinHeightPt ?? 0);
+  const freeBox = boxMinHeightPt !== undefined;
   const [moveOffset, setMoveOffset] = useState({ x: 0, y: 0 });
   const [toolbarRef, toolbarSize] = useElementSize<HTMLDivElement>();
   const [errorRef, errorSize] = useElementSize<HTMLDivElement>();
@@ -575,6 +581,26 @@ export function TextEditOverlay({
 
     const move = (moveEvent: PointerEvent) => {
       setWidth(Math.max(MIN_BOX_WIDTH, startWidth + (moveEvent.clientX - startX) / zoom));
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  };
+
+  /** Add Text: drag the bottom edge to make the box taller or shorter, never shorter than its text. */
+  const beginHeightDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = Math.max(boxHeight, height);
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const move = (moveEvent: PointerEvent) => {
+      setBoxHeight(Math.max(height, startHeight + (moveEvent.clientY - startY) / zoom));
     };
     const stop = () => {
       window.removeEventListener('pointermove', move);
@@ -690,7 +716,7 @@ export function TextEditOverlay({
       } : {}),
       ...(paragraphMode && !existing?.length && width === initialWidth ? { preserveSourceWrapping: true } : {}),
       width,
-      height,
+      height: freeBox ? Math.max(height, boxHeight) : height,
       dx: moveOffset.x / zoom,
       dy: -moveOffset.y / zoom,
       boxLeftPt: boxLeftPt + moveOffset.x / zoom,
@@ -710,7 +736,7 @@ export function TextEditOverlay({
         ...((presented ? presented.spans : initialSpans) ? { spans: presented ? presented.spans : initialSpans } : {}),
         ...((presented ? presented.paragraphs : initialParagraphs) ? { paragraphs: presented ? presented.paragraphs : initialParagraphs } : {}),
         width: initialWidth,
-        height: initialRenderedHeightRef.current,
+        height: freeBox ? Math.max(initialRenderedHeightRef.current, boxMinHeightPt ?? 0) : initialRenderedHeightRef.current,
         dx: 0,
         dy: 0,
         ...(usesAlignmentColumn ? {
@@ -742,7 +768,14 @@ export function TextEditOverlay({
     width: width * zoom,
     height: height * zoom,
   };
-  const visualFrame = inkFrame ?? { left: 0, top: 0, width: EMPTY_FRAME_WIDTH_PX * zoom, height: style.fontSizePt * zoom };
+  const textFrame = inkFrame ?? { left: 0, top: 0, width: EMPTY_FRAME_WIDTH_PX * zoom, height: style.fontSizePt * zoom };
+  // Add Text shows the whole box it was drawn as; PDF text keeps the frame around its ink.
+  const visualFrame = freeBox ? {
+    left: 0,
+    top: 0,
+    width: Math.max(width * zoom, textFrame.left + textFrame.width),
+    height: Math.max(boxHeight * zoom, height * zoom, textFrame.top + textFrame.height),
+  } : textFrame;
   const editorFrame: ScreenRect = {
     left: layoutFrame.left + visualFrame.left,
     top: layoutFrame.top + visualFrame.top,
@@ -1523,6 +1556,15 @@ export function TextEditOverlay({
         style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height / 2 - 5 }}
         className="absolute z-10 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
       />
+      {freeBox && (
+        <button
+          type="button"
+          aria-label="Drag to change box height"
+          onPointerDown={beginHeightDrag}
+          style={{ left: visualFrame.left + visualFrame.width / 2 - 5, top: visualFrame.top + visualFrame.height - 5 }}
+          className="absolute z-10 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+        />
+      )}
       <button
         type="button"
         aria-label="Drag to resize text"
