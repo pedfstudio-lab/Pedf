@@ -1093,9 +1093,10 @@ export function OverlayLayer({
         const plan = ordinalByBlock.get(target);
         const owner = plan?.source ?? target;
         const existing = findExisting(owner);
-        const actionText = existing && existing.texts.length > 0
-          ? sourceText(existing.texts)
-          : plan?.editor.text ?? target.text;
+        // An edited box is clicked where its text is now (the re-edit target below);
+        // its original place would otherwise stay clickable after a move.
+        if (existing && existing.texts.length > 0) return null;
+        const actionText = plan?.editor.text ?? target.text;
         const area = clickTargetArea(rect);
         return (
           <button

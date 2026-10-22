@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { PageViewport, PDFPageProxy } from 'pdfjs-dist';
 import type { Edit, TextEdit } from '@/lib/export/types';
+import { pdfRectToScreenRect } from '@/lib/export/coordinates';
 import type { ScreenRect } from '@/lib/export/coordinates';
 import type { SnapTarget } from '@/lib/edit/moveSnap';
 import type { TextBlock } from '@/lib/pdf/textContent';
@@ -533,6 +534,29 @@ describe('OverlayLayer text click targets', () => {
     const smallTarget = screen.getByRole('button', { name: /^Text actions: Small$/ });
     const point = centreOf(smallTarget);
     expect(targetAt(point.x, point.y)).toBe(smallTarget);
+  });
+
+  it('leaves nothing clickable at the original place of a moved edit', async () => {
+    const source: TextBlock = {
+      ...textBlock,
+      text: 'Moved paragraph',
+      rect: { x: 300, y: 600, w: 160, h: 20 },
+      topBaselineY: 600,
+    };
+    const moved = buildTextBlockEdits(source, {
+      text: 'Moved paragraph', style, width: 160, height: 20, dx: -200, dy: 100,
+    }, ['Moved paragraph'], 1, { x: source.rect.x, topBaselineY: source.rect.y });
+    mocks.blocks = [source];
+    mocks.edits = [...moved.covers, ...moved.texts];
+
+    renderOverlay();
+
+    const edited = await screen.findByRole('button', { name: /^Text actions for edited text: Moved paragraph$/ });
+    expect(Number.parseFloat(edited.style.left)).toBeCloseTo(100, 5);
+    expect(screen.queryByRole('button', { name: /^Text actions: Moved paragraph$/ })).toBeNull();
+    // The old spot is empty: nothing there opens the editor or lights up.
+    const old = pdfRectToScreenRect(source.rect, viewport, 1);
+    expect(targetAt(old.left + old.width / 2, old.top + old.height / 2)).toBeUndefined();
   });
 
   it('keeps a divider above an equal-area text target', async () => {
