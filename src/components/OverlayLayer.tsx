@@ -44,6 +44,8 @@ import {
 } from '@/lib/edit/buildLineEdits';
 import { extractTextRuns, groupRunsIntoBlocks, preserveEditedBlockPartitions } from '@/lib/pdf/textContent';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
+import { attachedOrdinals, hasInlineOrdinal, ordinalRemovalCovers } from '@/lib/pdf/attachedOrdinals';
+import type { OrdinalEditorPlan } from '@/lib/pdf/attachedOrdinals';
 import {
   availableBulletListHeight,
   bulletEditorBlock,
@@ -359,6 +361,7 @@ export function OverlayLayer({
   const [activeBlock, setActiveBlock] = useState<TextBlock | null>(null);
   const [activeBulletList, setActiveBulletList] = useState<BulletList | null>(null);
   const [activeExisting, setActiveExisting] = useState<ExistingBlock>();
+  const [activeOrdinals, setActiveOrdinals] = useState<OrdinalEditorPlan>();
   const [commitPending, setCommitPending] = useState(false);
   const [bulletCommitError, setBulletCommitError] = useState<string>();
   const [popoverTarget, setPopoverTarget] = useState<PopoverTarget | null>(null);
@@ -378,6 +381,7 @@ export function OverlayLayer({
 
   const closeTextEditor = useCallback(() => {
     setActiveBlock(null); setActiveBulletList(null); setActiveExisting(undefined);
+    setActiveOrdinals(undefined);
     setBulletCommitError(undefined); setCommitPending(false);
   }, []);
   useEffect(() => {
@@ -463,6 +467,8 @@ export function OverlayLayer({
       })
     ));
   }, [sourceBlocks, legacyBlocks, pageCoverEdits, ruleLines]);
+  const ordinalPlans = useMemo(() => attachedOrdinals(blocks, runs), [blocks, runs]);
+  const ordinalByBlock = useMemo(() => new Map(ordinalPlans.flatMap(plan => plan.members.map(block => [block, plan] as const))), [ordinalPlans]);
   const bulletLists = useMemo(
     () => blocks
       .map((block) => detectBulletListFromRegions(block, imageRegions, shapeMarkerRegions))
@@ -616,13 +622,22 @@ export function OverlayLayer({
     const existing = list ? findExistingBulletList(list) : findExisting(block);
     return textPreviewSelection(block, existing, list, extendCoverToSourceInk);
   };
-  const warmBlock = (block:TextBlock,list?:BulletList) => preview?.warm(selectionFor(block,list));
+  const editorSelectionFor = (block: TextBlock, list?: BulletList): PagePreviewSelection => {
+    const plan = !list ? ordinalByBlock.get(block) : undefined;
+    if (!plan) return selectionFor(block, list);
+    const existing = findExisting(plan.source);
+    const selection = textPreviewSelection(plan.source, existing, undefined, extendCoverToSourceInk);
+    return existing ? selection : { ...selection, key: `${selection.key}:ordinals`,
+      transientEdits: ordinalRemovalCovers(plan, selection.transientEdits),
+      paintSupported: selection.paintSupported && plan.originals.every(run => run.style.colorKnown !== false) };
+  };
+  const warmBlock = (block:TextBlock,list?:BulletList) => preview?.warm(editorSelectionFor(block,list));
 
   const activeCoverGeometry = useMemo(() => {
     if (!activeBlock) return [];
     const covers = activeBulletList
       ? [coverRectForBulletList(activeBulletList)]
-      : coverRectsForTextBlock(activeBlock);
+      : activeOrdinals ? activeOrdinals.members.flatMap(coverRectsForTextBlock) : coverRectsForTextBlock(activeBlock);
     return covers.map((cover, index) => {
       const fontSizePt = activeBulletList
         ? activeBulletList.block.style.fontSizePt
@@ -635,7 +650,7 @@ export function OverlayLayer({
         fontSizePt,
       };
     });
-  }, [activeBlock, activeBulletList, measureInkExtent]);
+  }, [activeBlock, activeBulletList, activeOrdinals, measureInkExtent]);
   const activeCoverRects = useMemo(
     () => activeCoverGeometry.map(({ sourceRect }) => sourceRect),
     [activeCoverGeometry],
@@ -779,7 +794,7 @@ export function OverlayLayer({
 
     const pageWidth = viewport.width / dpr;
     const pageHeight = viewport.height / dpr;
-    const activeSource = activeBulletList?.sourceBlock ?? (
+    const activeSource = activeOrdinals?.source ?? activeBulletList?.sourceBlock ?? (
       activeBlock
         ? blocks.find((block) => (
             block === activeBlock ||
@@ -793,7 +808,7 @@ export function OverlayLayer({
       rect: pdfRectToScreenRect(block.rect, viewport, dpr),
     }));
     const otherRects = blockRects.filter(({ block }) => (
-      !activeSource || (block !== activeSource && !sameRect(block.rect, activeSource.rect))
+      !activeOrdinals?.members.includes(block) && (!activeSource || (block !== activeSource && !sameRect(block.rect, activeSource.rect)))
     ));
     const contentLeft = blockRects.length > 0
       ? Math.min(...blockRects.map(({ rect }) => rect.left))
@@ -827,6 +842,7 @@ export function OverlayLayer({
   }, [
     activeBlock,
     activeBulletList,
+    activeOrdinals,
     activeSnapLeft,
     activeSnapTop,
     blocks,
@@ -1074,10 +1090,12 @@ export function OverlayLayer({
         if (!target) return null;
         const rect = pdfRectToScreenRect(target.rect, viewport, dpr);
         const labelText = target.text.replace(/\s+/g, ' ').trim();
-        const existing = findExisting(target);
+        const plan = ordinalByBlock.get(target);
+        const owner = plan?.source ?? target;
+        const existing = findExisting(owner);
         const actionText = existing && existing.texts.length > 0
           ? sourceText(existing.texts)
-          : target.text;
+          : plan?.editor.text ?? target.text;
         const area = clickTargetArea(rect);
         return (
           <button
@@ -1092,7 +1110,7 @@ export function OverlayLayer({
               setActiveRuleLine(null);
               setActiveBlock(null);
               setActiveBulletList(null);
-              setPopoverTarget({ block: target, text: actionText, screenRect: rect });
+              setPopoverTarget({ block: owner, text: actionText, screenRect: rect });
             }}
             className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
             style={{
@@ -1187,6 +1205,7 @@ export function OverlayLayer({
         const list = bulletLists.find((entry) => entry.sourceBlock === block);
         const target = list ? bulletListHeadingBlock(list) : block;
         if (!target) return null;
+        if (ordinalByBlock.has(target) && ordinalByBlock.get(target)!.source !== target) return null;
         const existing = findExisting(target);
         if (!existing || existing.texts.length === 0) return null;
         const rect = pdfRectToScreenRect(
@@ -1231,13 +1250,15 @@ export function OverlayLayer({
             translation?.showOriginal();
             setActiveExisting(popoverTarget.bulletList ? findExistingBulletList(popoverTarget.bulletList) : findExisting(popoverTarget.block));
             setCommitPending(false);
-            preview?.begin(selectionFor(popoverTarget.block,popoverTarget.bulletList),closeTextEditor);
+            const plan = !popoverTarget.bulletList ? ordinalByBlock.get(popoverTarget.block) : undefined;
+            setActiveOrdinals(plan);
+            preview?.begin(editorSelectionFor(popoverTarget.block,popoverTarget.bulletList),closeTextEditor);
             setActiveBulletList(popoverTarget.bulletList ?? null);
             setBulletCommitError(undefined);
             setActiveBlock(
               popoverTarget.bulletList
                 ? bulletEditorBlock(popoverTarget.bulletList)
-                : popoverTarget.block,
+                : plan?.editor ?? popoverTarget.block,
             );
             setPopoverTarget(null);
           }}
@@ -1322,11 +1343,13 @@ export function OverlayLayer({
             <TextEditOverlay
               key={`${activeBlock.pageIndex}:${activeBlock.rect.x}:${activeBlock.rect.y}:${activeBlock.text}`}
               block={activeBlock}
-              blocks={blocks}
+              blocks={activeOrdinals ? blocks.filter(candidate => !activeOrdinals.members.includes(candidate)) : blocks}
               toolbarObstacles={blocks.filter((candidate) => (
+                !activeOrdinals?.members.includes(candidate) &&
                 candidate !== activeBlock && !containsRect(fallback, candidate.rect)
               )).map((candidate) => pdfRectToScreenRect(candidate.rect, viewport, dpr))}
               existing={existing?.texts}
+              scaleInlineSizes={Boolean(activeOrdinals) || hasInlineOrdinal(activeBlock)}
               screenRect={screenRect}
               topCorrectionPx={topCorrectionPx}
               expectedBaselinePx={pdfToScreen(viewport, {
@@ -1405,7 +1428,9 @@ export function OverlayLayer({
                   base,
                   currentLines,
                 );
-                const covers = built.covers.map((cover, index) => (
+                const physicalCovers = activeOrdinals ? ordinalRemovalCovers(activeOrdinals,
+                  buildTextBlockEdits(activeOrdinals.source, next, [], nextZ).covers, built.texts) : built.covers;
+                const covers = physicalCovers.map((cover, index) => (
                   extendCoverToSourceInk(
                     cover,
                     activeBlock.lines[index]?.style.fontSizePt ?? activeBlock.style.fontSizePt,
@@ -1417,7 +1442,7 @@ export function OverlayLayer({
                   existing
                     ? [...existing.covers.map((edit) => edit.id), ...existing.texts.map((edit) => edit.id)]
                     : [],
-                  [...covers, ...built.texts],
+                  [...covers, ...built.texts.map((text, index) => activeOrdinals ? { ...text, z: nextZ + covers.length + index } : text)],
                 );
                 if (!cleanActive) closeTextEditor();
               }}

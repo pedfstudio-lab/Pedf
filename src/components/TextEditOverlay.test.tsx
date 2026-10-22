@@ -69,6 +69,7 @@ interface RenderEditorOptions {
   readonly onDone?: ReturnType<typeof vi.fn>;
   readonly onCancel?: ReturnType<typeof vi.fn>;
   readonly measureTextWidth?: (line: string) => number;
+  readonly scaleInlineSizes?: boolean;
 }
 
 function renderEditor(
@@ -95,6 +96,7 @@ function renderEditor(
       horizontalTargets={[]}
       bulletMode={options.bulletMode}
       measureTextWidth={options.measureTextWidth}
+      scaleInlineSizes={options.scaleInlineSizes}
       onMoveStateChange={vi.fn()}
       onDone={options.onDone ?? vi.fn()}
       onCancel={options.onCancel ?? vi.fn()}
@@ -1078,6 +1080,48 @@ describe('Task 83 revision 1 grows-down corner resize', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onDone.mock.calls[0]![0]).toMatchObject({ width: 240, style: { fontSizePt: 10 } });
     expect(onDone.mock.calls[0]![0]).not.toHaveProperty('resizedBullet');
+  });
+});
+
+describe('Task 84 small inline date letters', () => {
+  function date() {
+    const value = paragraph('23rd September');
+    return { ...value, text: '23rd September', lines: [{ ...value.lines[0]!, runs: [
+      { pageIndex: 0, text: '23', style, rect: { x: 40, y: 680, w: 20, h: 20 } },
+      { pageIndex: 0, text: 'rd', style: { ...style, fontSizePt: 12 }, rect: { x: 60, y: 680, w: 10, h: 12 } },
+      { pageIndex: 0, text: 'September', style, rect: { x: 75, y: 680, w: 90, h: 20 } },
+    ] }] };
+  }
+  it('unchanged Done is still a no-op with the small ordinal', () => {
+    const onDone = vi.fn(), onCancel = vi.fn();
+    renderEditor(date(), 1, 0, { onDone, onCancel, scaleInlineSizes: true });
+    expect(screen.getByRole('textbox').textContent).toBe('23rd September');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).not.toHaveBeenCalled(); expect(onCancel).toHaveBeenCalledOnce();
+  });
+  it.each(['size', 'corner'])('keeps the small span proportional through the %s control', control => {
+    const onDone = vi.fn();
+    renderEditor(date(), 1, 0, { onDone, scaleInlineSizes: true });
+    window.getSelection()?.removeAllRanges();
+    if (control === 'corner') {
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to resize text' }), { key: 'ArrowDown', shiftKey: true });
+    } else {
+      fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '30' } });
+      fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]![0]).toMatchObject({ style: { fontSizePt: 30 },
+      spans: expect.arrayContaining([expect.objectContaining({ text: 'rd', fontSizePt: 18 })]) });
+  });
+  it('keeps the existing non-date whole-box size behavior unchanged', () => {
+    const onDone = vi.fn();
+    renderEditor(date(), 1, 0, { onDone });
+    window.getSelection()?.removeAllRanges();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Font size' }), { target: { value: '30' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Font size' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone.mock.calls[0]![0]).toMatchObject({ style: { fontSizePt: 30 },
+      spans: expect.arrayContaining([expect.objectContaining({ text: 'rd', fontSizePt: 12 })]) });
   });
 });
 

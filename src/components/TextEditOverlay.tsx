@@ -380,6 +380,8 @@ interface TextEditOverlayProps {
   /** Test seam for deterministic line-width measurements; production uses canvas. */
   readonly measureTextWidth?: (line: string) => number;
   readonly externalError?: string;
+  /** Date ordinals retain their relative size when the whole date's size changes. */
+  readonly scaleInlineSizes?: boolean;
   onMoveStateChange(state: MoveGuideState | null): void;
   onDone(next: NextTextEdit): void;
   onCancel(): void;
@@ -405,6 +407,7 @@ export function TextEditOverlay({
   bulletMode,
   measureTextWidth,
   externalError,
+  scaleInlineSizes = false,
   onMoveStateChange,
   onDone,
   onCancel,
@@ -1121,6 +1124,12 @@ export function TextEditOverlay({
     const editable = editableRef.current;
     const range = editableRange();
     if (!editable || !range || range.collapsed) {
+      if (scaleInlineSizes && editable) {
+        const start = captureResize();
+        if (start) applyCornerScale(start, fontSizePt / start.style.fontSizePt);
+        editable.focus({ preventScroll: true });
+        return;
+      }
       setStyle((value) => ({ ...value, fontSizePt }));
       setSelectionStyle((value) => ({ ...value, fontSizePt }));
       editable?.focus({ preventScroll: true });

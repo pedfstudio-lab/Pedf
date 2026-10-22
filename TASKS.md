@@ -15849,3 +15849,102 @@ translation, chat.
 after the checks pass and the user's steps pass.
 
 ---
+
+### Task 84 — "rd" and "th" stay with their date: small letters on the line, edited and moved with the number  ✅ DONE → merged to `main` (2026-10-22) — built by Codex on `date-ordinals`, tested by the user in Chrome ("it's working"); accepted with the two known visual limits below (Healing p1's baked-in shadow stays behind a moved date; Ladakh p1's edited date runs wider than its yellow label)   *(Medium · about 1 day)*
+
+**What the user hit (2026-10-21).** Ziro p1: *23ʳᵈ September – 28ᵗʰ September*. When the date is moved or changed, the
+raised **"rd"** and **"th"** do not move with it — they stay floating where they were.
+
+**The user's decision.** Put them **inside the date line as small letters sitting on the line** (not raised), right
+after their numbers — like the user's reference picture: *23rd September – 28th September* with "rd"/"th" smaller.
+Considered and not chosen: keeping them raised (needs raised text in the editor and the export — harder) and making
+them normal-size letters (loses the design's smaller size).
+
+**Today** (measured 2026-10-21 by `src/lib/pdf/superscriptProbe.local.test.ts`, `SUPERSCRIPT_PROBE=1`): every ordinal
+is **its own separate text box**, never part of its date — the app reads text of a different size and height as a
+separate piece:
+
+| PDF / page | Date | The ordinals |
+|---|---|---|
+| Ziro p1 (`tmp/text-doubling/ziro.pdf`) | 23**rd** September – 28**th** September | "rd", "th": 25 pt beside 41.6 pt numbers, raised 18 pt; each its own box |
+| Healing p1 | 20**th** June – 22**nd** June | "th", "nd": 21.4 pt beside 35.7 pt, raised 15 pt; own boxes |
+| Healing p17 | before 25**th** May; 26**th** May onwards | "th" ×2: 11.6 pt beside 19.4 pt; own boxes |
+| Ladakh p1 | 8**th** – 16**th** August | both "th" **drawn twice** (a shadow), grouped as one box "thth"; the numbers are drawn twice too |
+
+**The change.**
+1. *Which letters:* a piece whose text is exactly **st / nd / rd / th** (any case), **smaller** than the text just
+   to its left (Codex sets the threshold, e.g. at most 80 % of its size), **raised** above that text's baseline, and
+   starting right after a **number** (within about half a letter-width). A shadow copy — the same letters drawn again
+   at almost the same place — belongs to the same ordinal. Nothing else changes: footnote numbers¹, ®, ™, m² and all
+   other raised text stay as today.
+2. *Opening the editor:* when a box containing that number is opened (**Edit text** → click), its attached ordinals
+   join the box: inserted **right after their number**, **on the line**, as a span with the ordinal's **own size,
+   font and colour** from the PDF (the existing mixed-size support A+/A− use). The editor shows
+   *23rd September – 28th September*, "rd"/"th" small.
+3. *Clicking the tiny "rd"/"th" on the page* opens its date line — no separate tiny box.
+4. *Removal:* when the edited date is saved, the original raised ordinals — **and their shadow copies** — are removed
+   together with the date's original text, so nothing floats and nothing doubles.
+5. *An unchanged Done changes nothing:* opening the date and pressing **Done** without edits creates no edit and
+   leaves the raised originals exactly as they are (Task 72's rule).
+6. *After that, they are ordinary text in the line:* moving the box moves them; changing the text keeps them after
+   their number; the user can retype "rd" → "th"; A+/A− and the corner resize (Task 83) scale them with the line.
+7. *Saved, downloaded, re-edited* through the existing paths: the download draws them small on the line; a saved
+   date reopens with them already in the line; removed originals are never attached twice.
+8. *Dates that are never edited* stay exactly as in the PDF, still raised.
+
+**What it affects (the user asked):** nothing outside a date line that is edited. Not affected: unedited text, text
+grouping (the attaching happens only when the editor opens), paragraphs, bullets, tables, fonts (Task 78), saved
+projects (no new field — mixed sizes are already stored), translation, other pages and PDFs. Improved: chat (Task 81)
+reads an edited date as "23rd September" instead of a separate "rd".
+
+**Checks**
+- *Attachment:* Ziro p1 → "rd", "th"; Healing p1 → "th", "nd"; Healing p17 → both "th"; Ladakh p1 → both "th"
+  with their shadows. Across all 47 corpus PDFs, report every attachment found (file, page, number, ordinal) and confirm
+  there is no false one (only exact st/nd/rd/th pieces after a number).
+- *Editor:* the date opens as one box with small ordinal spans after their numbers; an unchanged Done creates zero
+  edits.
+- *Round trip on Ziro p1, Healing p1, Healing p17, Ladakh p1:* move the date → nothing left behind; change the text
+  → **Done** → download → the page's extracted text has each ordinal **exactly once** (none doubled, no raised leftover,
+  Ladakh's shadow included) → reopen → edit again → still small on the line; A+/A− and the corner scale them.
+- *Unchanged elsewhere:* untouched text byte-identical in the export; full suite; the real-PDF switches
+  (`TASK74_REAL`, `SPACING_SCOPE`, `TASK74_JUSTIFY`, `TASK80_REAL`) unchanged; typecheck; lint; build.
+
+**Files**
+
+| File | Change |
+|---|---|
+| `src/lib/pdf/attachedOrdinals.ts` (name is Codex's choice) + test | Which ordinals belong to which number, shadows included (step 1) |
+| `src/components/OverlayLayer.tsx` + test | Join them when the editor opens; their click opens the date line; remove them on save (steps 2–4) |
+| `src/components/TextEditOverlay.tsx` / `src/lib/edit/buildTextEdits.ts`, only if needed + tests | The initial small spans and the removal of the originals (steps 2, 4) |
+
+**Must not change:** text grouping (`textContent.ts`, `textUnits.ts`), fonts and font matching, the export handlers
+(mixed sizes already draw), the saved-project format, unedited dates, translation, chat.
+
+**Verify (user)** at `http://127.0.0.1:5173`:
+1. Ziro p1 → **Edit text** → click the date → the box shows *23rd September – 28th September*, "rd"/"th" small on the
+   line.
+2. Move the box → "rd"/"th" move with it; nothing is left behind.
+3. Change 23 → 24 and "rd" → "th" → **Done** → correct.
+4. Healing p1 (*20th June – 22nd June*) and Ladakh p1 (*8th – 16th August*, with its shadow) → edit → **Done** → no
+   double "th".
+5. **Export PDF** → each date shows its "rd"/"th" once → reopen → edit again → still small on the line.
+6. Open a date and press **Done** without changing anything → nothing changes; the raised originals stay.
+7. Click a tiny "th" on the page → the date line opens.
+
+**Implementation result (2026-10-21, uncommitted).** Attachment, small baseline spans, tiny-piece click ownership,
+physical shadow-copy removal, no-op Done, proportional date sizing and download/reopen are implemented. The 47-PDF,
+473-page survey found 43 logical ordinals (47 physical copies), all genuine dates; every match is published in
+`TASK84_ORDINAL_INVENTORY.md`. Ten real move/type export cases pass; browser checks cover all four required pages.
+The full suite plus separately run patch guard has 1,804 passing tests, 83 skipped and the same pre-existing
+Corporate p18 24-vs-25-line failure as the before baseline. Typecheck/lint/build pass. All eight ordinary
+layout/export comparison files are byte-identical before/after; no existing scope assertion changed status.
+
+**Not marked fully done:** independent export rendering shows Healing's blurred non-text date shadow remains
+after the editable glyphs are removed, and Ladakh's edited inline date is wider than the yellow label. These need
+review and a separately approved scope if background artwork or font-fitting behavior is to change. Details,
+screenshots, checks and the cover-only shadow diagnostic are in `TASK84_REPORT.md`. Nothing is staged or committed.
+
+**Land:** branch `date-ordinals` from `main`. Commit: `"rd" and "th" stay with their date (Task 84)`. Merge after the
+checks pass and the user's steps pass.
+
+---

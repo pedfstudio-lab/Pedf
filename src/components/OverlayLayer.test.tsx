@@ -13,6 +13,8 @@ import type { ImageRegion } from '@/lib/pdf/images';
 import type { RuleLine } from '@/lib/pdf/ruleLines';
 import type { PagePreviewBridge } from '@/lib/pdf/pagePreviewController';
 import { buildTextBlockEdits, coverRectForTextBlock } from '@/lib/edit/buildTextEdits';
+import type { NextTextEdit } from '@/lib/edit/buildTextEdits';
+import { sourceSpansForTextBlock } from '@/lib/edit/richText';
 import { OverlayLayer } from './OverlayLayer';
 
 const task74Fixture = 'tmp/compress-tests/rishi-ilovepdf.pdf';
@@ -28,6 +30,8 @@ interface CapturedEditorProps {
   readonly topCorrectionPx?: number;
   readonly horizontalTargets: readonly SnapTarget[];
   readonly onCancel: () => void;
+  readonly onDone: (next: NextTextEdit) => void;
+  readonly scaleInlineSizes?: boolean;
 }
 
 const mocks = vi.hoisted(() => ({
@@ -40,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   },
   ruleLines: [] as RuleLine[],
   editorProps: undefined as CapturedEditorProps | undefined,
+  replaceEdits: vi.fn(),
 }));
 
 const style = {
@@ -71,7 +76,7 @@ vi.mock('@/state/editsStore', () => ({
   useEdits: () => ({
     edits: mocks.edits,
     addEdits: vi.fn(),
-    replaceEdits: vi.fn(),
+    replaceEdits: mocks.replaceEdits,
   }),
 }));
 
@@ -198,9 +203,55 @@ beforeEach(() => {
   mocks.graphicRegions = { imageRegions: [], shapeMarkerRegions: [] };
   mocks.ruleLines = [];
   mocks.editorProps = undefined;
+  mocks.replaceEdits.mockClear();
 });
 
 afterEach(cleanup);
+
+describe('Task 84 date editor integration', () => {
+  function fixture() {
+    const number = { pageIndex: 0, text: '23', rect: { x: 20, y: 700, w: 20, h: 20 }, style };
+    const month = { ...number, text: 'September', rect: { ...number.rect, x: 55, w: 100 } };
+    const tiny = { ...number, text: 'rd', rect: { x: 40, y: 708, w: 10, h: 12 }, style: { ...style, fontSizePt: 12 } };
+    const owner: TextBlock = { ...textBlock, text: '23 September', rect: { x: 20, y: 700, w: 135, h: 20 },
+      lines: [{ pageIndex: 0, text: '23 September', rect: { x: 20, y: 700, w: 135, h: 20 }, baselineY: 700, style, runs: [number, month] }] };
+    const ordinal: TextBlock = { ...textBlock, text: 'rd', rect: tiny.rect, topBaselineY: 708, style: tiny.style,
+      lines: [{ pageIndex: 0, text: 'rd', rect: tiny.rect, baselineY: 708, style: tiny.style, runs: [tiny] }] };
+    return { owner, ordinal, tiny };
+  }
+  it('clicking the tiny suffix opens the full date and warms/removes its physical source too', async () => {
+    const { owner, ordinal, tiny } = fixture(); mocks.blocks = [owner, ordinal];
+    const preview = { state: 'fallback', renderedEditIds: new Set(), warm: vi.fn(), begin: vi.fn(), cancel: vi.fn(),
+      commit: vi.fn(), suspend: vi.fn() } as unknown as PagePreviewBridge;
+    renderOverlay(preview);
+    const props = await openEditor(/^Text actions: rd$/);
+    expect(props!.block.text).toBe('23rd September');
+    expect(props!.scaleInlineSizes).toBe(true);
+    const selection = vi.mocked(preview.begin).mock.calls[0]![0];
+    expect(selection.transientEdits[0]!.replaces).toContainEqual({ text: 'rd', rect: tiny.rect });
+    expect(mocks.replaceEdits).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Close captured editor' }));
+    expect(mocks.replaceEdits).not.toHaveBeenCalled();
+  });
+  it('records suffix removal inside the same anchored transaction and reopens saved spans only once', async () => {
+    const { owner, ordinal, tiny } = fixture(); mocks.blocks = [owner, ordinal];
+    renderOverlay();
+    const props = await openEditor(/^Text actions: rd$/);
+    const spans = sourceSpansForTextBlock(props!.block, props!.block.text, true);
+    props!.onDone({ text: props!.block.text, spans, style, width: 200, height: 20, dx: 10, dy: -5 });
+    const saved = mocks.replaceEdits.mock.calls[0]![1] as Edit[];
+    const covers = saved.filter(edit => edit.kind === 'cover');
+    const texts = saved.filter((edit): edit is TextEdit => edit.kind === 'text');
+    expect(covers).toHaveLength(1);
+    expect(covers[0]!.replaces).toContainEqual({ text: 'rd', rect: tiny.rect });
+    expect(texts[0]!.z).toBe(covers[0]!.z + 1);
+    expect(texts[0]!.boxText).toBe('23rd September');
+    cleanup(); mocks.edits = saved; renderOverlay();
+    const reopened = await openEditor(/^Text actions for edited text: 23rd September$/);
+    expect(reopened!.existing).toEqual(texts);
+    expect(reopened!.existing?.[0]?.boxText?.match(/rd/gu)).toHaveLength(1);
+  });
+});
 
 describe('OverlayLayer editor top correction', () => {
   it('does not mistake a new merged-paragraph edit for several old saved boxes', async () => {
