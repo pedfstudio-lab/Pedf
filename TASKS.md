@@ -15948,3 +15948,27 @@ screenshots, checks and the cover-only shadow diagnostic are in `TASK84_REPORT.m
 checks pass and the user's steps pass.
 
 ---
+
+### Task 85 — A move handle in the edit box's toolbar, so a box dragged off the page can come back  ✅ DONE → merged to `main` (`d8b3064`, 2026-10-22) — built by Claude on branch `toolbar-move` from `main` (`d801f81`), tested by the user in Chrome ("it's working")   *(Easy · a few hours)*
+
+**What the user hit (2026-10-22).** The only way to move an edit box was the round blue ✥ button on its top-left
+corner (`TextEditOverlay.tsx`). A box dragged partly off the page — e.g. a little past the left edge — took that
+button with it: the page clips anything outside it, so the button could no longer be reached and the box could not be
+moved back. The user pointed to PDFfiller, whose formatting toolbar has its own move handle.
+
+**The change.** The formatting toolbar (Done, Cancel, size, B/I, font, colour) is always kept inside the page (Task 56
+Rev 2), so it now starts with a **✥ move handle**, separated by a thin divider: **hold and drag** to move the box, or
+the **arrow keys** (one pixel; Shift = ten). It calls the round button's own move code (`beginMoveDrag`; the arrow keys
+now share one `nudgeMove`), so snapping, guides and the saved offset are identical. The round button stays.
+
+**Not affected:** the round button, the width handle, the corner resize (Task 83), typing, Done/Cancel/Undo (a move
+is still part of the one edit), where a box is saved, the download and saved files, bullet lists, tables and dated
+lines (Task 84).
+
+**Checked (Claude, 2026-10-22).** Ziro p1 in the browser: the date box dragged 500 px past the page's left edge with
+the round button — the round button left the page (x 586 → 86, page edge 416) while the toolbar ✥ stayed on it (421);
+dragging that ✥ brought the box back to exactly its original place (586). New tests in `TextEditOverlay.test.tsx`:
+the toolbar handle is in the toolbar, and a drag and an arrow-key nudge give exactly the same Done result as the round
+button. Full suite **1,767 passed / 0 failed**; typecheck, lint, build.
+
+---
