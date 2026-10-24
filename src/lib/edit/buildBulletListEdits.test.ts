@@ -202,6 +202,13 @@ describe('buildBulletListEdits', () => {
     expect(built.texts).toEqual([]);
   });
 
+  it('counts the room the list gained by moving up, as the editor does', () => {
+    const items = [{ text: 'One', lines: ['One'] }, { text: 'Two', lines: ['Two'] }];
+    // 22 pt of list: no room in 15 pt, but grown upwards by 10 pt its bottom stays above the next section.
+    expect(buildBulletListEdits(fixtureList(), { ...next, dy: 10 }, items, 1, 15).overflow).toBe(false);
+    expect(buildBulletListEdits(fixtureList(), { ...next, dy: -10 }, items, 1, 30).overflow).toBe(true);
+  });
+
   it('keeps an invisible re-edit anchor when every bullet is removed', () => {
     const built = buildBulletListEdits(
       fixtureList(),

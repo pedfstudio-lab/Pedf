@@ -103,6 +103,14 @@ type FamilyKey = keyof typeof FAMILY_KEYWORD;
 const MIN_BOX_WIDTH = 12;
 const MIN_BOX_HEIGHT = 8;
 const EMPTY_FRAME_WIDTH_PX = 24;
+/** Text-size handles on all four corners: dragging away from the box makes the text bigger. */
+interface ResizeCorner { readonly label: string; readonly x: 1 | -1; readonly y: 1 | -1; readonly top: boolean }
+const RESIZE_CORNERS: readonly ResizeCorner[] = [
+  { label: 'Drag to resize text', x: 1, y: 1, top: false },
+  { label: 'Drag the bottom-left corner to resize text', x: -1, y: 1, top: false },
+  { label: 'Drag the top-right corner to resize text', x: 1, y: -1, top: true },
+  { label: 'Drag the top-left corner to resize text', x: -1, y: -1, top: true },
+];
 
 /** Text-node ranges avoid the full-width rectangles of block-level DOM wrappers. */
 function liveTextFrame(
@@ -572,6 +580,11 @@ export function TextEditOverlay({
   const initialPresentedValueRef = useRef<ReturnType<typeof serializeRichText>>();
   const stopCornerDragRef = useRef<(() => void) | undefined>();
   useEffect(() => () => stopCornerDragRef.current?.(), []);
+  // A top corner keeps the box's bottom still while its text grows or shrinks;
+  // the anchor is the bottom edge, in the same space as the move offset.
+  const bottomAnchorRef = useRef<number | undefined>();
+  const anchorReleaseRef = useRef<number | undefined>();
+  useEffect(() => () => { if (anchorReleaseRef.current !== undefined) window.cancelAnimationFrame(anchorReleaseRef.current); }, []);
 
   const beginWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -776,6 +789,14 @@ export function TextEditOverlay({
     width: Math.max(width * zoom, textFrame.left + textFrame.width),
     height: Math.max(boxHeight * zoom, height * zoom, textFrame.top + textFrame.height),
   } : textFrame;
+  // While a top corner resizes, shift the box so its bottom stays put — never above the page top.
+  useLayoutEffect(() => {
+    const anchor = bottomAnchorRef.current;
+    if (anchor === undefined) return;
+    const highest = -(screenRect.top + visualFrame.top);
+    const y = Math.max(highest, anchor - (visualFrame.top + visualFrame.height));
+    setMoveOffset((value) => (Math.abs(value.y - y) < 0.01 ? value : { ...value, y }));
+  }, [screenRect.top, visualFrame.top, visualFrame.height]);
   const editorFrame: ScreenRect = {
     left: layoutFrame.left + visualFrame.left,
     top: layoutFrame.top + visualFrame.top,
@@ -822,7 +843,6 @@ export function TextEditOverlay({
   // A right or centre box now starts where its neighbour ends, so a handle hanging
   // outside that corner would sit back on the neighbour's words. Keep it inside, where
   // such a box always has empty room before its own text.
-  const moveHandleOffset = usesAlignmentColumn ? { left: 0, top: 0 } : { left: -8, top: -8 };
   const lineHeight = textBlockLineHeight(block, style, paragraphMode);
   const previewScaleX = compositionPreviewActive && sourceCompositionsRef.current.length === 1 && compositionRef.current?.pieces.length === 1 ? initialScaleX : 1;
   const initialMeasuredWidth = compositionRef.current ? compositionWidth(compositionRef.current) : 0;
@@ -1226,24 +1246,45 @@ export function TextEditOverlay({
     setSelectionStyle(value => ({ ...value, fontSizePt: next.style.fontSizePt }));
   };
 
-  const beginCornerDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  /** Hold the bottom edge for a top corner's gesture, then let go once the last size has been measured. */
+  const anchorBottom = () => {
+    if (anchorReleaseRef.current !== undefined) window.cancelAnimationFrame(anchorReleaseRef.current);
+    anchorReleaseRef.current = undefined;
+    bottomAnchorRef.current ??= moveOffset.y + visualFrame.top + visualFrame.height;
+  };
+  const releaseBottomSoon = () => {
+    if (bottomAnchorRef.current === undefined) return;
+    if (anchorReleaseRef.current !== undefined) window.cancelAnimationFrame(anchorReleaseRef.current);
+    anchorReleaseRef.current = window.requestAnimationFrame(() => {
+      anchorReleaseRef.current = window.requestAnimationFrame(() => {
+        anchorReleaseRef.current = undefined;
+        bottomAnchorRef.current = undefined;
+      });
+    });
+  };
+
+  const beginCornerDrag = (corner: ResizeCorner) => (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (committing || composingRef.current || event.button !== 0) return;
     event.preventDefault();
     const start = captureResize();
     if (!start) return;
     stopCornerDragRef.current?.();
+    if (corner.top) anchorBottom();
     event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     const x = event.clientX, y = event.clientY;
     const move = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== event.pointerId) return;
-      applyCornerScale(start, cornerDragFactor(moveEvent.clientX - x, moveEvent.clientY - y, start.style.fontSizePt, zoom));
+      // Away from the box is bigger at every corner.
+      applyCornerScale(start, cornerDragFactor(corner.x * (moveEvent.clientX - x), corner.y * (moveEvent.clientY - y),
+        start.style.fontSizePt, zoom));
     };
     const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
       stopCornerDragRef.current = undefined;
+      releaseBottomSoon();
     };
     stopCornerDragRef.current = stop;
     window.addEventListener('pointermove', move);
@@ -1565,33 +1606,32 @@ export function TextEditOverlay({
           className="absolute z-10 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
         />
       )}
-      <button
-        type="button"
-        aria-label="Drag to resize text"
-        title="Drag to resize text; arrow keys resize, Shift for bigger steps"
-        disabled={committing}
-        onPointerDown={beginCornerDrag}
-        onKeyDown={(event) => {
-          const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
-          if (!direction || composingRef.current) return;
-          event.preventDefault();
-          const start = captureResize();
-          if (start) applyCornerScale(start, (start.style.fontSizePt + direction * (event.shiftKey ? 10 : 1)) / start.style.fontSizePt);
-        }}
-        style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height - 5 }}
-        className="absolute z-20 h-2.5 w-2.5 touch-none cursor-nwse-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
-      />
-      <button
-        type="button"
-        aria-label="Drag to move"
-        title="Drag to move; arrow keys move one pixel"
-        onPointerDown={beginMoveDrag}
-        onKeyDown={nudgeMove}
-        style={{ left: visualFrame.left + moveHandleOffset.left, top: visualFrame.top + moveHandleOffset.top }}
-        className="absolute z-20 h-4 w-4 cursor-move rounded-full border border-white bg-blue-600 text-[10px] font-bold leading-none text-white shadow hover:bg-blue-700"
-      >
-        ✥
-      </button>
+      {RESIZE_CORNERS.map(corner => (
+        <button
+          key={corner.label}
+          type="button"
+          aria-label={corner.label}
+          title="Drag to resize text; arrow keys resize, Shift for bigger steps"
+          disabled={committing}
+          onPointerDown={beginCornerDrag(corner)}
+          onKeyDown={(event) => {
+            // An arrow pointing away from the box makes the text bigger, as dragging does.
+            const direction = { ArrowLeft: -corner.x, ArrowUp: -corner.y, ArrowRight: corner.x, ArrowDown: corner.y }[event.key];
+            if (!direction || composingRef.current) return;
+            event.preventDefault();
+            const start = captureResize();
+            if (!start) return;
+            if (corner.top) anchorBottom();
+            applyCornerScale(start, (start.style.fontSizePt + direction * (event.shiftKey ? 10 : 1)) / start.style.fontSizePt);
+            releaseBottomSoon();
+          }}
+          style={{
+            left: visualFrame.left + (corner.x > 0 ? visualFrame.width : 0) - 5,
+            top: visualFrame.top + (corner.y > 0 ? visualFrame.height : 0) - 5,
+          }}
+          className={`absolute z-20 h-2.5 w-2.5 touch-none ${corner.x === corner.y ? 'cursor-nwse-resize' : 'cursor-nesw-resize'} rounded-sm border border-white bg-blue-500 hover:bg-blue-600`}
+        />
+      ))}
     </div>
   );
 }

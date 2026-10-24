@@ -532,17 +532,12 @@ describe('TextEditOverlay paragraph seed', () => {
     });
   });
 
-  it('keeps the move handle inside a right or centre box and outside a left one', () => {
+  it('moves only from the toolbar handle: no round move button on the box', () => {
     const right = renderEditor({ ...block('Email', 24), align: 'right', alignLeftPt: 68.2, alignWidthPt: 467.7 });
-    const insideHandle = screen.getByRole('button', { name: 'Drag to move' });
-    expect(insideHandle.style.left).toBe('0px');
-    expect(insideHandle.style.top).toBe('0px');
+    expect(screen.queryByRole('button', { name: 'Drag to move' })).toBeNull();
+    expect(screen.getByRole('toolbar', { name: 'Text formatting' })
+      .querySelector('button[aria-label="Move text box"]')).toBeTruthy();
     right.unmount();
-
-    renderEditor(block('Heading', 24));
-    const outsideHandle = screen.getByRole('button', { name: 'Drag to move' });
-    expect(outsideHandle.style.left).toBe('-8px');
-    expect(outsideHandle.style.top).toBe('-8px');
   });
 
   it('still reflows a left-aligned paragraph', () => {
@@ -950,7 +945,7 @@ describe('Task 74 Step 5c.1 measured baseline', () => {
         const editor = screen.getByRole('textbox');
         editor.append(document.createTextNode('!'));
         fireEvent.input(editor);
-        fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to move' }), { key: 'ArrowDown' });
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Move text box' }), { key: 'ArrowDown' });
         fireEvent.click(screen.getByRole('button', { name: 'Done' }));
         expect(onDone).toHaveBeenCalledOnce();
         outputs.push(onDone.mock.calls[0]?.[0]);
@@ -1625,22 +1620,18 @@ describe('the move handle in the toolbar', () => {
     return result;
   }
 
-  it('sits in the formatting toolbar and moves the box exactly like the round handle', () => {
+  it('sits in the formatting toolbar and moves the box', () => {
     renderEditor(block('Heading', 24), 1, 0);
     const toolbar = screen.getByRole('toolbar', { name: 'Text formatting' });
     expect(toolbar.querySelector('button[aria-label="Move text box"]')).toBeTruthy();
     cleanup();
 
     const fromToolbar = moved('Move text box', handle => dragFrom(handle, -40, 25));
-    const fromRound = moved('Drag to move', handle => dragFrom(handle, -40, 25));
-    expect(fromToolbar).toEqual(fromRound);
     expect(fromToolbar).toMatchObject({ dx: -40, dy: -25 });
   });
 
-  it('nudges with the arrow keys like the round handle', () => {
+  it('nudges with the arrow keys', () => {
     const fromToolbar = moved('Move text box', handle => fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true }));
-    const fromRound = moved('Drag to move', handle => fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true }));
-    expect(fromToolbar).toEqual(fromRound);
     expect(fromToolbar).toMatchObject({ dx: -10 });
   });
 });
@@ -1701,5 +1692,89 @@ describe('Add Text keeps the box the user drew', () => {
   it('leaves the PDF’s own text boxes as they were: no height handle', () => {
     renderEditor(block('Heading', 24), 1, 0);
     expect(screen.queryByRole('button', { name: 'Drag to change box height' })).toBeNull();
+  });
+});
+
+describe('text size from all four corners', () => {
+  const corners = [
+    ['Drag the top-left corner to resize text', -1, -1],
+    ['Drag the top-right corner to resize text', 1, -1],
+    ['Drag the bottom-left corner to resize text', -1, 1],
+    ['Drag to resize text', 1, 1],
+  ] as const;
+  function drag(handle: HTMLElement, dx: number, dy: number) {
+    handle.setPointerCapture = vi.fn();
+    fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientX: 300, clientY: 200, button: 0 }));
+    fireEvent(window, new MouseEvent('pointermove', { clientX: 300 + dx, clientY: 200 + dy }));
+    fireEvent(window, new MouseEvent('pointerup'));
+  }
+  const px = (value: string) => Number.parseFloat(value);
+
+  it('puts a size handle on every corner of the box', () => {
+    renderEditor(block('Heading', 24));
+    const frame = screen.getByTestId('text-editor-frame');
+    const [left, top, width, height] = [frame.style.left, frame.style.top, frame.style.width, frame.style.height].map(px);
+    const centre = (label: string) => {
+      const handle = screen.getByRole('button', { name: label });
+      return [px(handle.style.left) + 5, px(handle.style.top) + 5];
+    };
+    expect(centre('Drag the top-left corner to resize text')).toEqual([left, top]);
+    expect(centre('Drag the top-right corner to resize text')).toEqual([left! + width!, top]);
+    expect(centre('Drag the bottom-left corner to resize text')).toEqual([left, top! + height!]);
+    expect(centre('Drag to resize text')).toEqual([left! + width!, top! + height!]);
+  });
+
+  it.each(corners)('%s: away from the box is bigger, towards it smaller', (label, x, y) => {
+    for (const [direction, check] of [[1, 'bigger'], [-1, 'smaller']] as const) {
+      const onDone = vi.fn();
+      const view = renderEditor(block('Heading', 24), 1, 0, { onDone });
+      act(() => drag(screen.getByRole('button', { name: label }), direction * x * 30, direction * y * 30));
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      const size = onDone.mock.calls[0]?.[0].style.fontSizePt;
+      if (check === 'bigger') expect(size).toBeGreaterThan(style.fontSizePt); else expect(size).toBeLessThan(style.fontSizePt);
+      view.unmount();
+    }
+  });
+
+  it('a top corner keeps the bottom of the box still; a bottom corner keeps the top still', async () => {
+    const bottomOf = () => px(screen.getByTestId('text-editor-layout').style.top)
+      + px(screen.getByTestId('text-editor-frame').style.top) + px(screen.getByTestId('text-editor-frame').style.height);
+    const topOf = () => px(screen.getByTestId('text-editor-layout').style.top);
+
+    const view = renderEditor(block('Heading', 24));
+    const bottom = bottomOf(), top = topOf();
+    await act(async () => drag(screen.getByRole('button', { name: 'Drag the top-left corner to resize text' }), -40, -40));
+    expect(topOf()).toBeLessThan(top);
+    expect(bottomOf()).toBeCloseTo(bottom, 1);
+    view.unmount();
+
+    renderEditor(block('Heading', 24));
+    const startTop = topOf(), startBottom = bottomOf();
+    await act(async () => drag(screen.getByRole('button', { name: 'Drag to resize text' }), 40, 40));
+    expect(topOf()).toBe(startTop);
+    expect(bottomOf()).toBeGreaterThan(startBottom);
+  });
+
+  it.each(corners)('%s: an arrow key pointing away from the box is bigger', (label, x, y) => {
+    const away = [x > 0 ? 'ArrowRight' : 'ArrowLeft', y > 0 ? 'ArrowDown' : 'ArrowUp'];
+    const towards = [x > 0 ? 'ArrowLeft' : 'ArrowRight', y > 0 ? 'ArrowUp' : 'ArrowDown'];
+    for (const [keys, check] of [[away, 'bigger'], [towards, 'smaller']] as const) {
+      for (const key of keys) {
+        const onDone = vi.fn();
+        const view = renderEditor(block('Heading', 24), 1, 0, { onDone });
+        fireEvent.keyDown(screen.getByRole('button', { name: label }), { key });
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(onDone.mock.calls[0]?.[0].style.fontSizePt).toBe(style.fontSizePt + (check === 'bigger' ? 1 : -1));
+        view.unmount();
+      }
+    }
+  });
+
+  it('never grows above the page top', async () => {
+    renderEditor(block('Heading', 24));
+    await act(async () => drag(screen.getByRole('button', { name: 'Drag the top-right corner to resize text' }), 600, -600));
+    const layoutTop = px(screen.getByTestId('text-editor-layout').style.top);
+    const frameTop = px(screen.getByTestId('text-editor-frame').style.top);
+    expect(layoutTop + frameTop).toBeGreaterThanOrEqual(-0.01);
   });
 });

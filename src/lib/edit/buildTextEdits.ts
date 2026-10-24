@@ -657,7 +657,8 @@ export function buildBulletListEdits(
   const usedHeightPt = items.length === 0
     ? 0
     : wrappedLineFontSize(firstLine, next.style) + firstBaseline - lastBaseline;
-  if (usedHeightPt > availableHeightPt + 0.5) {
+  // Room is measured from the list's original top; moving up (dy > 0) adds to it, as in the editor.
+  if (usedHeightPt > availableHeightPt + next.dy + 0.5) {
     return { covers: [], texts: [], usedHeightPt, overflow: true };
   }
 
