@@ -402,8 +402,10 @@ export function OverlayLayer({
       extractTextRuns(page, pageIndex),
       detectPageGraphicRegions(page, pageIndex),
       detectRuleLines(page, pageIndex),
-    ]).then(([nextRuns, nextGraphicRegions, nextRuleLines]) => {
+    ]).then(([pageRuns, nextGraphicRegions, nextRuleLines]) => {
       if (!cancelled) {
+        // A watermark stays part of the page: never clickable, grouped or translated.
+        const nextRuns = pageRuns.filter((run) => !run.background);
         setRuns(nextRuns);
         // A drawn bullet dot is local evidence that two stacked lines are list items:
         // without it their own text looks like short sentences and they never group,

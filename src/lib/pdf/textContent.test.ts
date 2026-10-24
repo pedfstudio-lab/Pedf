@@ -6,6 +6,7 @@ import {
   PDFDocument,
   StandardFonts,
   TextRenderingMode,
+  degrees,
   rgb,
   setTextRenderingMode,
 } from 'pdf-lib';
@@ -23,7 +24,9 @@ import {
   fontStyleFromProgram,
   groupRunsIntoBlocks,
   hitTestRun,
+  isSlantedText,
   isTableNumber,
+  markBackdropText,
   mergeRunsIntoLines,
   sourceBoldFromFont,
   preserveEditedBlockPartitions,
@@ -239,6 +242,27 @@ describe('extractTextRuns', () => {
     expect(run?.style.fontRef).toMatch(/^g_d\d+_f\d+$/);
   });
 
+  it('marks a tilted watermark and a big label written over as background, and nothing else', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([400, 400]);
+    const font = await source.embedFont(StandardFonts.Helvetica);
+    const grey = rgb(0.9, 0.9, 0.9);
+    page.drawText('CAREERS360', { x: 120, y: 80, size: 46, font, color: grey, rotate: degrees(45) });
+    page.drawText('SAMPLE', { x: 40, y: 200, size: 60, font, color: grey });
+    page.drawText('All managers are graduates.', { x: 40, y: 210, size: 11, font });
+    page.drawText('You can conclude:', { x: 40, y: 150, size: 11, font });
+    page.drawText('Big heading', { x: 40, y: 320, size: 30, font });
+    page.drawText('Up', { x: 120, y: 90, size: 11, font, rotate: degrees(90) });
+
+    const document = await getDocument({ data: (await source.save()).slice(), verbosity: 0 }).promise;
+    openDocuments.push(document);
+    const runs = await extractTextRuns(await document.getPage(1), 0);
+
+    expect(runs.filter((run) => run.background).map((run) => run.text).sort()).toEqual(['CAREERS360', 'SAMPLE']);
+    expect(runs.filter((run) => !run.background).map((run) => run.text).sort())
+      .toEqual(['All managers are graduates.', 'Big heading', 'Up', 'You can conclude:']);
+  });
+
   it('attaches the actual source fill colour to each extracted run', async () => {
     const source = await PDFDocument.create();
     const page = source.addPage([300, 300]);
@@ -433,6 +457,48 @@ describe('dropSameSpotCopies', () => {
     const offset = run('L', 50, 499);
     const larger = run('L', 50, 500, 9);
     expect(dropSameSpotCopies([...letters, offset, larger])).toEqual([...letters, offset, larger]);
+  });
+});
+
+describe('background text', () => {
+  const run = (text: string, x: number, y: number, size: number, w = size * text.length * 0.5): TextRun => ({
+    pageIndex: 0,
+    text,
+    rect: { x, y, w, h: size },
+    style: { fontName: 'Helvetica', fontSizePt: size, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } },
+  });
+  const order = (...runs: TextRun[]) => new Map(runs.map((entry, index) => [entry, index]));
+
+  it.each([
+    [[1, 0, 0, 1], false],
+    [[0, 1, -1, 0], false],
+    [[-1, 0, 0, -1], false],
+    [[1, 0.05, -0.05, 1], false],
+    [[32.4, 32.4, -32.4, 32.4], true],
+    [[1, -0.6, 0.6, 1], true],
+  ])('treats %j as slanted: %s', (transform, slanted) => {
+    expect(isSlantedText(transform)).toBe(slanted);
+  });
+
+  it('marks big text that smaller text is written over afterwards', () => {
+    const label = run('LABEL', 40, 200, 60);
+    const body = run('Body text on top', 40, 210, 11);
+    const marked = markBackdropText([label, body], order(label, body));
+    expect(marked.map((entry) => entry.background)).toEqual([true, undefined]);
+  });
+
+  it('leaves alone a same-size neighbour, big text drawn on top, and a barely touching mark', () => {
+    const letter = run('y', 40, 200, 18);
+    const stop = run('.', 44, 200, 18, 4);
+    expect(markBackdropText([letter, stop], order(letter, stop)).some((entry) => entry.background)).toBe(false);
+
+    const small = run('caption', 40, 210, 11);
+    const heading = run('HEADING', 40, 200, 60);
+    expect(markBackdropText([small, heading], order(small, heading)).some((entry) => entry.background)).toBe(false);
+
+    const date = run('25', 40, 200, 30, 30);
+    const ordinal = run('th', 69, 215, 10, 10);
+    expect(markBackdropText([date, ordinal], order(date, ordinal)).some((entry) => entry.background)).toBe(false);
   });
 });
 

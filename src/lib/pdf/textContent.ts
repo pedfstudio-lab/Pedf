@@ -6,7 +6,7 @@ import type { PdfPt, ViewportPt } from '@/lib/export/coordinates';
 import { registerPdfJsFontReference } from '@/lib/export/embeddedFont';
 import { pageFontTracking, registerSourceFont, sourceFontIdentity } from '@/lib/fonts/fontMatch';
 import { ensureMatchedFont, prepareSourceFont } from '@/lib/fonts/twinFonts';
-import { dropCoveredTextRuns } from './hiddenText';
+import { dropCoveredTextRuns, mapTextItemsToOperators } from './hiddenText';
 import { resolveTextPaint, textPaintForItems } from './textPaint';
 import type { RuleLine } from './ruleLines';
 import type { DrawnMarker } from './textUnits';
@@ -40,6 +40,8 @@ export interface TextRun {
   readonly spaceWidthPt?: number;
   readonly metrics?: SourceTextMetrics;
   readonly wordSpacing?: RawSpacing;
+  /** Page decoration such as a watermark: left on the page, never edited or translated. */
+  readonly background?: true;
 }
 
 export interface TextLine {
@@ -696,6 +698,51 @@ export function dropSameSpotCopies(runs: readonly TextRun[]): TextRun[] {
   });
 }
 
+/** Text tilted further than this from straight or upright is a watermark or stamp. */
+const SLANT_DEGREES = 5;
+/** Text at least this many times the size of text written over it is a backdrop. */
+const BACKDROP_SIZE_RATIO = 2;
+/** The text on top must cover this share of the smaller of the two boxes. */
+const BACKDROP_OVERLAP = 0.3;
+
+/** Whether a text matrix runs at a slant rather than straight across or up and down. */
+export function isSlantedText(transform: readonly number[]): boolean {
+  const degrees = Math.abs(Math.atan2(transform[1] ?? 0, transform[0] ?? 0) * 180 / Math.PI) % 90;
+  return Math.min(degrees, 90 - degrees) > SLANT_DEGREES;
+}
+
+function overlapArea(left: PdfRect, right: PdfRect): number {
+  const width = Math.min(left.x + left.w, right.x + right.w) - Math.max(left.x, right.x);
+  const height = Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+/**
+ * Mark big text that smaller text is later written over (a page-wide label behind
+ * the reading text) as background, so editing never mixes it into a paragraph.
+ */
+export function markBackdropText(
+  runs: readonly TextRun[],
+  paintedAt: ReadonlyMap<TextRun, number>,
+): TextRun[] {
+  const smallest = Math.min(...runs.map(run => run.style.fontSizePt));
+  return runs.map((run) => {
+    const at = paintedAt.get(run);
+    if (run.background || at === undefined || run.style.fontSizePt < BACKDROP_SIZE_RATIO * smallest) return run;
+    const behind = runs.some((over) => {
+      const overAt = paintedAt.get(over);
+      if (over.background || overAt === undefined || overAt <= at || !over.text.trim()) return false;
+      if (run.style.fontSizePt < BACKDROP_SIZE_RATIO * over.style.fontSizePt) return false;
+      const shared = overlapArea(run.rect, over.rect);
+      return shared > 0 && shared >= BACKDROP_OVERLAP * Math.min(
+        run.rect.w * run.rect.h,
+        over.rect.w * over.rect.h,
+      );
+    });
+    return behind ? { ...run, background: true } : run;
+  });
+}
+
 /** Extract the text items for one page into the PDF-point space used by edits. */
 export async function extractTextRuns(
   page: PDFPageProxy,
@@ -795,6 +842,7 @@ export async function extractTextRuns(
       wordSpacing: wordSpacing.get(runKey(fontRef, item.str, item.transform[4]!, item.transform[5]!)),
       ...(characterWidthsPt ? { characterWidthsPt } : {}),
       ...(spaceWidthPt !== undefined ? { spaceWidthPt } : {}),
+      ...(isSlantedText(item.transform) ? { background: true as const } : {}),
       style: {
         fontName,
         ...sourceFontIdentity(fontRef),
@@ -814,8 +862,15 @@ export async function extractTextRuns(
   const visible = dropSameSpotCopies(operatorList
     ? dropCoveredTextRuns(runs, itemIndexes, content.items, operatorList, viewport)
     : runs);
-  const tracking = pageFontTracking(visible);
-  return visible.map(run => tracking.has(run.style.fontRef ?? '')
+  const operatorIndexes = operatorList ? mapTextItemsToOperators(content.items, operatorList) : null;
+  const paintedAt = new Map<TextRun, number>();
+  runs.forEach((run, index) => {
+    const at = operatorIndexes?.[itemIndexes[index] ?? -1] ?? -1;
+    if (at >= 0) paintedAt.set(run, at);
+  });
+  const marked = markBackdropText(visible, paintedAt);
+  const tracking = pageFontTracking(marked);
+  return marked.map(run => tracking.has(run.style.fontRef ?? '')
     ? { ...run, style: { ...run.style, fontTrackingEm: tracking.get(run.style.fontRef!)! } }
     : run);
 }
