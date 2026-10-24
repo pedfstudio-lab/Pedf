@@ -15972,3 +15972,115 @@ the toolbar handle is in the toolbar, and a drag and an arrow-key nudge give exa
 button. Full suite **1,767 passed / 0 failed**; typecheck, lint, build.
 
 ---
+
+### Task 86 — A moved edit leaves nothing clickable at its original place  ✅ DONE → merged to `main` (`d843411`, 2026-10-22) — built by Claude, tested by the user in Chrome ("it's working")   *(Easy · a few hours)*
+
+**What the user hit (2026-10-22, Ladakh, every PDF).** After moving an edit box and clicking it again, the original
+spot still showed a blue "Text actions" box as well as the green one at the new place, so the same text could be
+opened twice.
+
+**The change.** In `OverlayLayer.tsx`'s source click targets, a block that already has an edit with text gets no blue
+target at its original place; it is opened only where its text is now (the green "Text actions for edited text"
+target). A block whose edit was a delete (no text) keeps its old target as before.
+
+**Not affected:** unedited text, re-editing at the new place, Undo, saved files, export.
+
+**Checked (Claude).** New test in `OverlayLayer.test.tsx`: after a moved edit there is no source target at the old
+place, only the re-edit target at the new one; with the fix line taken out the test fails. Full suite **1,768 passed /
+0 failed**; typecheck, lint, build.
+
+---
+
+### Task 87 — Add text boxes come out as big as they are dragged  ✅ DONE → merged to `main` (`2d5f9f9`, 2026-10-23) — built by Claude, tested by the user in Chrome ("it's working")   *(Easy · half a day)*
+
+**What the user hit (2026-10-23).** Dragging a large **Add text** box made only a small one-line box: the height
+followed the typed text, not the drag. The user asked for the drawn size, which can still be made smaller later.
+
+**The change** (`TextEditOverlay.tsx`, `OverlayLayer.tsx`):
+- The editor gets the drawn height (`boxMinHeightPt`, passed only for an Add text box). The frame shows the whole
+  drawn box, and Done saves `height = max(text height, drawn height)`.
+- A **"Drag to change box height"** handle on the bottom edge (up-down cursor) makes the box taller or shorter at any
+  time, but never shorter than its text.
+- The corner text-size handles (Task 83, Task 88) work on it as on any box: the text grows inside the drawn box first,
+  then the box grows.
+
+**Not affected:** editing existing PDF text, the width handle, saved files, export.
+
+**Checked (Claude).** 4 new tests in `TextEditOverlay.test.tsx`: the whole drawn box shows with the height handle on
+its bottom edge; the handle never makes the box shorter than its text and Done saves the height shown; a saved box
+reopens at its saved size and an unchanged Done changes nothing; the PDF's own text boxes get no height handle. Full
+suite **1,772 passed / 0 failed**; typecheck, lint, build.
+
+---
+
+### Task 88 — Resize text from all four corners; the top corners grow it upwards  ✅ DONE → merged to `main` (`ce80bde`, 2026-10-24) — built by Claude on branch `four-corners` from `main` (`2d5f9f9`), tested by the user in Chrome   *(Medium · about 1 day)*
+
+**The user's request (2026-10-24).** The corner resize (Task 83) only had the bottom-right corner; the user wanted it
+on all four, and the round ✥ move button on the top-left corner removed because the toolbar ✥ (Task 85) replaces it.
+Choices made by the user: **Option B** (top corners grow the box up, bottom corners grow it down); bullet lists grow
+up and down like everything else, **keeping** the "No room — the next section is in the way" check; nothing grows off
+the page top.
+
+**The change** (`TextEditOverlay.tsx`):
+- **Four size handles**, one on each corner of the frame (diagonal cursors). Dragging **away from the box** makes the
+  text bigger, towards it smaller. The arrow keys follow the same rule per corner (↑ on a top corner = bigger; Shift =
+  10 pt steps); the bottom-right corner's keys are unchanged.
+- **Top corners keep the bottom still**: while they resize, the box's bottom edge is held and the box moves up as it
+  grows, until its top reaches the page top; from there it grows downwards. **Bottom corners** keep the top still, as
+  in Task 83. Width stays fixed and the text re-wraps (the Word way).
+- The **round ✥ "Drag to move" button is removed**; the box moves only with the toolbar ✥ (this replaces Task 85's
+  "the round button stays").
+- **Bullet "No room" fix** (`buildBulletListEdits` in `buildTextEdits.ts`): the final check now adds the room the list
+  gained by moving up (`next.dy`), as the editor's own check (`calculateBulletRoomPt`) already did. Before, a list grown
+  upwards with its bottom fixed was refused with "No room". Growing **down** into the next section is still refused,
+  and Done stays greyed out.
+
+**Not affected:** the toolbar move handle, the width handle, the Add text height handle (Task 87), typing, Undo,
+saved files, export, translation.
+
+**Checked (Claude, 2026-10-24).** In the browser (Goa, the resume): the top-left corner took MONSOON MADNESS 28 → 36 pt
+with the bottom fixed (418.5 before and after) and Done saved it in that place; the bottom-right corner grew it down;
+the page-top stop held the top at 0 and then grew down; a bullet list grown from the top-right corner saved without
+"No room", and grown down from the bottom-right it showed "No room" with Done greyed out; an Add text box filled its
+drawn size first, then grew upwards. New tests: a handle on every corner, away = bigger / towards = smaller for each
+corner (drag and keys), a top corner keeps the bottom still, the page-top stop, no round move button, and the bullet
+room after moving up. Full suite **1,784 passed / 0 failed**; typecheck, lint, build.
+
+---
+
+### Task 89 — A watermark behind the text is never edited or mixed into paragraphs  ✅ DONE → merged to `main` (`9638c77`, 2026-10-24) — built by Claude on branch `watermark-text` from `main` (`ce80bde`), tested by the user in Chrome ("it's working")   *(Easy · half a day)*
+
+**What the user hit (2026-10-24, "NMAT 2026 Logical Reasoning" PDF).** Every page from 2 to 49 has a faint
+**CAREERS360** label behind the text. It is real text (46 pt, light grey, tilted 45°), so the app offered to edit it.
+Its tilted footprint (a 239 × 239 pt square) pulled nearby lines into one huge box: on page 7, "All managers are
+graduates." + the label + "You can conclude:" became one box over the bullet list, and opening it rewrapped the lines
+and drew the label flat.
+
+**The rule (Part 1 only, chosen by the user).** Text is **background** when either:
+- it is **slanted** — more than 5° away from straight across or straight up/down; or
+- **smaller text is written over it afterwards** (paint order), it is **at least twice that text's size**, and the
+  overlap is at least 30% of the smaller box.
+
+Background text stays on the page and in the export unchanged, but it is never clickable, never joined to nearby
+lines and never translated. Ask/chat still reads all text. **Part 2** (images with text on top lose their image
+options) was **not built**: it would have locked 95 normal photos and pictures in 8 PDFs (Goa, Ziro and Bhutan cover
+photos among them).
+
+**The change:**
+- `src/lib/pdf/textContent.ts`: `TextRun.background`; `isSlantedText` marks slanted runs when they are read;
+  `markBackdropText` marks the big-under-small case using the paint order (`mapTextItemsToOperators`), after the
+  existing hidden-text and same-spot filters.
+- `src/components/OverlayLayer.tsx`: the edit layer drops background runs before grouping, so click targets,
+  paragraphs, dates and translation boxes never see them.
+
+**Checked (Claude, 2026-10-24).**
+- Every page of the 13 project PDFs: only the 48 CAREERS360 labels are flagged; **0 pages** of the 12 other PDFs
+  change their boxes. The two near-misses from the survey stay editable: a "y" touching a full stop (same size, Ziro)
+  and an old name under our own edit (already hidden by its cover).
+- NMAT page 7 in the browser: 31 targets, none for the label; "All managers are graduates." opens as its own one-line
+  box; after an edit and Done the label is still on the page, tilted and faint.
+- New tests in `textContent.test.ts`: a real PDF with a tilted label and a big straight label under small text (only
+  those two flagged; a 90° upright word and a big heading are not), the slant angles, and the cases left alone (same
+  size, big text drawn on top, a raised "th"). Full suite **1,793 passed / 0 failed**; typecheck, lint, build.
+
+---
