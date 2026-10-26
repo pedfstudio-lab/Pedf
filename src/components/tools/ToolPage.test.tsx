@@ -38,6 +38,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); takePendingFiles(); });
 
 describe('ToolPage', () => {
+  it('clears secret options at run start and completion without changing ordinary tool options', async () => {
+    let finish!: (outputs: ToolOutput[]) => void;
+    run.mockImplementationOnce(async (_files, selected) => {
+      expect(selected.label).toBe('Private passphrase');
+      return new Promise(resolve => { finish = resolve; });
+    });
+    show({ ...dummy, sensitiveOptions: true }); pick(file('private.pdf'));
+    fireEvent.change(screen.getByLabelText('Output label'), { target: { value: 'Private passphrase' } });
+    fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+    expect((screen.getByLabelText('Output label') as HTMLInputElement).value).toBe('Default');
+    await act(async () => finish([{ ...result, canOpenInEditor: false }]));
+    await screen.findByRole('region', { name: 'Results' });
+    expect(run.mock.calls[0]![1]).toEqual({});
+    expect(screen.queryByRole('button', { name: 'Open in editor' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+  });
   it('shows a tool\'s calm preview-failure text instead of the red reading error', async () => {
     vi.mocked(previewPdf).mockRejectedValue(new ToolError('This file could not be read. Try Repair PDF.'));
     const calm = { ...dummy, slug: 'calm', previewFailureText: 'No preview. See the file check below.' };

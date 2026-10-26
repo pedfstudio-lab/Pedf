@@ -69,6 +69,8 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     const selectedFiles = files.map(({ file }) => file);
     if (files.length < minimumInputs || activeRun.current || tool.canRun?.(options, selectedFiles)) return;
     const controller = new AbortController();
+    const runOptions = structuredClone(options);
+    if (tool.sensitiveOptions) setOptions(structuredClone(tool.defaultOptions));
     activeRun.current = controller;
     setError('');
     setWarnings([]);
@@ -76,7 +78,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     setStatus('running');
     setProgress({ value: 0, label: 'Preparing…' });
     try {
-      const result = await tool.run(selectedFiles, structuredClone(options), {
+      const result = await tool.run(selectedFiles, runOptions, {
         signal: controller.signal,
         onProgress(done, total, label) {
           if (activeRun.current !== controller || controller.signal.aborted) return;
@@ -98,6 +100,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
         setStatus('idle');
       }
     } finally {
+      if (tool.sensitiveOptions) Object.keys(runOptions).forEach(key => { delete runOptions[key]; });
       if (activeRun.current === controller) activeRun.current = null;
     }
   }
@@ -183,7 +186,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
         </div>
         <div className="tool-result-actions">
           <button className="site-button" type="button" onClick={() => download(() => downloadBytes(output.name, output.bytes, output.mime))}>Download</button>
-          {output.mime === 'application/pdf' && <button className="tool-secondary" type="button" onClick={() => {
+          {output.mime === 'application/pdf' && output.canOpenInEditor !== false && <button className="tool-secondary" type="button" onClick={() => {
             setPendingFiles([new File([output.bytes.slice().buffer], output.name, { type: 'application/pdf' })]);
             navigate('/app');
           }}>Open in editor</button>}

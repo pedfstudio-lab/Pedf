@@ -69,6 +69,13 @@
 .compress-recommendation { margin: 0; color: #255093; font-size: .9rem; }
 .tool-options { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
 .tool-options legend { margin-bottom: 14px; font-size: 1.25rem; font-weight: 750; }
+.lock-options { max-width: 660px; }
+.lock-options > .tool-hint { margin: 0; }
+.lock-field { display: grid; gap: 8px; font-size: .9rem; font-weight: 650; }
+.lock-field input { min-height: 48px; width: 100%; border: 1px solid #b8c9df; border-radius: 10px; background: #fff; color: var(--site-ink); font: inherit; padding: 10px 12px; }
+.lock-field input:focus { border-color: var(--site-blue); outline: 3px solid rgba(30, 107, 255, .16); }
+.lock-explainer { border: 1px solid var(--site-line); border-radius: 14px; padding: 18px; background: #f8faff; line-height: 1.6; }
+.lock-explainer p { margin: 8px 0 0; color: var(--site-body); font-size: .9rem; }
 .tool-option-choice { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--site-line); border-radius: 14px; cursor: pointer; }
 .tool-option-choice:has(input:checked) { border-color: var(--site-blue); background: #f6f9ff; box-shadow: 0 0 0 1px var(--site-blue); }
 .tool-option-choice input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--site-blue); }

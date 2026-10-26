@@ -13,6 +13,7 @@ describe('local tools privacy guard', () => {
   it('keeps network APIs out of tool processing and UI source', () => {
     const files = [
       ...sources(resolve('src/lib/tools')),
+      ...sources(resolve('src/lib/lockPdf')),
       ...sources(resolve('src/components/tools')),
       ...sources(resolve('src/lib/projects')),
     ];

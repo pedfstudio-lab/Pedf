@@ -4,6 +4,8 @@ export interface ToolOutput {
   name: string;
   bytes: Uint8Array;
   mime: string;
+  /** Protected outputs cannot be passed directly to the existing unencrypted editor. */
+  canOpenInEditor?: boolean;
   note?: { text: string; tone: 'ok' | 'warn' | 'danger' };
 }
 
@@ -33,6 +35,8 @@ export interface ToolDefinition {
   run(inputs: File[], options: ToolOptions, ctx: ToolContext): Promise<ToolOutput[]>;
   Options?: ComponentType<ToolOptionsProps>;
   defaultOptions: ToolOptions;
+  /** Clear secrets from UI options as soon as processing starts; never persist them. */
+  sensitiveOptions?: boolean;
   icon?: ReactNode;
   /**
    * Shown in the file card when its thumbnail cannot be drawn (default: the reading error, in red). Repair uses a

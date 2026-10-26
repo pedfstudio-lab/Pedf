@@ -1,0 +1,49 @@
+Lock PDF - third-party software notices
+======================================
+
+Lock PDF uses @neslinesli93/qpdf-wasm 0.3.0, bundled with the app and
+loaded from the app's own origin. No PDF or password is sent to these projects.
+
+WASM wrapper: @neslinesli93/qpdf-wasm, package licence ISC.
+Source: https://github.com/neslinesli93/qpdf-wasm
+The upstream npm package declares ISC in package.json, but ships no separate
+copyright or licence notice. The standard ISC permission/disclaimer follows:
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
+OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+qpdf 12.2.0: Apache License 2.0.
+Source: https://github.com/qpdf/qpdf/tree/v12.2.0
+See APACHE-2.0.txt and QPDF-NOTICE.md in this directory. QPDF-NOTICE.md also
+includes its public-domain AES and sphlib SHA-2 acknowledgements.
+
+The published WASM build recipe pins qpdf to
+856d32c610334855d30e96d25eb5f9636fb62f08, zlib to
+21767c654d31d2dccdde4330529775c6c5fd5389, and libjpeg-turbo to
+7aa2a898c564041a24b09d0a6e780aaa632d08d3, using Emscripten 3.1.74.
+
+zlib 1.2.12: zlib licence. See ZLIB-README.txt.
+Source: https://github.com/madler/zlib/tree/21767c654d31d2dccdde4330529775c6c5fd5389
+
+libjpeg-turbo: IJG, BSD-3-Clause and zlib licences.
+This software is based in part on the work of the Independent JPEG Group.
+See LIBJPEG-TURBO-LICENSE.md and README.ijg.
+Source: https://github.com/ImageMagick/jpeg-turbo/tree/7aa2a898c564041a24b09d0a6e780aaa632d08d3
+
+Emscripten runtime: MIT / University of Illinois-NCSA, with bundled Node.js
+and musl notices. See EMSCRIPTEN-LICENSE.txt and MUSL-COPYRIGHT.txt.
+Source: https://github.com/emscripten-core/emscripten/tree/3.1.74
+
+The upstream JS/WASM is not source-modified by this project; the app adds a
+separate worker, validation and UI. This notice is not a security audit or an
+endorsement by any upstream author. Keep the pinned engine under review and
+update it when an appropriate maintained build is available.

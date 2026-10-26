@@ -23,7 +23,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Repair PDF/ }).getAttribute('href')).toBe('/tools/repair');
     expect(screen.getByRole('link', { name: /Sign PDF/ }).getAttribute('href')).toBe('/tools/sign');
     expect(screen.getByRole('link', { name: /Compress PDF/ }).getAttribute('href')).toBe('/tools/compress');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(12);
+    expect(screen.getByRole('link', { name: /Lock PDF/ }).getAttribute('href')).toBe('/tools/lock');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(13);
   });
 
   it('falls back to the tools index for an unknown slug', () => {
@@ -122,5 +123,13 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('radio', { name: /Medium/ })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Fit under a size/ })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Compress PDF' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('opens Lock PDF with password confirmation and a disabled action', () => {
+    render(<ToolsApp slug="lock" />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Lock PDF');
+    expect(screen.getByLabelText('Password').getAttribute('type')).toBe('password');
+    expect(screen.getByLabelText('Confirm password').getAttribute('type')).toBe('password');
+    expect((screen.getByRole('button', { name: 'Lock PDF' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
