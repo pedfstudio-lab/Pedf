@@ -371,8 +371,8 @@ describe('TextEditOverlay appearance controls', () => {
   });
 
   it.each([
-    ['bold', 'B'],
-    ['italic', 'I'],
+    ['bold', 'Bold'],
+    ['italic', 'Italic'],
   ] as const)('commits %s toggled at a collapsed caret to the whole box', (property, button) => {
     const onDone = vi.fn();
     renderEditor(block('whole box', 24), 1, 0, { onDone });
@@ -385,8 +385,8 @@ describe('TextEditOverlay appearance controls', () => {
   });
 
   it.each([
-    ['bold', 'B'],
-    ['italic', 'I'],
+    ['bold', 'Bold'],
+    ['italic', 'Italic'],
   ] as const)('commits %s turned on for a selection as rich spans', (property, button) => {
     installFormattingCommandMock();
     const onDone = vi.fn();
@@ -404,8 +404,8 @@ describe('TextEditOverlay appearance controls', () => {
   });
 
   it.each([
-    ['bold', 'B'],
-    ['italic', 'I'],
+    ['bold', 'Bold'],
+    ['italic', 'Italic'],
   ] as const)('commits %s turned off for a selection as rich spans', (property, button) => {
     installFormattingCommandMock();
     const onDone = vi.fn();
@@ -1722,6 +1722,42 @@ describe('text size from all four corners', () => {
     expect(centre('Drag the top-right corner to resize text')).toEqual([left! + width!, top]);
     expect(centre('Drag the bottom-left corner to resize text')).toEqual([left, top! + height!]);
     expect(centre('Drag to resize text')).toEqual([left! + width!, top! + height!]);
+  });
+
+  it('keeps every handle reachable on a one-line box: grab areas reach outwards only', () => {
+    renderEditor(block('ABOUT ME', 17));
+    const frame = screen.getByTestId('text-editor-frame');
+    const [left, top, width, height] = [frame.style.left, frame.style.top, frame.style.width, frame.style.height].map(px) as [number, number, number, number];
+    expect(height).toBeLessThan(26); // short enough that 24px areas around each dot would collide
+    type Box = { x1: number; y1: number; x2: number; y2: number };
+    const overlaps = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+    const handles = [...corners.map(([label]) => label), 'Drag to change text width'].map((label) => {
+      const button = screen.getByRole('button', { name: label });
+      const [x, y] = [px(button.style.left), px(button.style.top)];
+      const area = button.querySelector<HTMLElement>('[data-testid="handle-grab-area"]')!;
+      // The area is placed inside the dot's 1px border.
+      const [ax, ay] = [x + 1 + px(area.style.left), y + 1 + px(area.style.top)];
+      return {
+        label,
+        dot: { x1: x, y1: y, x2: x + 10, y2: y + 10 },
+        area: { x1: ax, y1: ay, x2: ax + px(area.style.width), y2: ay + px(area.style.height) },
+      };
+    });
+    const text = { x1: left, y1: top, x2: left + width, y2: top + height };
+    for (const handle of handles) {
+      // 24px to grab, counting the dot itself.
+      expect(Math.max(handle.area.x2, handle.dot.x2) - Math.min(handle.area.x1, handle.dot.x1)).toBe(24);
+      expect(Math.max(handle.area.y2, handle.dot.y2) - Math.min(handle.area.y1, handle.dot.y1)).toBe(24);
+      expect(overlaps(handle.area, text), `${handle.label} covers the text`).toBe(false);
+      for (const other of handles) {
+        if (other !== handle) expect(overlaps(handle.area, other.dot), `${handle.label} covers ${other.label}`).toBe(false);
+      }
+    }
+    // Just right of the width dot, at mid-height, no corner competes for the pointer.
+    const widthSpot = { x1: left + width + 8, y1: top + height / 2, x2: left + width + 9, y2: top + height / 2 + 1 };
+    const widthHandle = handles.find((handle) => handle.label === 'Drag to change text width')!;
+    expect(overlaps(widthHandle.area, widthSpot)).toBe(true);
+    for (const corner of handles.filter((handle) => handle !== widthHandle)) expect(overlaps(corner.area, widthSpot)).toBe(false);
   });
 
   it.each(corners)('%s: away from the box is bigger, towards it smaller', (label, x, y) => {

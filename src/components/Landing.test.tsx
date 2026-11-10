@@ -26,7 +26,7 @@ describe('Landing', () => {
     const { container } = render(<Landing />);
 
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Read it. Ask it. Edit it.');
-    expect(screen.getByRole('link', { name: 'Try it free' }).getAttribute('href')).toBe('/app');
+    expect(screen.getByRole('link', { name: 'Start editing' }).getAttribute('href')).toBe('/app');
     expect(screen.getByText('English, Hindi & 8 more Indian languages')).toBeTruthy();
     expect(screen.getByText('© 2026 PEDF Studio')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Tools' }).getAttribute('href')).toBe('/tools');

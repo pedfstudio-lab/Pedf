@@ -31,7 +31,7 @@ export function SiteHeader({ compact = false }: { readonly compact?: boolean }) 
             <a href={siteHref('#faq')}>FAQ</a>
           </div>
         )}
-        <a className="site-button site-button--small" href={siteHref('/app')}>Try it free</a>
+        <a className="site-button site-button--small" href={siteHref('/app')}>Start editing</a>
       </nav>
     </header>
   );

@@ -854,6 +854,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             <div>
               <h2 id="pdf-chat-title" className="text-lg font-semibold text-neutral-900">Ask this PDF</h2>
               <p className="mt-1 text-xs text-neutral-500">Answers come from this PDF; general knowledge is clearly labeled.</p>
+              <p className="mt-1 text-xs text-neutral-500">Your question, your voice and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.</p>
             </div>
             <button
               type="button"

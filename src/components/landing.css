@@ -1,6 +1,8 @@
 :root {
   --site-blue: #1e6bff;
   --site-blue-dark: #0753e6;
+  /* Small blue text: readable (4.5:1) on white and on the pale band. */
+  --site-blue-text: #1a5fe0;
   --site-ink: #0b1220;
   --site-body: #5b6472;
   --site-line: #dbe6f7;
@@ -114,7 +116,8 @@
   justify-content: center;
   gap: 8px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #2681ff 0%, #0b57f0 100%);
+  /* Dark enough for white text across the whole gradient (4.7:1 or more). */
+  background: linear-gradient(135deg, #1f6fe5 0%, #0b4fd6 100%);
   box-shadow: 0 14px 32px rgba(30, 107, 255, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.28);
   color: #fff;
   font-weight: 750;
@@ -137,7 +140,7 @@
 
 .site-eyebrow {
   margin: 0 0 16px;
-  color: var(--site-blue);
+  color: var(--site-blue-text);
   font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.18em;
@@ -587,7 +590,7 @@
 .site-footer p {
   justify-self: end;
   margin: 0;
-  color: #6e7787;
+  color: var(--site-body);
   font-size: 0.9rem;
 }
 

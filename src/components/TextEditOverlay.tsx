@@ -112,6 +112,34 @@ const RESIZE_CORNERS: readonly ResizeCorner[] = [
   { label: 'Drag the top-left corner to resize text', x: -1, y: -1, top: true },
 ];
 
+const HANDLE_DOT_PX = 10;
+const HANDLE_GRAB_PX = 24;
+/**
+ * An invisible area that makes a 10px handle dot 24px to grab. It reaches outwards, away
+ * from the text (x/y: -1, 0 or 1 per axis), so it never covers the text or another
+ * handle's dot: on a one-line box the width handle stays reachable between the corners.
+ */
+function HandleGrabArea({ x, y }: { readonly x: -1 | 0 | 1; readonly y: -1 | 0 | 1 }) {
+  // Offsets are from the dot's padding box (inside its 1px border); the dot's centre is 4px in.
+  const centre = HANDLE_DOT_PX / 2 - 1;
+  const reach = HANDLE_GRAB_PX - HANDLE_DOT_PX / 2;
+  // A corner's area starts at its dot's centre. An edge handle's starts beyond its own dot,
+  // so on a short box it never reaches the corner dots beside it.
+  const skip = x !== 0 && y !== 0 ? 0 : HANDLE_DOT_PX / 2;
+  const axis = (side: -1 | 0 | 1) => side === 0
+    ? { start: centre - HANDLE_GRAB_PX / 2, size: HANDLE_GRAB_PX }
+    : { start: side > 0 ? centre + skip : centre - reach, size: reach - skip };
+  const across = axis(x), down = axis(y);
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="handle-grab-area"
+      className="absolute"
+      style={{ left: across.start, width: across.size, top: down.start, height: down.size }}
+    />
+  );
+}
+
 /** Text-node ranges avoid the full-width rectangles of block-level DOM wrappers. */
 function liveTextFrame(
   editable: HTMLElement,
@@ -1385,7 +1413,8 @@ export function TextEditOverlay({
       <style>{'[data-pdf-justify-tail="true"]::after{content:"\\2060";font-size:0;letter-spacing:0;word-spacing:0;padding-right:var(--pdf-justify-tail-width,0px)}'}</style>
       <div
         ref={toolbarRef}
-        className="absolute z-20 flex flex-wrap items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
+        // Above every handle and its grab area: nothing may cover a toolbar button.
+        className="absolute z-40 flex flex-wrap items-center gap-1 rounded-lg border border-neutral-300 bg-white p-1 shadow-xl"
         style={{ ...toolbarOffset, width: 'max-content', maxWidth: pageSizePx.width }}
         role="toolbar"
         aria-label="Text formatting"
@@ -1415,8 +1444,8 @@ export function TextEditOverlay({
           <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
         )}
         <FontSizeCombobox value={selectionStyle.fontSizePt} onApply={applyFontSize} />
-        <button type="button" aria-pressed={selectionStyle.bold} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
-        <button type="button" aria-pressed={selectionStyle.italic} onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
+        <button type="button" aria-pressed={selectionStyle.bold} aria-label="Bold" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
+        <button type="button" aria-pressed={selectionStyle.italic} aria-label="Italic" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
         <select
           aria-label="Font family"
           value={selectionStyle.family}
@@ -1595,16 +1624,21 @@ export function TextEditOverlay({
         aria-label="Drag to change text width"
         onPointerDown={beginWidthDrag}
         style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height / 2 - 5 }}
-        className="absolute z-10 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
-      />
+        // Above the corner handles, so a short box's corners never cover it.
+        className="absolute z-30 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+      >
+        <HandleGrabArea x={1} y={0} />
+      </button>
       {freeBox && (
         <button
           type="button"
           aria-label="Drag to change box height"
           onPointerDown={beginHeightDrag}
           style={{ left: visualFrame.left + visualFrame.width / 2 - 5, top: visualFrame.top + visualFrame.height - 5 }}
-          className="absolute z-10 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
-        />
+          className="absolute z-30 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+        >
+          <HandleGrabArea x={0} y={1} />
+        </button>
       )}
       {RESIZE_CORNERS.map(corner => (
         <button
@@ -1630,7 +1664,9 @@ export function TextEditOverlay({
             top: visualFrame.top + (corner.y > 0 ? visualFrame.height : 0) - 5,
           }}
           className={`absolute z-20 h-2.5 w-2.5 touch-none ${corner.x === corner.y ? 'cursor-nwse-resize' : 'cursor-nesw-resize'} rounded-sm border border-white bg-blue-500 hover:bg-blue-600`}
-        />
+        >
+          <HandleGrabArea x={corner.x} y={corner.y} />
+        </button>
       ))}
     </div>
   );

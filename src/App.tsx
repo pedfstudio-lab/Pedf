@@ -947,7 +947,8 @@ function EditorApp() {
             role="dialog"
             aria-modal="true"
             aria-label="Saved files drawer"
-            className="fixed inset-x-0 bottom-0 top-14 z-[170] flex bg-neutral-950/45"
+            // Fills the area under the top bar, however many lines the bar needs.
+            className="absolute inset-0 z-[170] flex bg-neutral-950/45"
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) setSavedFilesDrawerOpen(false);
             }}
@@ -1053,7 +1054,7 @@ function EditorApp() {
               </button>
               <button
                 type="button"
-                className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
                 onClick={() => {
                   setSaveFailure(null);
                   setPendingSwitch(null);
@@ -1088,7 +1089,7 @@ function EditorApp() {
       {downloadReady && (
         <aside className="fixed bottom-4 left-4 z-[100] flex items-center gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 shadow-xl" role="status">
           <span>Export ready</span>
-          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-600">
+          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800">
             Download edited PDF
           </a>
           <button type="button" onClick={() => setDownloadReady(null)} className="rounded px-1 text-lg leading-none hover:bg-emerald-100" aria-label="Dismiss download">×</button>

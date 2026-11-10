@@ -17,7 +17,7 @@ const features = [
 const faqs = [
   ['Is it free?', 'Yes. PEDF Studio is free to use.'],
   ['Do I need an account?', 'No. Open the page and start with a PDF.'],
-  ['Does it work offline?', 'Editing works offline once the page is open. Voice and chat need an internet connection.'],
+  ['Does it work offline?', 'Editing works offline once the page is open. Chat, voice and Translate need an internet connection.'],
   ['Which languages are supported?', 'English, Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, and Punjabi.'],
   ['Where is my file stored?', 'Your PDF and saved edits stay only in this browser on this device. You download the edited copy when you are ready.'],
   ['What does voice need?', 'A Sarvam API key in Settings until our managed proxy goes live.'],
@@ -47,9 +47,9 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
             <PdfDropZone onFile={openFile} />
           </div>
 
-          <div className="hero__visual" aria-label="A PDF document opening into a voice chat">
+          <div className="hero__visual">
             <div className="hero__glow" aria-hidden="true" />
-            <img src={siteHref('landing/hero-doc.webp')} width="1100" height="825" alt="3D PDF document with a folded blue corner and chat panel" />
+            <img src={siteHref('landing/hero-doc.webp')} width="1100" height="825" alt="3D PDF document opening into a voice chat panel" />
             <div className="chat-demo" aria-hidden="true">
               <div className="chat-demo__question">What does clause 4 mean?<span className="chat-demo__mic">●</span></div>
               <div className="chat-demo__answer">Clause 4 refers to termination by either party with 30 days’ written notice.</div>
@@ -64,7 +64,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
           <div className="features__grid">
             {features.map((feature) => (
               <a className="feature" key={feature.title} href={siteHref(feature.href)}>
-                <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt={feature.alt} />
+                <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt={feature.alt} loading="lazy" decoding="async" />
                 <h3>{feature.title}</h3>
               </a>
             ))}
@@ -86,13 +86,13 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
         <section className="privacy-band" id="privacy" aria-labelledby="privacy-title">
           <div className="site-shell privacy-band__inner">
             <div className="privacy-band__art">
-              <img src={siteHref('landing/laptop-lock.webp')} width="900" height="600" alt="3D laptop, PDF page, and padlock" />
+              <img src={siteHref('landing/laptop-lock.webp')} width="900" height="600" alt="3D laptop, PDF page, and padlock" loading="lazy" decoding="async" />
             </div>
             <div className="privacy-band__copy">
               <p className="site-eyebrow">Private by design</p>
               <h2 id="privacy-title">Runs on your computer.<span>Stays on your computer.</span></h2>
               <p>Everything is processed in your browser. Your PDF never leaves your device.</p>
-              <p className="privacy-band__detail">Voice and chat send only your question, your audio, and the document’s text to Sarvam AI to get an answer. Nothing is stored.</p>
+              <p className="privacy-band__detail">Chat, voice and Translate send only your question, your audio, and the document’s text to Sarvam AI to get an answer or a translation. Nothing is stored.</p>
               <a href={siteHref('/privacy')}>Read our privacy notes <span aria-hidden="true">→</span></a>
             </div>
           </div>

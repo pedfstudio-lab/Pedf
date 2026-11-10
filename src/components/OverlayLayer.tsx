@@ -1074,7 +1074,7 @@ export function OverlayLayer({
               setFreeTextSession(null);
               setActiveRuleLine(editable);
             }}
-            className="absolute cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none"
+            className="absolute cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
             style={{
               left: rect.left - (hitWidth - rect.width) / 2,
               top: rect.top - (hitHeight - rect.height) / 2,
@@ -1115,7 +1115,7 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: owner, text: actionText, screenRect: rect });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1159,7 +1159,7 @@ export function OverlayLayer({
                 screenRect: rect,
               });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1192,7 +1192,7 @@ export function OverlayLayer({
                 boxId,
               });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1231,7 +1231,7 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
             style={{
               left: rect.left,
               top: rect.top,

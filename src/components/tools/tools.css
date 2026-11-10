@@ -156,6 +156,8 @@
 .placement-guide-v { top: 0; bottom: 0; left: 50%; width: 1px; }
 .placement-guide-h { left: 0; right: 0; top: 50%; height: 1px; }
 .placement-resize-handle { position: absolute; z-index: 5; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: var(--site-blue); box-shadow: 0 1px 5px rgba(20, 42, 78, .35); touch-action: none; }
+/* The dot stays 14px; the grab area around it is 24px. */
+.placement-resize-handle::before { position: absolute; inset: -7px; content: ""; }
 .placement-resize-nw { top: -7px; left: -7px; cursor: nwse-resize; }
 .placement-resize-ne { top: -7px; right: -7px; cursor: nesw-resize; }
 .placement-resize-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }

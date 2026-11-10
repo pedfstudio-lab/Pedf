@@ -43,6 +43,14 @@ interface ToolbarProps {
 
 const SAVE_TOOLTIP = 'Saved only in this browser on this device. Clearing browser data removes it.';
 const SAVE_AND_CLOSE_TOOLTIP = 'Save every change on this device and close the file. Ctrl+S saves without closing.';
+const PLAIN_BUTTON = 'whitespace-nowrap rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40';
+/** A switched-on mode. Each mode adds its colour, darker on hover so the white text stays readable. */
+const PRESSED_BUTTON = 'whitespace-nowrap rounded-md border border-transparent px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40';
+const ICON_BUTTON = 'w-8 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40';
+
+function Divider() {
+  return <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-neutral-300" />;
+}
 
 export function Toolbar({
   onOpen,
@@ -111,38 +119,96 @@ export function Toolbar({
         : saveStatus === 'unavailable'
           ? "Can't save on this device"
           : '';
+  const saveProblem = saveStatus === 'full' || saveStatus === 'unavailable';
 
+  // Two rows, so every label fits on one line on a 1366px laptop:
+  // the file (name, save status, file actions) above the editing tools.
+  // In a narrow window the buttons move onto another line instead of off the screen.
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
-      <button
-        type="button"
-        onClick={onHome}
-        title="Save and go to the home page"
-        className="cursor-pointer rounded text-lg font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-      >
-        PEDF Studio
-      </button>
-      {fileName && (
-        <span className="max-w-[45%] truncate text-sm text-neutral-500" title={fileName}>
-          {fileName}
-        </span>
-      )}
-      <div className="ml-auto flex items-center gap-2">
+    <header className="shrink-0 border-b border-neutral-200 bg-white">
+      <div className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-1.5">
+        <div className="flex min-w-0 grow basis-64 items-center gap-3">
+          <button
+            type="button"
+            onClick={onHome}
+            title="Save and go to the home page"
+            className="shrink-0 cursor-pointer whitespace-nowrap rounded text-lg font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            PEDF Studio
+          </button>
+          {fileName && (
+            <span className="min-w-0 truncate text-sm text-neutral-600" title={fileName}>
+              {fileName}
+            </span>
+          )}
+          {statusText && (
+            <span
+              role="status"
+              title={SAVE_TOOLTIP}
+              className={`text-xs ${saveProblem ? 'max-w-md font-semibold text-red-700' : 'shrink-0 whitespace-nowrap text-neutral-500'}`}
+            >
+              {statusText}
+            </span>
+          )}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Settings"
+            className={PLAIN_BUTTON}
+          >
+            ⚙ Settings
+          </button>
+          <button
+            type="button"
+            onClick={onSaveAndClose}
+            disabled={!fileName || saveStatus === 'saving'}
+            title={SAVE_AND_CLOSE_TOOLTIP}
+            className={PLAIN_BUTTON}
+          >
+            Save &amp; close
+          </button>
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={!fileName || exporting}
+            className="whitespace-nowrap rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-40"
+          >
+            {exporting ? 'Exporting…' : 'Export PDF'}
+          </button>
+          <label className="cursor-pointer whitespace-nowrap rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700">
+            Open PDF
+            <input
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onOpen(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+      </div>
+      <div className="flex min-h-11 flex-wrap items-center gap-1.5 border-t border-neutral-100 bg-neutral-50 px-4 py-1">
         <button
           type="button"
           aria-pressed={savedFilesOpen}
           onClick={onToggleSavedFiles}
-          className="whitespace-nowrap rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+          className={PLAIN_BUTTON}
         >
           Saved files
         </button>
+        <Divider />
         <button
           type="button"
           onClick={undo}
           disabled={!canUndo}
           aria-label="Undo document edit"
           title="Undo (Ctrl+Z)"
-          className="w-9 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className={ICON_BUTTON}
         >
           ↶
         </button>
@@ -152,7 +218,7 @@ export function Toolbar({
           disabled={!canRedo}
           aria-label="Redo document edit"
           title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
-          className="w-9 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className={ICON_BUTTON}
         >
           ↷
         </button>
@@ -167,7 +233,7 @@ export function Toolbar({
             disabled={zoom <= ZOOM_MIN}
             aria-label="Zoom out"
             title="Zoom out (Ctrl+-)"
-            className="w-8 rounded-l-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-7 rounded-l-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             −
           </button>
@@ -176,7 +242,7 @@ export function Toolbar({
             onClick={zoomReset}
             aria-label={`Reset zoom to 100% (currently ${Math.round(zoom * 100)}%)`}
             title="Reset zoom (Ctrl+0)"
-            className="min-w-14 border-x border-neutral-300 px-2 py-1.5 text-xs font-semibold tabular-nums text-neutral-700 hover:bg-neutral-100"
+            className="min-w-12 border-x border-neutral-300 px-2 py-1.5 text-xs font-semibold tabular-nums text-neutral-700 hover:bg-neutral-100"
           >
             {Math.round(zoom * 100)}%
           </button>
@@ -186,17 +252,18 @@ export function Toolbar({
             disabled={zoom >= ZOOM_MAX}
             aria-label="Zoom in"
             title="Zoom in (Ctrl+=)"
-            className="w-8 rounded-r-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-7 rounded-r-md py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             +
           </button>
         </div>
+        <Divider />
         <button
           type="button"
           aria-pressed={editMode}
           onClick={() => onEditModeChange(!editMode)}
           disabled={!fileName}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${editMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
+          className={editMode ? `${PRESSED_BUTTON} bg-blue-600 hover:bg-blue-700` : PLAIN_BUTTON}
         >
           Edit text
         </button>
@@ -205,7 +272,7 @@ export function Toolbar({
           aria-pressed={textAddMode}
           onClick={() => onTextAddModeChange(!textAddMode)}
           disabled={!fileName}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${textAddMode ? 'bg-violet-700 text-white hover:bg-violet-600' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
+          className={textAddMode ? `${PRESSED_BUTTON} bg-violet-700 hover:bg-violet-800` : PLAIN_BUTTON}
         >
           Add text
         </button>
@@ -214,7 +281,7 @@ export function Toolbar({
           aria-pressed={imageMode}
           onClick={() => onImageModeChange(!imageMode)}
           disabled={!fileName}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${imageMode ? 'bg-cyan-700 text-white hover:bg-cyan-600' : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100'}`}
+          className={imageMode ? `${PRESSED_BUTTON} bg-cyan-700 hover:bg-cyan-800` : PLAIN_BUTTON}
         >
           Add image
         </button>
@@ -222,67 +289,22 @@ export function Toolbar({
           type="button"
           onClick={onOpenSign}
           disabled={!fileName}
-          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className={PLAIN_BUTTON}
         >
           Sign
         </button>
         <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />
-        <button
-          type="button"
-          onClick={onOpenChat}
-          disabled={!fileName}
-          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          💬 Ask
-        </button>
-        <TranslationControls disabled={!fileName} onTranslate={onTranslate} />
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          aria-label="Settings"
-          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
-        >
-          ⚙ Settings
-        </button>
-        {statusText && (
-          <span
-            role="status"
-            title={SAVE_TOOLTIP}
-            className={`max-w-56 text-right text-xs ${saveStatus === 'full' || saveStatus === 'unavailable' ? 'font-semibold text-red-700' : 'text-neutral-500'}`}
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenChat}
+            disabled={!fileName}
+            className={PLAIN_BUTTON}
           >
-            {statusText}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={onSaveAndClose}
-          disabled={!fileName || saveStatus === 'saving'}
-          title={SAVE_AND_CLOSE_TOOLTIP}
-          className="whitespace-nowrap rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Save &amp; close
-        </button>
-        <button
-          type="button"
-          onClick={onExport}
-          disabled={!fileName || exporting}
-          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-40"
-        >
-          {exporting ? 'Exporting…' : 'Export PDF'}
-        </button>
-      <label className="cursor-pointer rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700">
-        Open PDF
-        <input
-          type="file"
-          accept="application/pdf"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onOpen(f);
-            e.target.value = '';
-          }}
-        />
-      </label>
+            💬 Ask
+          </button>
+          <TranslationControls disabled={!fileName} onTranslate={onTranslate} />
+        </div>
       </div>
     </header>
   );
