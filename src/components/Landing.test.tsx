@@ -99,4 +99,26 @@ describe('Landing', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/app'));
     expect(pendingFile.takePendingProject()).toBe('contract-project');
   });
+
+  it('folds the page links into a ☰ menu that opens and closes (phones)', () => {
+    render(<Landing />);
+    const menu = screen.getByRole('button', { name: 'Menu' });
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(menu.getAttribute('aria-controls')).toBe('site-nav-links');
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(menu);
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    expect(nav.classList.contains('is-open')).toBe(true);
+    fireEvent.click(screen.getByRole('link', { name: 'FAQ' }));
+    expect(nav.classList.contains('is-open')).toBe(false);
+
+    fireEvent.click(menu);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(menu);
+    fireEvent.pointerDown(document.body);
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+  });
 });

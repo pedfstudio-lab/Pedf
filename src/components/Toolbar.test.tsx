@@ -152,6 +152,65 @@ describe('Toolbar signature action', () => {
     expect(screen.getByRole('button', { name: 'Saved files' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  describe('on a phone', () => {
+    const phoneProps = () => ({
+      onOpen: vi.fn(), fileName: 'trip.pdf', editMode: false, textAddMode: false,
+      imageMode: false, hasEdits: true, exporting: false, saveStatus: 'idle' as const,
+      zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
+      onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
+      savedFilesOpen: false, onToggleSavedFiles: vi.fn(), phoneLayout: true,
+    });
+
+    it('shows one row: the logo, Ask, Export PDF and a ☰ for everything else', () => {
+      render(<EditsStoreProvider><Toolbar {...phoneProps()} /></EditsStoreProvider>);
+      for (const name of ['PEDF Studio', '💬 Ask', 'Export PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
+      const more = screen.getByRole('button', { name: 'More tools' });
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByRole('button', { name: 'Edit text' })).toBeNull();
+
+      fireEvent.click(more);
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+      for (const group of ['Edit', 'View', 'File']) expect(screen.getByRole('group', { name: group })).toBeTruthy();
+      for (const name of ['Edit text', 'Add text', 'Add image', 'Sign', 'Undo document edit', 'Zoom in', 'Saved files', 'Save & close', 'Settings']) {
+        expect(screen.getByRole('button', { name })).toBeTruthy();
+      }
+      expect(screen.getByText('trip.pdf')).toBeTruthy();
+    });
+
+    it('closes the panel after choosing a tool, but not after zooming', () => {
+      const props = phoneProps();
+      render(<EditsStoreProvider><Toolbar {...props} /></EditsStoreProvider>);
+      const more = screen.getByRole('button', { name: 'More tools' });
+      fireEvent.click(more);
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+      expect(props.zoomIn).toHaveBeenCalledOnce();
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Edit text' }));
+      expect(props.onEditModeChange).toHaveBeenCalledWith(true);
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('closes the panel with Escape or a tap outside the bar', () => {
+      render(<EditsStoreProvider><Toolbar {...phoneProps()} /></EditsStoreProvider>);
+      const more = screen.getByRole('button', { name: 'More tools' });
+      fireEvent.click(more);
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+
+      fireEvent.click(more);
+      fireEvent.pointerDown(document.body);
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('keeps a save problem visible without opening the panel', () => {
+      render(<EditsStoreProvider><Toolbar {...phoneProps()} saveStatus="full" /></EditsStoreProvider>);
+      expect(screen.getByRole('status').textContent).toContain("Couldn't save");
+    });
+  });
+
   it('makes the PEDF Studio logo a button that goes home (Task 82)', () => {
     const onHome = vi.fn();
     const onSaveAndClose = vi.fn();

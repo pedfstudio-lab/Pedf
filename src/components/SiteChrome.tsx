@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { siteHref } from '@/lib/site/config';
 
@@ -16,14 +17,36 @@ export function Brand() {
   );
 }
 
+const MENU_ID = 'site-nav-links';
+
 export function SiteHeader({ compact = false }: { readonly compact?: boolean }) {
+  // On phones the links fold into a ☰ menu (landing.css hides them under 760px).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', closeOutside);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [menuOpen]);
+
   return (
-    <header className="site-header">
-      <nav className="site-shell site-nav" aria-label="Main navigation">
+    <header ref={headerRef} className="site-header">
+      <nav className={`site-shell site-nav${menuOpen ? ' is-open' : ''}`} aria-label="Main navigation">
         <Brand />
         {compact && <a className="site-nav__tools" href={siteHref('/tools')}>Tools</a>}
         {!compact && (
-          <div className="site-nav__links">
+          <div className="site-nav__links" id={MENU_ID} onClick={() => setMenuOpen(false)}>
             <a href={siteHref('/tools')}>Tools</a>
             <a href={siteHref('#features')}>Features</a>
             <a href={siteHref('#how')}>How it Works</a>
@@ -32,6 +55,18 @@ export function SiteHeader({ compact = false }: { readonly compact?: boolean }) 
           </div>
         )}
         <a className="site-button site-button--small" href={siteHref('/app')}>Start editing</a>
+        {!compact && (
+          <button
+            type="button"
+            className="site-nav__menu"
+            aria-expanded={menuOpen}
+            aria-controls={MENU_ID}
+            aria-label="Menu"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span aria-hidden="true">{menuOpen ? '✕' : '☰'}</span>
+          </button>
+        )}
       </nav>
     </header>
   );

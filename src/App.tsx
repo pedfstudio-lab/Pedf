@@ -133,6 +133,15 @@ interface PendingSwitch {
 }
 
 const SAVED_FILES_COLUMN_KEY = 'pedf.savedFilesColumn';
+const PHONE_NOTICE_KEY = 'pedf.phoneNoticeDismissed';
+
+function readPhoneNoticeDismissed(): boolean {
+  try {
+    return localStorage.getItem(PHONE_NOTICE_KEY) === 'yes';
+  } catch {
+    return false;
+  }
+}
 const PHONE_SAVED_FILES_QUERY = '(max-width: 767px)';
 
 function savedFilesColumnInitiallyOpen(): boolean {
@@ -201,6 +210,15 @@ function EditorApp() {
   const [savedFilesOpen, setSavedFilesOpen] = useState(savedFilesColumnInitiallyOpen);
   const [savedFilesDrawerOpen, setSavedFilesDrawerOpen] = useState(false);
   const phoneLayout = usePhoneLayout();
+  const [phoneNoticeDismissed, setPhoneNoticeDismissed] = useState(readPhoneNoticeDismissed);
+  const dismissPhoneNotice = () => {
+    setPhoneNoticeDismissed(true);
+    try {
+      localStorage.setItem(PHONE_NOTICE_KEY, 'yes');
+    } catch {
+      // Private browsing: the note simply comes back next visit.
+    }
+  };
   const saveBusy = useRef(false);
   const scrollRef = useRef<HTMLElement>(null);
   const openingPlan = useRef<ReturnType<typeof createPagePlan> | null>(null);
@@ -787,6 +805,7 @@ function EditorApp() {
         savedAt={autosave.savedAt}
         saveNotice={saveNotice}
         savedFilesOpen={phoneLayout ? savedFilesDrawerOpen : savedFilesOpen}
+        phoneLayout={phoneLayout}
         zoom={zoom}
         zoomIn={zoomIn}
         zoomOut={zoomOut}
@@ -833,6 +852,19 @@ function EditorApp() {
         onHome={() => void goHome()}
       />
       <TranslationPrivacyNote />
+      {phoneLayout && !phoneNoticeDismissed && (
+        <aside role="note" className="flex shrink-0 items-start gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <span>Editing works best on a computer. You can still open and read your PDF here.</span>
+          <button
+            type="button"
+            onClick={dismissPhoneNotice}
+            aria-label="Dismiss note about phones"
+            className="-my-1 ml-auto shrink-0 rounded px-2 py-1 text-base leading-none hover:bg-amber-100"
+          >
+            ×
+          </button>
+        </aside>
+      )}
       <SettingsPanel
         open={settingsOpen}
         fileOpen={Boolean(document)}

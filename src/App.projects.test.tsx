@@ -783,10 +783,13 @@ describe('App saved projects', () => {
     render(<App />);
 
     expect(screen.queryByRole('complementary', { name: 'Saved files' })).toBeNull();
+    // On a phone, Saved files sits in the ☰ panel of the one-row top bar.
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
     const toggle = screen.getByRole('button', { name: 'Saved files' });
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(toggle);
     expect(await screen.findByRole('dialog', { name: 'Saved files drawer' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Saved files' })).toBeNull(); // choosing it closed the panel
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Saved files drawer' })).toBeNull());
 
@@ -795,5 +798,34 @@ describe('App saved projects', () => {
     fireEvent.click(await within(drawer).findByTitle('Other.pdf'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Saved files drawer' })).toBeNull());
     await waitFor(() => expect(within(screen.getByRole('banner')).getByText('Other.pdf')).toBeTruthy());
+  });
+
+  it('tells phone users that editing works best on a computer, until they dismiss it', () => {
+    const phone = vi.fn((query: string) => ({
+      matches: query === '(max-width: 767px)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    vi.stubGlobal('matchMedia', phone);
+    const view = render(<App />);
+    const note = screen.getByRole('note');
+    expect(note.textContent).toContain('Editing works best on a computer. You can still open and read your PDF here.');
+    fireEvent.click(within(note).getByRole('button', { name: 'Dismiss note about phones' }));
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(localStorage.getItem('pedf.phoneNoticeDismissed')).toBe('yes');
+
+    view.unmount();
+    render(<App />);
+    expect(screen.queryByRole('note')).toBeNull(); // stays dismissed on the next visit
+  });
+
+  it('shows no phone note on a computer', () => {
+    render(<App />);
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });
