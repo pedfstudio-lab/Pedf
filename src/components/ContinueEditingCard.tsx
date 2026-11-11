@@ -44,10 +44,11 @@ function ProjectSummary({
             Continue editing
           </button>
         )}
+        {/* A full-size button at the far end, well away from Continue editing. */}
         <button
           type="button"
           onClick={onDelete}
-          className="text-sm font-medium text-red-700 underline-offset-2 hover:underline"
+          className="ml-auto rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
         >
           Delete saved file
         </button>

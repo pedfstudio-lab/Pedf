@@ -9,12 +9,30 @@ interface PdfDropZoneProps {
   sublabel?: string;
 }
 
+/**
+ * A phone or tablet: no dragging, and people tap rather than click. A touchscreen laptop
+ * still has a trackpad or mouse (a "fine" pointer), so it keeps the drag-and-click words.
+ */
+function isTouchScreen(): boolean {
+  try {
+    return typeof matchMedia === 'function'
+      && matchMedia('(pointer: coarse)').matches
+      && !matchMedia('(any-pointer: fine)').matches;
+  } catch {
+    return false;
+  }
+}
+
+// Never "upload": the PDF is opened on this device, which is the whole promise.
 export function PdfDropZone({
   onFile,
   onError,
-  label = 'Drag & drop your PDF here',
-  sublabel = 'or click to upload',
+  label: givenLabel,
+  sublabel: givenSublabel,
 }: PdfDropZoneProps) {
+  const [touch] = useState(isTouchScreen);
+  const label = givenLabel ?? (touch ? 'Tap to choose your PDF' : 'Drag & drop your PDF here');
+  const sublabel = givenSublabel ?? (touch ? 'It stays on your device.' : 'or click to choose it. It stays on your computer.');
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');

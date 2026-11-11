@@ -57,4 +57,26 @@ describe('Task 79 Translate controls and card', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Tamil/ }));
     expect(value.setLanguage).toHaveBeenCalledWith('ta-IN');
   });
+  it('moves through the language menu with arrow keys and returns focus to Translate', () => {
+    render(<TranslationControls disabled={false} />);
+    const trigger = screen.getByRole('button', { name: /Translate/ });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu', { name: 'Read in your language' });
+    const items = screen.getAllByRole('menuitemradio');
+    items[0]!.focus();
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[0]); // wraps round
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(document.activeElement).toBe(items[0]);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });

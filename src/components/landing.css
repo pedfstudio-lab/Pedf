@@ -131,9 +131,35 @@
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.site-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 18px 38px rgba(30, 107, 255, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+/* Lift on hover only where there is a mouse; on touch it would stay stuck after a tap. */
+@media (hover: hover) {
+  .site-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 38px rgba(30, 107, 255, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  }
+}
+
+/* A tap or click shows straight away that it registered. */
+.site-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Hidden until a keyboard user tabs to it. */
+.site-skip {
+  position: absolute;
+  z-index: 100;
+  top: -80px;
+  left: 16px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--site-ink);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.site-skip:focus {
+  top: 12px;
 }
 
 .site-button--small {
@@ -343,9 +369,15 @@
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
-.feature:hover {
-  transform: translateY(-7px);
-  box-shadow: 0 26px 52px rgba(22, 75, 154, 0.14);
+@media (hover: hover) {
+  .feature:hover {
+    transform: translateY(-7px);
+    box-shadow: 0 26px 52px rgba(22, 75, 154, 0.14);
+  }
+}
+
+.feature:active {
+  transform: scale(0.98);
 }
 
 .feature img {
@@ -515,6 +547,15 @@
   width: 1px;
   height: 34px;
   background: #ccd9ec;
+}
+
+/* The privacy promise's one exception, said right next to it. */
+.trust-note {
+  margin-top: -14px;
+  margin-bottom: 0;
+  color: var(--site-body);
+  font-size: 0.9rem;
+  text-align: center;
 }
 
 .faq {

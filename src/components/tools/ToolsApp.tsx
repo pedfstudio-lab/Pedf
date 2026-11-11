@@ -35,7 +35,7 @@ if (!getTool('lock')) registerTool(lockTool);
 function ToolsIndex() {
   const tools = listTools();
   useToolMetadata('PDF tools', 'Work with PDFs locally in your browser. Your files are never uploaded.');
-  return <main className="site-shell tool-main">
+  return <main id="main-content" className="site-shell tool-main">
     <header className="tool-heading"><h1>PDF tools</h1><p>Work with your PDFs, right on your computer.</p></header>
     <p className="tool-local-note">No uploads. No account. Your files stay with you.</p>
     <div className="tools-grid">

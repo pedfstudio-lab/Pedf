@@ -8,7 +8,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
   if (kind === 'privacy') {
     return (
       <StaticPageShell>
-        <main className="site-static site-shell">
+        <main id="main-content" className="site-static site-shell">
           <p className="site-eyebrow">Privacy</p>
           <h1>Your PDF stays yours.</h1>
           <p>PEDF Studio processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
@@ -22,7 +22,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
   if (kind === 'terms') {
     return (
       <StaticPageShell>
-        <main className="site-static site-shell">
+        <main id="main-content" className="site-static site-shell">
           <p className="site-eyebrow">Terms</p>
           <h1>DRAFT — review before launch</h1>
           <p>PEDF Studio is provided as-is, without warranties or guarantees. You are responsible for reviewing the accuracy and suitability of every edit and exported document.</p>
@@ -35,7 +35,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
 
   return (
     <StaticPageShell>
-      <main className="site-static site-shell">
+      <main id="main-content" className="site-static site-shell">
         <p className="site-eyebrow">Support</p>
         <h1>How can we help?</h1>
         <p>Tell us what happened, which browser you use, and the language of your PDF.</p>

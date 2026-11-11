@@ -25,11 +25,25 @@
   outline-offset: 4px;
 }
 
-.drop-zone:hover,
 .drop-zone--active {
   border-color: var(--site-blue, #1e6bff);
   background: #eef6ff;
   transform: translateY(-2px);
+}
+
+/* Lift on hover only where there is a mouse; on touch it would stay stuck after a tap. */
+@media (hover: hover) {
+  .drop-zone:hover {
+    border-color: var(--site-blue, #1e6bff);
+    background: #eef6ff;
+    transform: translateY(-2px);
+  }
+}
+
+.drop-zone:active {
+  border-color: var(--site-blue, #1e6bff);
+  background: #eef6ff;
+  transform: scale(0.99);
 }
 
 .drop-zone strong,

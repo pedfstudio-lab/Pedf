@@ -16,7 +16,7 @@ export interface TranslationBox {
 }
 
 export const TRANSLATION_FAILURE = "Couldn't translate this page — try again";
-export const TRANSLATION_PRIVACY = 'Only page text is sent to Sarvam for translation. Your PDF file stays on this device. Translation is for reading only; Export stays English.';
+export const TRANSLATION_PRIVACY = 'Only page text is sent to Sarvam for translation. Your PDF file stays on this device. Translation is for reading only; the downloaded PDF stays English.';
 
 export function translationError(error: unknown): string {
   if (error instanceof AggregateError) {

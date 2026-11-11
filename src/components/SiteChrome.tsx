@@ -42,6 +42,8 @@ export function SiteHeader({ compact = false }: { readonly compact?: boolean }) 
 
   return (
     <header ref={headerRef} className="site-header">
+      {/* For keyboard users: jump past the header links straight to the page. */}
+      <a className="site-skip" href="#main-content">Skip to content</a>
       <nav className={`site-shell site-nav${menuOpen ? ' is-open' : ''}`} aria-label="Main navigation">
         <Brand />
         {compact && <a className="site-nav__tools" href={siteHref('/tools')}>Tools</a>}

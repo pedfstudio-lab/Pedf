@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
@@ -87,18 +88,27 @@ function useEditHistoryShortcuts(): void {
   }, [canRedo, canUndo, redo, undo]);
 }
 
+/**
+ * Ctrl/Cmd + / − / 0 zoom the PDF only while the mouse is over the pages or focus is
+ * inside them. Anywhere else the browser zooms the whole screen, as people who need
+ * bigger text expect.
+ */
 function useZoomShortcuts(
   zoomIn: () => void,
   zoomOut: () => void,
   zoomReset: () => void,
+  pagesRef: RefObject<HTMLElement | null>,
 ): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const pages = pagesRef.current;
       if (
         event.defaultPrevented
         || event.altKey
         || (!event.ctrlKey && !event.metaKey)
         || isEditableTarget(event.target)
+        || !pages
+        || !(pages.matches(':hover') || pages.contains(document.activeElement))
       ) return;
 
       const key = event.key.toLowerCase();
@@ -117,7 +127,7 @@ function useZoomShortcuts(
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [zoomIn, zoomOut, zoomReset]);
+  }, [pagesRef, zoomIn, zoomOut, zoomReset]);
 }
 
 interface MatchingFilePrompt {
@@ -247,7 +257,7 @@ function EditorApp() {
     captureAnchor();
     setZoom(1);
   }, [captureAnchor, zoom]);
-  useZoomShortcuts(zoomIn, zoomOut, zoomReset);
+  useZoomShortcuts(zoomIn, zoomOut, zoomReset, scrollRef);
   const [editMode, setEditMode] = useState(false);
   const [textAddMode, setTextAddMode] = useState(false);
   const [imageMode, setImageMode] = useState(false);
@@ -741,7 +751,7 @@ function EditorApp() {
       }
       const outcome = await saveProjectNow();
       if (outcome === 'saved') {
-        closeDocument(`Saved ${fileName} on this device — continue editing anytime.`);
+        closeDocument(`Saved ${fileName} on this device — continue editing anytime. To get the file, open it and press Download PDF.`);
         return true;
       } else if (outcome === 'no-changes') {
         closeDocument(`No changes to save — closed ${fileName}.`);
@@ -1052,7 +1062,7 @@ function EditorApp() {
               {saveFailure === 'full'
                 ? `There isn't enough space on this device to save ${document.fileName}.`
                 : `This browser isn't allowing PEDF Studio to save ${document.fileName} (for example in a private window).`}
-              {' '}Your file is still open. Export your PDF to keep your work.
+              {' '}Your file is still open. Download your PDF to keep your work.
             </p>
             <div className="mt-5 flex flex-wrap justify-end gap-3">
               <button
@@ -1093,7 +1103,7 @@ function EditorApp() {
                   void handleExport();
                 }}
               >
-                Export PDF
+                Download PDF
               </button>
             </div>
           </section>
@@ -1120,7 +1130,7 @@ function EditorApp() {
       )}
       {downloadReady && (
         <aside className="fixed bottom-4 left-4 z-[100] flex items-center gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 shadow-xl" role="status">
-          <span>Export ready</span>
+          <span>Your PDF is ready</span>
           <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800">
             Download edited PDF
           </a>

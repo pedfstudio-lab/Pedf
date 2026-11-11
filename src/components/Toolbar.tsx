@@ -20,7 +20,7 @@ interface ToolbarProps {
   savedFilesOpen: boolean;
   /** Brief Ctrl/Cmd+S result shown in place of the quiet autosave status. */
   saveNotice?: 'saved' | 'no-changes';
-  /** A phone-sized screen: one row (logo, Ask, Export PDF) and a ☰ panel with the rest. */
+  /** A phone-sized screen: one row (logo, Ask, Download PDF) and a ☰ panel with the rest. */
   phoneLayout?: boolean;
   zoom: number;
   zoomIn(): void;
@@ -101,6 +101,7 @@ export function Toolbar({
   const [, refreshSavedTime] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (saveStatus !== 'saved' || !savedAt) return;
@@ -153,7 +154,7 @@ export function Toolbar({
         : saveStatus === 'saved' && savedAt
       ? `Saved on this device · ${savedAgo(savedAt)}`
       : saveStatus === 'full'
-        ? "Couldn't save — not enough space on this device. Export your PDF to keep your work."
+        ? "Couldn't save — not enough space on this device. Download your PDF to keep your work."
         : saveStatus === 'unavailable'
           ? "Can't save on this device"
           : '';
@@ -175,14 +176,27 @@ export function Toolbar({
       {fileName}
     </span>
   );
-  const status = statusText && (
-    <span
-      role="status"
-      title={SAVE_TOOLTIP}
-      className={`text-xs ${saveProblem ? 'max-w-md font-semibold text-red-700' : 'shrink-0 whitespace-nowrap text-neutral-500'}`}
-    >
-      {statusText}
+  // Screen readers hear the save state when it changes, not "Saved · 3 min ago" every minute:
+  // the ticking time sits outside the announced part.
+  const savedTime = !saveNotice && saveStatus === 'saved' && savedAt ? savedAgo(savedAt) : '';
+  const status = statusText && !saveProblem && (
+    <span title={SAVE_TOOLTIP} className="shrink-0 whitespace-nowrap text-xs text-neutral-500">
+      <span role="status">{savedTime ? 'Saved on this device' : statusText}</span>
+      {savedTime && <span> · {savedTime}</span>}
     </span>
+  );
+  const saveProblemBanner = saveProblem && (
+    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+      <span className="font-semibold">{statusText}</span>
+      <button
+        type="button"
+        onClick={onExport}
+        disabled={!fileName || exporting}
+        className="whitespace-nowrap rounded-md bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-40"
+      >
+        Download PDF now
+      </button>
+    </div>
   );
   const settingsButton = (
     <button type="button" onClick={onOpenSettings} aria-label="Settings" className={PLAIN_BUTTON}>
@@ -207,23 +221,30 @@ export function Toolbar({
       disabled={!fileName || exporting}
       className="shrink-0 whitespace-nowrap rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-40"
     >
-      {exporting ? 'Exporting…' : 'Export PDF'}
+      {exporting ? 'Preparing PDF…' : 'Download PDF'}
     </button>
   );
+  // A real button (reachable by keyboard and announced as a button) that opens a hidden
+  // file chooser. Outlined, so the green Download PDF stays the one strong button.
   const openPdfButton = (
-    <label className="cursor-pointer whitespace-nowrap rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700">
-      Open PDF
+    <>
+      <button type="button" onClick={() => fileInputRef.current?.click()} className={PLAIN_BUTTON}>
+        Open PDF
+      </button>
       <input
+        ref={fileInputRef}
         type="file"
         accept="application/pdf"
         className="hidden"
+        tabIndex={-1}
+        aria-label="Open PDF"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onOpen(f);
           e.target.value = '';
         }}
       />
-    </label>
+    </>
   );
   const savedFilesButton = (
     <button type="button" aria-pressed={savedFilesOpen} onClick={onToggleSavedFiles} className={PLAIN_BUTTON}>
@@ -345,7 +366,7 @@ export function Toolbar({
             </button>
           </div>
         </div>
-        {saveProblem && <div className="border-t border-red-200 bg-red-50 px-3 py-1.5">{status}</div>}
+        {saveProblemBanner}
         {/* Hidden, not removed, so the file input and Translate keep working while it is closed. */}
         <div
           id={MORE_PANEL_ID}
@@ -353,10 +374,10 @@ export function Toolbar({
           onClick={closeAfterChoice}
           className="absolute inset-x-0 top-full z-[180] grid gap-3 border-b border-neutral-200 bg-white p-3 shadow-lg"
         >
-          {(fileLabel || (!saveProblem && status)) && (
+          {(fileLabel || status) && (
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               {fileLabel}
-              {!saveProblem && status}
+              {status}
             </div>
           )}
           <PanelGroup label="Edit">
@@ -424,6 +445,7 @@ export function Toolbar({
           <TranslationControls disabled={!fileName} onTranslate={onTranslate} />
         </div>
       </div>
+      {saveProblemBanner}
     </header>
   );
 }

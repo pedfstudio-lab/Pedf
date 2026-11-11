@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditsStoreProvider } from '@/state/editsStore';
 import { Toolbar } from './Toolbar';
@@ -108,7 +108,7 @@ describe('Toolbar signature action', () => {
   });
 
   it.each([
-    ['full', "Couldn't save — not enough space on this device. Export your PDF to keep your work."],
+    ['full', "Couldn't save — not enough space on this device. Download your PDF to keep your work."],
     ['unavailable', "Can't save on this device"],
   ] as const)('shows the %s storage status', (saveStatus, message) => {
     render(
@@ -152,6 +152,49 @@ describe('Toolbar signature action', () => {
     expect(screen.getByRole('button', { name: 'Saved files' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  describe('UI/UX review fixes', () => {
+    const props = () => ({
+      onOpen: vi.fn(), fileName: 'trip.pdf', editMode: false, textAddMode: false,
+      imageMode: false, hasEdits: true, exporting: false, saveStatus: 'saved' as const, savedAt: Date.now() - 3 * 60_000,
+      zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
+      onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
+      savedFilesOpen: false, onToggleSavedFiles: vi.fn(),
+    });
+
+    it('makes Open PDF a real button that opens the file chooser', () => {
+      const { container } = render(<EditsStoreProvider><Toolbar {...props()} /></EditsStoreProvider>);
+      const input = container.querySelector<HTMLInputElement>('header input[type="file"]')!;
+      const click = vi.spyOn(input, 'click');
+      fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+      expect(click).toHaveBeenCalledOnce();
+      expect(input.tabIndex).toBe(-1);
+    });
+
+    it('names the download "Download PDF"', () => {
+      render(<EditsStoreProvider><Toolbar {...props()} /></EditsStoreProvider>);
+      expect(screen.getByRole('button', { name: 'Download PDF' })).toBeTruthy();
+      expect(screen.queryByText(/Export/)).toBeNull();
+    });
+
+    it('announces the save state, not the minutes that tick by', () => {
+      render(<EditsStoreProvider><Toolbar {...props()} /></EditsStoreProvider>);
+      expect(screen.getByRole('status').textContent).toBe('Saved on this device');
+      expect(screen.getByRole('status').parentElement?.textContent).toBe('Saved on this device · 3 min ago');
+    });
+
+    it('turns a save failure into a red banner with a Download PDF now button', () => {
+      const onExport = vi.fn();
+      render(<EditsStoreProvider><Toolbar {...props()} saveStatus="full" onExport={onExport} /></EditsStoreProvider>);
+      const banner = screen.getByRole('alert');
+      expect(banner.textContent).toContain("Couldn't save — not enough space on this device.");
+      fireEvent.click(within(banner).getByRole('button', { name: 'Download PDF now' }));
+      expect(onExport).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+  });
+
   describe('on a phone', () => {
     const phoneProps = () => ({
       onOpen: vi.fn(), fileName: 'trip.pdf', editMode: false, textAddMode: false,
@@ -163,9 +206,9 @@ describe('Toolbar signature action', () => {
       savedFilesOpen: false, onToggleSavedFiles: vi.fn(), phoneLayout: true,
     });
 
-    it('shows one row: the logo, Ask, Export PDF and a ☰ for everything else', () => {
+    it('shows one row: the logo, Ask, Download PDF and a ☰ for everything else', () => {
       render(<EditsStoreProvider><Toolbar {...phoneProps()} /></EditsStoreProvider>);
-      for (const name of ['PEDF Studio', '💬 Ask', 'Export PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
+      for (const name of ['PEDF Studio', '💬 Ask', 'Download PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
       const more = screen.getByRole('button', { name: 'More tools' });
       expect(more.getAttribute('aria-expanded')).toBe('false');
       expect(screen.queryByRole('button', { name: 'Edit text' })).toBeNull();
@@ -207,7 +250,7 @@ describe('Toolbar signature action', () => {
 
     it('keeps a save problem visible without opening the panel', () => {
       render(<EditsStoreProvider><Toolbar {...phoneProps()} saveStatus="full" /></EditsStoreProvider>);
-      expect(screen.getByRole('status').textContent).toContain("Couldn't save");
+      expect(screen.getByRole('alert').textContent).toContain("Couldn't save");
     });
   });
 

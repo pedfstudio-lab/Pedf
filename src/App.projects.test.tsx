@@ -281,7 +281,7 @@ describe('App saved projects', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & close' }));
 
-    expect(await screen.findByText('Saved Contract.pdf on this device — continue editing anytime.')).toBeTruthy();
+    expect(await screen.findByText('Saved Contract.pdf on this device — continue editing anytime. To get the file, open it and press Download PDF.')).toBeTruthy();
     expect(await screen.findByRole('button', { name: 'Continue editing' })).toBeTruthy();
     expect(mocks.projectStore.create).toHaveBeenCalledTimes(1);
     expect(mocks.projectStore.delete).not.toHaveBeenCalled();
@@ -331,7 +331,7 @@ describe('App saved projects', () => {
       await Promise.resolve();
     });
     vi.useRealTimers();
-    expect(await screen.findByText('Saved Slow.pdf on this device — continue editing anytime.')).toBeTruthy();
+    expect(await screen.findByText('Saved Slow.pdf on this device — continue editing anytime. To get the file, open it and press Download PDF.')).toBeTruthy();
   });
 
   it('does not attach a late project creation to a replacement document', async () => {
@@ -382,7 +382,7 @@ describe('App saved projects', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Make test change' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save & close' }));
 
-    expect(await screen.findByText('Saved Second.pdf on this device — continue editing anytime.')).toBeTruthy();
+    expect(await screen.findByText('Saved Second.pdf on this device — continue editing anytime. To get the file, open it and press Download PDF.')).toBeTruthy();
     expect(mocks.projectStore.create).toHaveBeenCalledTimes(2);
     expect(mocks.projectStore.saveState).not.toHaveBeenCalled();
   });
@@ -477,7 +477,7 @@ describe('App saved projects', () => {
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain("Couldn't save on this device");
     expect(dialog.textContent).toContain("There isn't enough space on this device to save Contract.pdf.");
-    expect(within(dialog).getByRole('button', { name: 'Export PDF' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Download PDF' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getAllByText('Contract.pdf').length).toBeGreaterThan(0);
@@ -827,5 +827,22 @@ describe('App saved projects', () => {
   it('shows no phone note on a computer', () => {
     render(<App />);
     expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('leaves Ctrl + to the browser unless the pointer or focus is on the pages', () => {
+    render(<App />);
+    const zoom = () => screen.getByRole('button', { name: /^Reset zoom/ }).getAttribute('aria-label');
+    const press = (target: EventTarget) => {
+      const event = new KeyboardEvent('keydown', { key: '=', ctrlKey: true, cancelable: true, bubbles: true });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+
+    expect(press(window)).toBe(false); // the browser zooms the whole screen
+    expect(zoom()).toContain('currently 100%');
+
+    const onPage = within(screen.getByRole('main')).getAllByRole('button')[0]!;
+    onPage.focus();
+    expect(press(onPage)).toBe(true); // focus is on the pages: the PDF zoom takes the key
   });
 });

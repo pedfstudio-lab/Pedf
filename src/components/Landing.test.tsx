@@ -27,10 +27,10 @@ describe('Landing', () => {
 
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Read it. Ask it. Edit it.');
     expect(screen.getByRole('link', { name: 'Start editing' }).getAttribute('href')).toBe('/app');
-    expect(screen.getByText('English, Hindi & 8 more Indian languages')).toBeTruthy();
+    expect(screen.getByText(/& 7 more Indian languages/).textContent).toBe('English, हिन्दी, தமிழ் & 7 more Indian languages');
     expect(screen.getByText('© 2026 PEDF Studio')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Tools' }).getAttribute('href')).toBe('/tools');
-    expect(screen.getByRole('link', { name: /Upload PDF/ }).getAttribute('href')).toBe('/tools');
+    expect(screen.getByRole('link', { name: 'PDF tools' }).getAttribute('href')).toBe('/tools');
     expect(screen.getByRole('link', { name: /Edit Text/ }).getAttribute('href')).toBe('/app');
     expect(container.querySelector('input[type="file"]')?.getAttribute('accept')).toBe('application/pdf');
   });
@@ -98,6 +98,25 @@ describe('Landing', () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/app'));
     expect(pendingFile.takePendingProject()).toBe('contract-project');
+  });
+
+  it('never says "upload": the PDF stays on this device', () => {
+    const { container } = render(<Landing />);
+    expect(container.textContent).not.toMatch(/upload/i);
+    expect(screen.getByText('Only Ask, voice and Translate send text out — to get your answer.')).toBeTruthy();
+  });
+
+  it('writes each language in its own script and reads the privacy heading as two sentences', () => {
+    const { container } = render(<Landing />);
+    const tamil = [...container.querySelectorAll('[lang="ta-IN"]')].map((node) => node.textContent);
+    expect(tamil).toContain('தமிழ்');
+    expect(screen.getByRole('heading', { name: 'Runs on your computer. Stays on your computer.' })).toBeTruthy();
+  });
+
+  it('lets keyboard users skip the header links', () => {
+    const { container } = render(<Landing />);
+    expect(screen.getByRole('link', { name: 'Skip to content' }).getAttribute('href')).toBe('#main-content');
+    expect(container.querySelector('main')?.id).toBe('main-content');
   });
 
   it('folds the page links into a ☰ menu that opens and closes (phones)', () => {

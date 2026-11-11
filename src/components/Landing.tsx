@@ -1,27 +1,40 @@
 import { setPendingFile, setPendingProject } from '@/lib/site/pendingFile';
 import { navigate } from '@/lib/site/navigate';
 import { siteHref } from '@/lib/site/config';
+import type { ReactNode } from 'react';
 import type { ProjectStore } from '@/lib/projects/projectStore';
+import { SUPPORTED_LANGUAGES } from '@/state/prefsStore';
 import { SiteFooter, SiteHeader } from './SiteChrome';
 import { ContinueEditingCard } from './ContinueEditingCard';
 import { PdfDropZone } from './PdfDropZone';
 import './landing.css';
 
+// The card title says it all; the pictures are decoration (empty alt).
 const features = [
-  { title: 'Upload PDF', image: 'cube-upload.webp', alt: '3D upload arrow', href: '/tools' },
-  { title: 'Edit Text', image: 'cube-text.webp', alt: '3D text symbol', href: '/app' },
-  { title: 'Add / Edit Image', image: 'cube-image.webp', alt: '3D image symbol', href: '/app' },
-  { title: 'Ask the Bot', image: 'cube-bot.webp', alt: '3D chat symbol', href: '/app' },
+  { title: 'PDF tools', image: 'cube-upload.webp', href: '/tools' },
+  { title: 'Edit Text', image: 'cube-text.webp', href: '/app' },
+  { title: 'Add / Edit Image', image: 'cube-image.webp', href: '/app' },
+  { title: 'Ask the Bot', image: 'cube-bot.webp', href: '/app' },
 ] as const;
 
-const faqs = [
+/** Each language written in its own script, so a Tamil reader sees தமிழ். */
+const languageList = SUPPORTED_LANGUAGES.map((language, index) => (
+  <span key={language.code}>
+    {index > 0 && ', '}
+    <span lang={language.code}>{language.label}</span>
+    {language.code !== 'en-IN' && ` (${language.name})`}
+  </span>
+));
+
+const faqs: ReadonlyArray<readonly [string, ReactNode]> = [
   ['Is it free?', 'Yes. PEDF Studio is free to use.'],
   ['Do I need an account?', 'No. Open the page and start with a PDF.'],
   ['Does it work offline?', 'Editing works offline once the page is open. Chat, voice and Translate need an internet connection.'],
-  ['Which languages are supported?', 'English, Hindi, Tamil, Bengali, Telugu, Marathi, Gujarati, Kannada, Malayalam, and Punjabi.'],
+  ['Which languages are supported?', <>{languageList}.</>],
   ['Where is my file stored?', 'Your PDF and saved edits stay only in this browser on this device. You download the edited copy when you are ready.'],
-  ['What does voice need?', 'A Sarvam API key in Settings until our managed proxy goes live.'],
-] as const;
+  ['What do voice and chat need?', 'For now, voice and chat need a key from Sarvam AI, which you paste in Settings.'],
+  ['Can I use it on my phone?', 'Yes. You can open and read your PDF, ask questions and translate it on a phone. Editing works best on a computer.'],
+];
 
 export function Landing({ projectStore }: { readonly projectStore?: ProjectStore } = {}) {
   const openFile = (file: File) => {
@@ -37,7 +50,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
   return (
     <div className="site-page landing-page">
       <SiteHeader />
-      <main>
+      <main id="main-content">
         <section className="site-shell hero" aria-labelledby="hero-title">
           <div className="hero__copy">
             <p className="site-eyebrow">Your PDF, finally editable</p>
@@ -64,7 +77,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
           <div className="features__grid">
             {features.map((feature) => (
               <a className="feature" key={feature.title} href={siteHref(feature.href)}>
-                <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt={feature.alt} loading="lazy" decoding="async" />
+                <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt="" loading="lazy" decoding="async" />
                 <h3>{feature.title}</h3>
               </a>
             ))}
@@ -79,7 +92,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
           <ol className="how__steps">
             <li><span>1</span><div><strong>Open your PDF.</strong><p>Drop it above or choose it from your computer.</p></div></li>
             <li><span>2</span><div><strong>Edit or ask.</strong><p>Tap text or images, or ask the bot by typing or talking.</p></div></li>
-            <li><span>3</span><div><strong>Download it.</strong><p>Export the finished PDF straight back to your computer.</p></div></li>
+            <li><span>3</span><div><strong>Download it.</strong><p>Download the finished PDF straight back to your computer.</p></div></li>
           </ol>
         </section>
 
@@ -90,7 +103,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
             </div>
             <div className="privacy-band__copy">
               <p className="site-eyebrow">Private by design</p>
-              <h2 id="privacy-title">Runs on your computer.<span>Stays on your computer.</span></h2>
+              <h2 id="privacy-title">Runs on your computer.{' '}<span>Stays on your computer.</span></h2>
               <p>Everything is processed in your browser. Your PDF never leaves your device.</p>
               <p className="privacy-band__detail">Chat, voice and Translate send only your question, your audio, and the document’s text to Sarvam AI to get an answer or a translation. Nothing is stored.</p>
               <a href={siteHref('/privacy')}>Read our privacy notes <span aria-hidden="true">→</span></a>
@@ -101,8 +114,9 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
         <section className="trust-strip site-shell" aria-label="Trust and language support">
           <div><span className="trust-strip__icon" aria-hidden="true">✓</span><strong>Your files never leave your device</strong></div>
           <div className="trust-strip__divider" aria-hidden="true" />
-          <div><span className="trust-strip__language" aria-hidden="true">अ</span><strong>English, Hindi &amp; 8 more Indian languages</strong></div>
+          <div><span className="trust-strip__language" aria-hidden="true">अ</span><strong>English, <span lang="hi-IN">हिन्दी</span>, <span lang="ta-IN">தமிழ்</span> &amp; 7 more Indian languages</strong></div>
         </section>
+        <p className="trust-note site-shell">Only Ask, voice and Translate send text out — to get your answer.</p>
 
         <section className="faq site-shell" id="faq" aria-labelledby="faq-title">
           <div className="faq__intro">
