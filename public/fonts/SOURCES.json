@@ -778,5 +778,53 @@
     "source": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
     "derivative": "scripts/task78-width-fonts.py; renamed, X-only wdth axis; hinting removed",
     "licence": "r1width/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-Bold.ttf",
+    "bytes": 108496,
+    "sha256": "eb7d46f856dd57f18a8c03d033c57802692bf127f01dbd95ba8984338e6b5135",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-Bold.ttf",
+    "licence": "oswald/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-ExtraLight.ttf",
+    "bytes": 98308,
+    "sha256": "4ccb7ad55946c0c77595177402cac8a855525b90a66955d9d850f463b0baeead",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-ExtraLight.ttf",
+    "licence": "oswald/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-Light.ttf",
+    "bytes": 104268,
+    "sha256": "1b0d955818288665aab59bfa1c9a7d89b22862864e4b1acabb3f7c7e4282b174",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-Light.ttf",
+    "licence": "oswald/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-Medium.ttf",
+    "bytes": 107948,
+    "sha256": "d8b3ac8668c6ddbcecd299567e2130e2b933ad8b6c98b5b8ac6ff2bee9c0848a",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-Medium.ttf",
+    "licence": "oswald/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-Regular.ttf",
+    "bytes": 105572,
+    "sha256": "0d9980da817ee71ad9c34bb46950fcf15dd53e928031f39d2e11ae19178ab826",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-Regular.ttf",
+    "licence": "oswald/OFL.txt"
+  },
+  {
+    "family": "Oswald",
+    "file": "oswald/Oswald-SemiBold.ttf",
+    "bytes": 109120,
+    "sha256": "8c5e61737c100d0a1ca87a9a1608afc53246b8a77f8d73c56b03406adc2d9282",
+    "source": "https://raw.githubusercontent.com/googlefonts/OswaldFont/89795261ac9eeb9aa8cd99f43982c4e4b0e53261/fonts/ttf/Oswald-SemiBold.ttf",
+    "licence": "oswald/OFL.txt"
   }
 ]

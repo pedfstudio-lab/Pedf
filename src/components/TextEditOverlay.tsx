@@ -82,6 +82,16 @@ function canvasWidth(text: string, style: TextStyle): number {
   return measurePieceWithCanvas(text, style);
 }
 
+/**
+ * Room left at the end of a matched source line. Sized exactly to its box, a full line
+ * (a contents entry with dot leaders, a cover title) overflowed by sub-pixel rounding and
+ * its last word wrapped. 0.3% (0.25–1.5pt) is invisible; only the line's last piece gives it
+ * up, so earlier pieces keep their exact positions.
+ */
+function lineFitSlackPt(widthPt: number): number {
+  return Math.min(1.5, Math.max(0.25, widthPt * 0.003));
+}
+
 /** Face metrics, not DOM positions: mixed-size CSS line boxes use this face. */
 function measureFontMetrics(style: TextStyle, zoom: number): FontMetrics | undefined {
   const context = window.document.createElement('canvas').getContext('2d');
@@ -506,10 +516,10 @@ export function TextEditOverlay({
     ? (boxLeftPt - initialAlignLeftPt) * zoom : 0);
   const initialCompositions = !bulletMode && !markerList && !paragraphMode
     ? existing?.length ? existing.map(edit => edit.composition) : block.lines.map(line => sourceLineComposition(line, initialAlign, initialAlignLeftPt, initialAlignWidthPt)) : [];
-  const sourceCompositionsRef = useRef(initialCompositions.map(composition => composition ? { ...composition, style: initialStyle, pieces: composition.pieces.map(piece => {
+  const sourceCompositionsRef = useRef(initialCompositions.map(composition => composition ? { ...composition, style: initialStyle, pieces: composition.pieces.map((piece, index, pieces) => {
     const natural = canvasWidth(piece.text, piece.style);
     return natural > 0 ? initialCompositions.length > 1 || composition.pieces.length > 1
-      ? { ...piece, advanceTrackingPt: (piece.widthPt - natural) / Math.max(1, [...piece.text].length) }
+      ? { ...piece, advanceTrackingPt: (piece.widthPt - (index === pieces.length - 1 ? lineFitSlackPt(piece.widthPt) : 0) - natural) / Math.max(1, [...piece.text].length) }
       : { ...piece, advanceScale: piece.widthPt / natural } : piece;
   }) } : undefined));
   const initialComposition = sourceCompositionsRef.current[0];

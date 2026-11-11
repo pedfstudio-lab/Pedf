@@ -472,6 +472,21 @@ describe('TextEditOverlay paragraph seed', () => {
     expect(first.firstChild).toBe(node);
     expect(first.style.letterSpacing).toContain('var(--pdf-piece-tracking,0px)');
   });
+  it('leaves a full source line a hair of room at its end, so rounding never wraps its last word', () => {
+    const tracked={...style,fontIdentity:'Lato',fontTrackingEm:-0.04};
+    const text='N E W Y E A R';
+    const runs=[{text:'N E W',x:40,width:50},{text:'Y E A R',x:140,width:70}].map(piece=>({
+      pageIndex:0,text:piece.text,style:tracked,rect:{x:piece.x,y:680,w:piece.width,h:20},
+      metrics:{matrix:[20,0,0,20,piece.x,680] as const,x:piece.x,baselineY:680,widthPt:piece.width},
+    }));
+    renderEditor({...block(text,24),style:tracked,lines:[{pageIndex:0,text,style:tracked,runs,baselineY:680,rect:{x:40,y:680,w:170,h:20}}]});
+    const contents=screen.getByRole('textbox',{name:'Editable text'}).querySelectorAll<HTMLElement>('[data-pdf-piece-content]');
+    const tracking=(index:number)=>Number.parseFloat(contents[index]!.style.getPropertyValue('--pdf-piece-tracking'));
+    // The first piece keeps its exact width and position; only the line's last piece gives
+    // up the room: 0.25pt (the minimum) spread over its 7 characters.
+    expect(tracking(0)).toBeCloseTo(0.8);
+    expect(tracking(1)).toBeCloseTo(0.8-0.25/7);
+  });
   it.each([1, 2])('uses displayed-face metrics, not source-face heights, at zoom %s', zoom => {
     vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue({
       font: '', measureText(this: { font: string }, text: string) {

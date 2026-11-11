@@ -26,6 +26,41 @@ describe('Task 78 font identity and local assets', () => {
   ])('maps %s to the licensed %s', (name, family) => expect(matchFont(style(name)).family).toBe(family));
   it.each(['Arial Black','HelveticaNowText','Aptos Narrow','Tahoma','Organic','Zuume Rough','TAN Jambore','NotoSansCJKsc','NotoSansDevanagari'])('does not pretend %s has an exact free twin', name => expect(matchFont(style(name)).exact).toBe(false));
   it('does not add the dropped Caladea', () => expect(matchFont(style('Cambria')).family).toBe('LiberationSerif'));
+  it.each([
+    'WOOJNA+TeXGyreTermesX-Regular', 'ZWOWSF+TeXGyreTermesX-Bold', 'TeXGyrePagella-Regular', 'CMR10', 'ABCDEF+CMBX12', 'LMRoman10-Regular',
+    'EBGaramond-Regular', 'PalatinoLinotype-Roman', 'BookAntiqua', 'CenturySchoolbook', 'Baskerville', 'Georgia', 'Merriweather-Regular',
+    'NotoSerif-Regular', 'PTSerif', 'Constantia',
+  ])('uses the serif stand-in for the serif font %s, so edited text keeps its size', (name) => {
+    const match = matchFont(style(name));
+    expect(match.family).toBe('LiberationSerif');
+  });
+  it.each([
+    'SAOXQS+LMSans10-Regular', 'MicrosoftSansSerif', 'CenturyGothic', 'MerriweatherSans-Bold', 'HelveticaInserat-Roman',
+    'TeXGyreHeros-Regular', 'Lucida Sans Unicode', 'Tahoma,Bold', 'Arial Black',
+  ])('keeps the sans stand-in for the sans font %s', (name) => {
+    expect(matchFont(style(name)).family).toBe('LiberationSans');
+  });
+  it.each([
+    ['AAAAAA+Oswald-Bold', true, 'oswald/Oswald-Bold.ttf'], ['Oswald-Regular', false, 'oswald/Oswald-Regular.ttf'],
+    ['Oswald-SemiBold', true, 'oswald/Oswald-SemiBold.ttf'], ['Oswald-Medium', false, 'oswald/Oswald-Medium.ttf'],
+    ['Oswald-Light', false, 'oswald/Oswald-Light.ttf'], ['Oswald-ExtraLight', false, 'oswald/Oswald-ExtraLight.ttf'],
+  ])('uses the real, free Oswald for %s', (name, bold, file) => {
+    const match = matchFont({ ...style(name), bold });
+    expect(match).toMatchObject({ family: 'Oswald', file, exact: true, scale: 1 });
+  });
+  it('slants Oswald, which has no italic files, instead of asking for a missing one', () => {
+    expect(matchFont({ ...style('Oswald-Bold'), bold: true, italic: true })).toMatchObject({ file: 'oswald/Oswald-Bold.ttf', syntheticItalic: true });
+  });
+  it('ships every Oswald file it asks for, recorded with its licence', async () => {
+    const sources = JSON.parse(await readFile('public/fonts/SOURCES.json', 'utf8')) as { file: string; bytes: number; licence: string }[];
+    for (const weight of ['Regular', 'Bold', 'Light', 'Medium', 'SemiBold', 'ExtraLight']) {
+      const file = `oswald/Oswald-${weight}.ttf`;
+      const entry = sources.find(item => item.file === file);
+      expect(entry?.licence).toBe('oswald/OFL.txt');
+      expect((await readFile(`public/fonts/${file}`)).length).toBe(entry?.bytes);
+    }
+    expect(await readFile('public/fonts/oswald/OFL.txt', 'utf8')).toContain('SIL Open Font License, Version 1.1');
+  });
   it('finds the actual family behind a CID name', async () => {
     const data = new Uint8Array(await readFile('public/fonts/carlito/Carlito-Regular.ttf'));
     registerSourceFont('cid-test', { name: 'CIDFont+F3', type: 'CIDFontType2', data });

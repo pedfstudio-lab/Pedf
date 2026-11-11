@@ -8,6 +8,7 @@ const families = [
   ['leaguespartan', 'LeagueSpartan', /leaguespartan/], ['notosans', 'NotoSans', /^notosans(?:regular|bold|italic|bolditalic|light|medium|semibold|black|extrabold)*(?:italic)?$/],
   ['sourcesanspro', 'SourceSansPro', /sourcesans(?:pro|3)/],
   ['bricolagegrotesque', 'BricolageGrotesque', /bricolagegrotesque/], ['allura', 'Allura', /allura/],
+  ['oswald', 'Oswald', /^oswald/],
   ['liberation', 'LiberationMono', /courier|liberationmono/],
   ['liberation', 'LiberationSerif', /times|liberationserif/],
   ['liberation', 'LiberationSans', /^(?:arial|arialmt|helvetica|helveticaneue|liberationsans)(?:regular|bold|italic|oblique|bolditalic|boldoblique)?$/],
@@ -16,14 +17,19 @@ const families = [
 export function normalizeFontName(name: string): string {
   return name.replace(/^[A-Z]{6}\+/i, '').replace(/PSMT|MT$/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
+// Serif families recognisable by name. A sans stand-in for a serif font is wider and has taller
+// lowercase letters, so edited text grows. The PDF's own serif flag is not used: LaTeX marks
+// Latin Modern Sans as serif, and Word leaves Times New Roman unmarked.
+const SERIF_NAMES = /times|georgia|cambria|(?<!sans)serif|termes|pagella|bonum|schola|lmroman|^cm(?:r|bx|ti|sl|csc|b|mi)\d|nimbusrom|garamond|palatino|bookantiqua|bookman|century(?!gothic)|schoolbook|minion|baskerville|caslon|didot|bodoni|charter|utopia|constantia|sabon|merriweather(?!sans)|^lora|playfair|spectral|crimson|cormorant|tinos|stix|frankruhl/;
 export function genericFont(name: string): 'Sans' | 'Serif' | 'Mono' {
   if (/courier|mono|consolas/i.test(name)) return 'Mono';
-  return /times|georgia|cambria|serif(?!sans)/i.test(name) ? 'Serif' : 'Sans';
+  return SERIF_NAMES.test(normalizeFontName(name)) ? 'Serif' : 'Sans';
 }
 const specialWeights: Record<string, readonly string[]> = {
   Lato: ['Black','Light','Semibold','Medium'], OpenSans: ['Light','SemiBold','ExtraBold'],
   IBMPlexSans: ['Light','Medium','SemiBold'], NotoSans: ['Light','Medium','SemiBold','Black','ExtraBold'],
   SourceSansPro: ['Semibold'], BricolageGrotesque: ['SemiBold','ExtraBold'], LeagueSpartan: ['Light','Medium','SemiBold','ExtraBold'],
+  Oswald: ['ExtraLight','Light','Medium','SemiBold'],
 };
 export function matchFont(style: TextStyle): FontMatch {
   const name = style.fontIdentity ?? fontSources.get(style.fontRef ?? '')?.name ?? style.fontName;
@@ -35,7 +41,7 @@ export function matchFont(style: TextStyle): FontMatch {
     weight = specialWeights[family]?.find(value => normalized.includes(value.toLowerCase())) ?? weight;
   }
   let italic = style.italic;
-  const syntheticItalic = italic && ['Allura','LeagueSpartan','BricolageGrotesque'].includes(family);
+  const syntheticItalic = italic && ['Allura','LeagueSpartan','BricolageGrotesque','Oswald'].includes(family);
   const syntheticBold = style.bold && family === 'Allura';
   if (syntheticBold) weight = 'Regular';
   if (syntheticItalic) italic = false;
