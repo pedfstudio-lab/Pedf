@@ -203,10 +203,13 @@ export function translationScale(fits: (scale: number) => boolean): number {
   return low;
 }
 
+// Windows' Indian-script fonts first, then the app's one font setting (index.css), which
+// on Android and Apple devices brings in their own matching Indian-script fonts.
+const appFont = 'var(--font-sans, sans-serif)';
 export const scriptFonts: Readonly<Record<string, string>> = {
-  'hi-IN': '"Nirmala UI", Mangal, sans-serif', 'mr-IN': '"Nirmala UI", Mangal, sans-serif',
-  'ta-IN': '"Nirmala UI", Latha, sans-serif', 'bn-IN': '"Nirmala UI", Vrinda, sans-serif',
-  'te-IN': '"Nirmala UI", Vani, sans-serif', 'gu-IN': '"Nirmala UI", Shruti, sans-serif',
-  'kn-IN': '"Nirmala UI", Tunga, sans-serif', 'ml-IN': '"Nirmala UI", Kartika, sans-serif',
-  'pa-IN': '"Nirmala UI", Raavi, sans-serif',
+  'hi-IN': `"Nirmala UI", Mangal, ${appFont}`, 'mr-IN': `"Nirmala UI", Mangal, ${appFont}`,
+  'ta-IN': `"Nirmala UI", Latha, ${appFont}`, 'bn-IN': `"Nirmala UI", Vrinda, ${appFont}`,
+  'te-IN': `"Nirmala UI", Vani, ${appFont}`, 'gu-IN': `"Nirmala UI", Shruti, ${appFont}`,
+  'kn-IN': `"Nirmala UI", Tunga, ${appFont}`, 'ml-IN': `"Nirmala UI", Kartika, ${appFont}`,
+  'pa-IN': `"Nirmala UI", Raavi, ${appFont}`,
 };

@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/*
+ * One font setting for the whole app (website, editor and on-screen translation):
+ * the device's own font, on purpose. Nothing to download, nothing fetched from a third
+ * party, and each system's Indian-script fonts were designed to match it (Segoe UI with
+ * Nirmala UI on Windows, Roboto with Noto on Android). Text inside a PDF never uses this;
+ * it keeps the PDF's own fonts.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial,
+    "Nirmala UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
 html,
 body,
 #root {
