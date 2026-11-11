@@ -159,7 +159,7 @@ export function TranslationLayer({ boxes, pageIndex, viewport, dpr, zoom, eligib
   [Boolean(shownWords?.text), showPatches, signature, registration?.canvas]);
 
   if (!translation || language === 'en-IN' || !boxes.length) return null;
-  if (!shownWords?.text) return eligible ? <div role="status" className="pointer-events-auto absolute left-2 top-2 z-30 max-w-sm rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950 shadow">
+  if (!shownWords?.text) return eligible ? <div role="status" className="pointer-events-auto absolute left-2 top-2 z-30 max-w-sm rounded-lg border border-translate-200 bg-translate-50 px-3 py-2 text-xs text-translate-950 shadow">
     {shownWords?.error ?? 'Translating this page…'}
     {shownWords?.error && <button type="button" className="ml-2 underline" onClick={() => setRetry(value => value + 1)}>Try again</button>}
   </div> : null;

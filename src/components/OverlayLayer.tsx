@@ -1037,7 +1037,7 @@ export function OverlayLayer({
 
       {textAddMode && !freeTextSession && (
         <div
-          className="absolute inset-0 z-40 cursor-crosshair bg-violet-300/5"
+          className="absolute inset-0 z-40 cursor-crosshair bg-addtext-300/5"
           onPointerDown={beginFreeTextPlacement}
           aria-label={`Draw text box on page ${pageIndex + 1}`}
         />
@@ -1045,7 +1045,7 @@ export function OverlayLayer({
 
       {freeDrawRect && (
         <div
-          className="pointer-events-none absolute z-[45] border-2 border-dashed border-violet-600 bg-violet-300/15"
+          className="pointer-events-none absolute z-[45] border-2 border-dashed border-addtext-600 bg-addtext-300/15"
           style={freeDrawRect}
         />
       )}
@@ -1074,7 +1074,7 @@ export function OverlayLayer({
               setFreeTextSession(null);
               setActiveRuleLine(editable);
             }}
-            className="absolute cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-fuchsia-500 hover:bg-fuchsia-400/20 focus:border-fuchsia-600 focus:bg-fuchsia-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-600"
+            className="absolute cursor-pointer rounded-sm border border-transparent bg-transparent hover:border-line-500 hover:bg-line-400/20 focus:border-line-600 focus:bg-line-400/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-line-600"
             style={{
               left: rect.left - (hitWidth - rect.width) / 2,
               top: rect.top - (hitHeight - rect.height) / 2,
@@ -1115,7 +1115,7 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: owner, text: actionText, screenRect: rect });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-blue-400 hover:bg-blue-300/20 focus:border-blue-500 focus:bg-blue-300/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-brand-400 hover:bg-brand-300/20 focus:border-brand-500 focus:bg-brand-300/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1159,7 +1159,7 @@ export function OverlayLayer({
                 screenRect: rect,
               });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-amber-500 hover:bg-amber-300/15 focus:border-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-warning-500 hover:bg-warning-300/15 focus:border-warning-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-warning-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1192,7 +1192,7 @@ export function OverlayLayer({
                 boxId,
               });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-violet-500 hover:bg-violet-300/10 focus:border-violet-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-600"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-addtext-500 hover:bg-addtext-300/10 focus:border-addtext-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-addtext-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1231,7 +1231,7 @@ export function OverlayLayer({
               setActiveBulletList(null);
               setPopoverTarget({ block: target, text: sourceText(existing.texts), screenRect: rect });
             }}
-            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-emerald-500 focus:border-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className="absolute cursor-text rounded-sm border border-transparent bg-transparent hover:border-success-500 focus:border-success-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-success-600"
             style={{
               left: rect.left,
               top: rect.top,
@@ -1516,11 +1516,11 @@ export function OverlayLayer({
           {moveGuideState.vertical && (
             <>
               <div
-                className="absolute inset-y-0 border-l-2 border-dashed border-fuchsia-500"
+                className="absolute inset-y-0 border-l-2 border-dashed border-line-500"
                 style={{ left: moveGuideState.vertical.pos }}
               />
               <span
-                className="absolute top-2 rounded bg-fuchsia-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
+                className="absolute top-2 rounded bg-line-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
                 style={{
                   left: clamp(moveGuideState.vertical.pos + 5, 4, Math.max(4, viewport.width / dpr - 110)),
                 }}
@@ -1532,11 +1532,11 @@ export function OverlayLayer({
           {moveGuideState.horizontal && (
             <>
               <div
-                className="absolute inset-x-0 border-t-2 border-dashed border-fuchsia-500"
+                className="absolute inset-x-0 border-t-2 border-dashed border-line-500"
                 style={{ top: moveGuideState.horizontal.pos }}
               />
               <span
-                className="absolute left-2 rounded bg-fuchsia-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
+                className="absolute left-2 rounded bg-line-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow"
                 style={{
                   top: clamp(moveGuideState.horizontal.pos + 5, 4, Math.max(4, viewport.height / dpr - 22)),
                 }}

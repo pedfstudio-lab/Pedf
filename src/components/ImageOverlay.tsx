@@ -845,7 +845,7 @@ export function ImageOverlay({
             )}
             {imageMode && !draft && !cropTarget && !transformSelection && (
               <div
-                className="pointer-events-auto absolute z-40 border-2 border-cyan-600 bg-cyan-300/5"
+                className="pointer-events-auto absolute z-40 border-2 border-image-600 bg-image-300/5"
                 style={{ left: screen.left, top: screen.top, width: screen.width, height: screen.height }}
                 aria-label={`Added image ${index + 1} on page ${pageIndex + 1}`}
               >
@@ -867,7 +867,7 @@ export function ImageOverlay({
                     event.stopPropagation();
                     removeEdit(edit.id);
                   }}
-                  className="absolute -right-3 -top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-red-600 text-sm font-bold leading-none text-white shadow hover:bg-red-500"
+                  className="absolute -right-3 -top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-danger-600 text-sm font-bold leading-none text-white shadow hover:bg-danger-500"
                 >
                   ×
                 </button>
@@ -880,7 +880,7 @@ export function ImageOverlay({
                       event.stopPropagation();
                       startCrop({ kind: 'added', edit });
                     }}
-                    className="rounded bg-cyan-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-cyan-700"
+                    className="rounded bg-image-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-image-700"
                   >
                     Crop
                   </button>
@@ -892,7 +892,7 @@ export function ImageOverlay({
                       event.stopPropagation();
                       chooseFile({ kind: 'reimage', editId: edit.id, rect: edit.rect });
                     }}
-                    className="rounded bg-cyan-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-cyan-700"
+                    className="rounded bg-image-800 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-image-700"
                   >
                     Replace
                   </button>
@@ -909,7 +909,7 @@ export function ImageOverlay({
                   edit.rect,
                   () => startPlacedTransform(edit),
                 )}
-                className="pointer-events-auto absolute z-30 cursor-move rounded-sm bg-transparent hover:outline hover:outline-2 hover:outline-blue-400/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+                className="pointer-events-auto absolute z-30 cursor-move rounded-sm bg-transparent hover:outline hover:outline-2 hover:outline-brand-400/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
                 style={{ left: screen.left, top: screen.top, width: screen.width, height: screen.height }}
               />
             )}
@@ -919,7 +919,7 @@ export function ImageOverlay({
 
       {imageMode && !draft && !cropTarget && !transformSelection && (
         <div
-          className="pointer-events-auto absolute inset-0 z-20 cursor-crosshair bg-cyan-300/5"
+          className="pointer-events-auto absolute inset-0 z-20 cursor-crosshair bg-image-300/5"
           onPointerDown={beginDraw}
           aria-label={`Draw image region on page ${pageIndex + 1}`}
         />
@@ -930,7 +930,7 @@ export function ImageOverlay({
         return (
           <div
             key={`${index}:${region.rect.x}:${region.rect.y}`}
-            className="pointer-events-auto absolute z-30 rounded-sm border-2 border-amber-500 bg-amber-300/10"
+            className="pointer-events-auto absolute z-30 rounded-sm border-2 border-warning-500 bg-warning-300/10"
             style={{ left: screen.left, top: screen.top, width: screen.width, height: screen.height }}
           >
             <button
@@ -941,7 +941,7 @@ export function ImageOverlay({
                 event.stopPropagation();
                 void startExistingTransform(region);
               }}
-              className="absolute inset-0 z-0 cursor-move rounded-sm bg-transparent hover:bg-amber-300/20 focus:outline focus:outline-2 focus:outline-amber-600"
+              className="absolute inset-0 z-0 cursor-move rounded-sm bg-transparent hover:bg-warning-300/20 focus:outline focus:outline-2 focus:outline-warning-600"
             />
             <button
               type="button"
@@ -955,7 +955,7 @@ export function ImageOverlay({
                   nextZ(),
                 )]);
               }}
-              className="absolute -right-3 -top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-red-600 text-sm font-bold leading-none text-white shadow hover:bg-red-500"
+              className="absolute -right-3 -top-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-danger-600 text-sm font-bold leading-none text-white shadow hover:bg-danger-500"
             >
               ×
             </button>
@@ -972,7 +972,7 @@ export function ImageOverlay({
                     draw: regionDraws.find((candidate) => sameRect(candidate.visibleRect, region.rect)),
                   });
                 }}
-                className="rounded bg-amber-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-amber-600"
+                className="rounded bg-warning-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-warning-600"
               >
                 Crop
               </button>
@@ -984,7 +984,7 @@ export function ImageOverlay({
                   event.stopPropagation();
                   chooseFile({ kind: 'replace', region });
                 }}
-                className="rounded bg-amber-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-amber-600"
+                className="rounded bg-warning-700 px-2 py-1 text-[11px] font-semibold text-white shadow hover:bg-warning-600"
               >
                 Replace
               </button>
@@ -1008,7 +1008,7 @@ export function ImageOverlay({
                 region.rect,
                 () => startExistingTransform(region),
               )}
-              className="pointer-events-auto absolute z-30 cursor-move rounded-sm bg-transparent hover:outline hover:outline-2 hover:outline-blue-400/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+              className="pointer-events-auto absolute z-30 cursor-move rounded-sm bg-transparent hover:outline hover:outline-2 hover:outline-brand-400/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
               style={{ left: screen.left, top: screen.top, width: screen.width, height: screen.height }}
             />
           );
@@ -1016,7 +1016,7 @@ export function ImageOverlay({
 
       {drawRect && (
         <div
-          className="absolute z-40 border-2 border-dashed border-cyan-600 bg-cyan-300/20"
+          className="absolute z-40 border-2 border-dashed border-image-600 bg-image-300/20"
           style={drawRect}
         />
       )}
@@ -1045,7 +1045,7 @@ export function ImageOverlay({
 
       {draft && draftScreen && (
         <div
-          className="pointer-events-auto absolute z-50 outline outline-2 outline-cyan-600"
+          className="pointer-events-auto absolute z-50 outline outline-2 outline-image-600"
           style={{
             left: draftScreen.left,
             top: draftScreen.top,
@@ -1065,7 +1065,7 @@ export function ImageOverlay({
             aria-label="Resize added image"
             title="Drag to resize"
             onPointerDown={(event) => draftTransform.beginResize('se', event)}
-            className="absolute -bottom-2 -right-2 z-30 h-5 w-5 cursor-nwse-resize rounded-full border-2 border-white bg-cyan-600 shadow"
+            className="absolute -bottom-2 -right-2 z-30 h-5 w-5 cursor-nwse-resize rounded-full border-2 border-white bg-image-600 shadow"
           />
           <div
             ref={draftToolbarRef}
@@ -1093,7 +1093,7 @@ export function ImageOverlay({
                 addEdits([image]);
                 setDraft(undefined);
               }}
-              className="rounded bg-cyan-700 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-600"
+              className="rounded bg-image-700 px-2 py-1 text-xs font-semibold text-white hover:bg-image-600"
             >
               Confirm
             </button>
@@ -1112,7 +1112,7 @@ export function ImageOverlay({
           />
           <div
             ref={transformFrameRef}
-            className="pointer-events-auto absolute z-[60] outline outline-2 outline-blue-600 focus:outline-4 focus:outline-blue-500"
+            className="pointer-events-auto absolute z-[60] outline outline-2 outline-brand-600 focus:outline-4 focus:outline-brand-500"
             style={{
               left: transformScreen.left,
               top: transformScreen.top,
@@ -1138,12 +1138,12 @@ export function ImageOverlay({
                 aria-label={`Resize selected image from ${corner} corner`}
                 title="Drag to resize proportionally"
                 onPointerDown={(event) => selectedTransform.beginResize(corner, event)}
-                className={`absolute z-30 h-5 w-5 rounded-full border-2 border-white bg-blue-600 shadow ${RESIZE_HANDLE_CLASSES[corner]}`}
+                className={`absolute z-30 h-5 w-5 rounded-full border-2 border-white bg-brand-600 shadow ${RESIZE_HANDLE_CLASSES[corner]}`}
               />
             ))}
             <div
               ref={transformToolbarRef}
-              className="absolute z-40 flex min-w-max flex-wrap items-center gap-1.5 rounded-md border border-blue-200 bg-white p-2 text-xs text-neutral-700 shadow-xl"
+              className="absolute z-40 flex min-w-max flex-wrap items-center gap-1.5 rounded-md border border-brand-200 bg-white p-2 text-xs text-neutral-700 shadow-xl"
               style={transformToolbar}
               onPointerDown={(event) => event.stopPropagation()}
             >
@@ -1191,12 +1191,12 @@ export function ImageOverlay({
               <button
                 type="button"
                 onClick={confirmTransform}
-                className="rounded bg-blue-700 px-2 py-1 font-semibold text-white hover:bg-blue-600"
+                className="rounded bg-brand-700 px-2 py-1 font-semibold text-white hover:bg-brand-600"
               >
                 Done
               </button>
               {transformSelection.kind === 'existing' && transformSelection.warning && (
-                <span className="basis-full text-[11px] text-amber-700" role="status">
+                <span className="basis-full text-[11px] text-warning-700" role="status">
                   {transformSelection.warning}
                 </span>
               )}
@@ -1207,7 +1207,7 @@ export function ImageOverlay({
 
       {cropTarget && cropTargetScreen && (
         <div
-          className="pointer-events-auto absolute z-[70] cursor-crosshair overflow-visible border-2 border-violet-600 bg-black/25"
+          className="pointer-events-auto absolute z-[70] cursor-crosshair overflow-visible border-2 border-crop-600 bg-black/25"
           style={{
             left: cropTargetScreen.left,
             top: cropTargetScreen.top,
@@ -1231,7 +1231,7 @@ export function ImageOverlay({
               />
             );
           })()}
-          <div className="pointer-events-none absolute left-2 top-2 rounded bg-violet-950/90 px-2 py-1 text-[11px] font-medium text-white">
+          <div className="pointer-events-none absolute left-2 top-2 rounded bg-crop-950/90 px-2 py-1 text-[11px] font-medium text-white">
             Drag inside the image to choose the crop.
           </div>
           <div
@@ -1255,7 +1255,7 @@ export function ImageOverlay({
               type="button"
               disabled={!cropRect || cropBusy}
               onClick={() => void confirmCrop()}
-              className="rounded bg-violet-700 px-2 py-1 text-xs font-semibold text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded bg-crop-700 px-2 py-1 text-xs font-semibold text-white hover:bg-crop-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {cropBusy ? 'Cropping…' : 'Confirm crop'}
             </button>
@@ -1264,7 +1264,7 @@ export function ImageOverlay({
       )}
 
       {error && (
-        <div role="alert" className="pointer-events-auto absolute bottom-3 left-3 z-[80] max-w-xs rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 shadow">
+        <div role="alert" className="pointer-events-auto absolute bottom-3 left-3 z-[80] max-w-xs rounded-md border border-danger-300 bg-danger-50 p-3 text-xs text-danger-800 shadow">
           {error}
           <button type="button" onClick={() => setError(undefined)} className="ml-2 font-bold" aria-label="Dismiss image error">×</button>
         </div>

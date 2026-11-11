@@ -114,7 +114,7 @@ export function DateActionPopover({
         }}
       >
         <div className="mb-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Date or time</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-warning-700">Date or time</p>
           <p className="mt-1 text-sm font-medium" data-testid="parsed-date">{readable}</p>
           <p className="mt-0.5 truncate text-xs text-neutral-500" title={detected.raw}>{detected.raw}</p>
         </div>
@@ -127,7 +127,7 @@ export function DateActionPopover({
           id={titleId}
           value={title}
           onChange={(eventTarget) => setTitle(eventTarget.target.value)}
-          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-warning-500 focus:ring-2 focus:ring-warning-200"
         />
 
         {canUseMonthDay && (

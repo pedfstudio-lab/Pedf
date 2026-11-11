@@ -863,13 +863,13 @@ function EditorApp() {
       />
       <TranslationPrivacyNote />
       {phoneLayout && !phoneNoticeDismissed && (
-        <aside role="note" className="flex shrink-0 items-start gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+        <aside role="note" className="flex shrink-0 items-start gap-3 border-b border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-950">
           <span>Editing works best on a computer. You can still open and read your PDF here.</span>
           <button
             type="button"
             onClick={dismissPhoneNotice}
             aria-label="Dismiss note about phones"
-            className="-my-1 ml-auto shrink-0 rounded px-2 py-1 text-base leading-none hover:bg-amber-100"
+            className="-my-1 ml-auto shrink-0 rounded px-2 py-1 text-base leading-none hover:bg-warning-100"
           >
             ×
           </button>
@@ -922,9 +922,9 @@ function EditorApp() {
           }}
         >
         {error && (
-          <div className="m-4 flex flex-wrap items-center gap-3 rounded bg-red-100 p-3 text-sm text-red-800">
+          <div className="m-4 flex flex-wrap items-center gap-3 rounded bg-danger-100 p-3 text-sm text-danger-800">
             <span>{error}</span>
-            {repairFile && <button type="button" className="rounded border border-red-300 bg-white px-3 py-2 font-semibold text-red-800"
+            {repairFile && <button type="button" className="rounded border border-danger-300 bg-white px-3 py-2 font-semibold text-danger-800"
               onClick={() => {
                 setPendingFiles([repairFile]);
                 navigate('/tools/repair');
@@ -946,7 +946,7 @@ function EditorApp() {
           <div
             role="region"
             aria-label="PDF drop area"
-            className={`flex h-full flex-col items-center justify-center gap-5 px-6 text-center text-neutral-500 ${draggingOverEmpty ? 'bg-blue-50 outline-2 -outline-offset-4 outline-blue-400' : ''}`}
+            className={`flex h-full flex-col items-center justify-center gap-5 px-6 text-center text-neutral-500 ${draggingOverEmpty ? 'bg-brand-50 outline-2 -outline-offset-4 outline-brand-400' : ''}`}
             onDragEnter={(event) => {
               event.preventDefault();
               setDraggingOverEmpty(true);
@@ -974,7 +974,7 @@ function EditorApp() {
             }}
           >
             {closedNote && (
-              <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-900">
+              <p role="status" className="rounded-md border border-success-200 bg-success-50 px-4 py-2 text-sm font-medium text-success-900">
                 {closedNote}
               </p>
             )}
@@ -1031,7 +1031,7 @@ function EditorApp() {
               </button>
               <button
                 type="button"
-                className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                className="rounded-md bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
                 onClick={() => {
                   const match = matchingFile;
                   void restoreSavedProject(match.project.id).then((restored) => {
@@ -1077,7 +1077,7 @@ function EditorApp() {
               </button>
               <button
                 type="button"
-                className="rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+                className="rounded-md border border-danger-300 bg-white px-4 py-2 text-sm font-semibold text-danger-700 hover:bg-danger-50"
                 onClick={() => {
                   if (!pendingSwitch) {
                     closeDocument(null);
@@ -1096,7 +1096,7 @@ function EditorApp() {
               </button>
               <button
                 type="button"
-                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+                className="rounded-md bg-success-700 px-4 py-2 text-sm font-semibold text-white hover:bg-success-800"
                 onClick={() => {
                   setSaveFailure(null);
                   setPendingSwitch(null);
@@ -1110,13 +1110,13 @@ function EditorApp() {
         </div>
       )}
       {evictionNote && (
-        <aside className="fixed right-4 top-16 z-[180] flex max-w-sm items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 shadow-xl" role="status">
+        <aside className="fixed right-4 top-16 z-[180] flex max-w-sm items-start gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-950 shadow-xl" role="status">
           <span>{evictionNote}</span>
-          <button type="button" onClick={() => setEvictionNote(null)} className="rounded px-1 text-lg leading-none hover:bg-blue-100" aria-label="Dismiss saved-file notice">×</button>
+          <button type="button" onClick={() => setEvictionNote(null)} className="rounded px-1 text-lg leading-none hover:bg-brand-100" aria-label="Dismiss saved-file notice">×</button>
         </aside>
       )}
       {warnings.length > 0 && (
-        <aside className="fixed bottom-4 right-4 z-[100] max-w-md rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-xl" role="status">
+        <aside className="fixed bottom-4 right-4 z-[100] max-w-md rounded-lg border border-warning-300 bg-warning-50 p-4 text-sm text-warning-950 shadow-xl" role="status">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-semibold">Exported with warnings</p>
@@ -1124,17 +1124,17 @@ function EditorApp() {
                 {warnings.map((warning) => <li key={warning}>{warning}</li>)}
               </ul>
             </div>
-            <button type="button" onClick={() => setWarnings([])} className="rounded px-1 text-lg leading-none hover:bg-amber-100" aria-label="Dismiss export warnings">×</button>
+            <button type="button" onClick={() => setWarnings([])} className="rounded px-1 text-lg leading-none hover:bg-warning-100" aria-label="Dismiss export warnings">×</button>
           </div>
         </aside>
       )}
       {downloadReady && (
-        <aside className="fixed bottom-4 left-4 z-[100] flex items-center gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 shadow-xl" role="status">
+        <aside className="fixed bottom-4 left-4 z-[100] flex items-center gap-3 rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-950 shadow-xl" role="status">
           <span>Your PDF is ready</span>
-          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-emerald-700 px-3 py-1.5 font-semibold text-white hover:bg-emerald-800">
+          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-success-700 px-3 py-1.5 font-semibold text-white hover:bg-success-800">
             Download edited PDF
           </a>
-          <button type="button" onClick={() => setDownloadReady(null)} className="rounded px-1 text-lg leading-none hover:bg-emerald-100" aria-label="Dismiss download">×</button>
+          <button type="button" onClick={() => setDownloadReady(null)} className="rounded px-1 text-lg leading-none hover:bg-success-100" aria-label="Dismiss download">×</button>
         </aside>
       )}
     </div>

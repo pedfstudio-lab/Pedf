@@ -871,7 +871,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               aria-label="Chat answer language"
               value={preferredLanguage}
               onChange={(event) => setPreferredLanguage(event.target.value as SupportedLanguageCode)}
-              className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-neutral-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
             >
               {SUPPORTED_LANGUAGES.map(({ code, label }) => (
                 <option key={code} value={code}>{label}</option>
@@ -889,7 +889,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
           {entries.map((entry) => (
             <article
               key={entry.id}
-              className={`max-w-[90%] rounded-xl px-4 py-3 text-sm ${entry.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'border border-neutral-200 bg-neutral-50 text-neutral-800'}`}
+              className={`max-w-[90%] rounded-xl px-4 py-3 text-sm ${entry.role === 'user' ? 'ml-auto bg-brand-600 text-white' : 'border border-neutral-200 bg-neutral-50 text-neutral-800'}`}
             >
               <p className="whitespace-pre-wrap">{entry.text}</p>
               {entry.role === 'assistant' && (
@@ -898,13 +898,13 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                     type="button"
                     onClick={() => void togglePlayback(entry)}
                     aria-label={playingId === entry.id ? 'Stop reading answer aloud' : 'Read answer aloud'}
-                    className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-neutral-700 hover:border-blue-400 hover:text-blue-700"
+                    className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-neutral-700 hover:border-brand-400 hover:text-brand-700"
                   >
                     <span aria-hidden="true">{playingId === entry.id ? '⏹' : '▶'}</span>
                     {playingId === entry.id ? 'Stop' : 'Read aloud'}
                   </button>
                   {entry.grounded === false && (
-                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                    <span className="inline-flex rounded-full bg-warning-100 px-2 py-0.5 text-[11px] font-semibold text-warning-900">
                       General info — not from this PDF
                     </span>
                   )}
@@ -918,20 +918,20 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             </div>
           )}
           {micState !== 'idle' && (
-            <div role="status" className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            <div role="status" className="inline-flex rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800">
               {micState === 'requesting' && 'Opening the microphone…'}
               {micState === 'recording' && 'Listening… tap Stop when you finish.'}
               {micState === 'transcribing' && 'Transcribing your question…'}
             </div>
           )}
           {conversationActive && (
-            <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
               <p className="font-semibold">
                 {conversationPhase === 'listening' && 'Conversation mode is listening.'}
                 {conversationPhase === 'thinking' && 'Finishing your question…'}
                 {conversationPhase === 'speaking' && 'Answering aloud…'}
               </p>
-              <p className="mt-1 text-xs text-emerald-800">
+              <p className="mt-1 text-xs text-success-800">
                 {conversationPhase === 'listening'
                   ? 'Pause briefly when you finish. Earphones are recommended.'
                   : conversationPhase === 'speaking'
@@ -944,14 +944,14 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
             <button
               type="button"
               onClick={stopVoicePlayback}
-              className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-red-400 hover:text-red-700"
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-danger-400 hover:text-danger-700"
             >
               <span aria-hidden="true">⏹</span>
               Stop voice
             </button>
           )}
           {error && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <div role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
               {error}
             </div>
           )}
@@ -960,7 +960,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
 
         <footer className="border-t border-neutral-200 p-4">
           {keyMissing ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-950">
               <p>Add your Sarvam API key in Settings to ask this PDF.</p>
               <button
                 type="button"
@@ -988,7 +988,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 }}
                 placeholder={conversationActive ? 'Listening continuously…' : 'Ask a question about this PDF…'}
                 disabled={!doc || thinking || micState !== 'idle' || conversationActive}
-                className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-neutral-100"
+                className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200 disabled:bg-neutral-100"
               />
               <button
                 type="button"
@@ -999,7 +999,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 disabled={!doc || thinking || conversationActive || micState === 'requesting' || micState === 'transcribing'}
                 aria-label={micState === 'recording' ? 'Stop recording question' : 'Ask by voice'}
                 aria-pressed={micState === 'recording'}
-                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${micState === 'recording' ? 'bg-red-600 hover:bg-red-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
+                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${micState === 'recording' ? 'bg-danger-600 hover:bg-danger-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
               >
                 {micState === 'requesting' && '…'}
                 {micState === 'recording' && '⏹'}
@@ -1022,7 +1022,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 title={conversationUnavailable
                   ? 'Realtime speech is unavailable; click-to-talk remains available.'
                   : 'Conversation mode keeps the microphone open. You can interrupt spoken answers; earphones improve reliability.'}
-                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${conversationActive ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-violet-700 hover:bg-violet-600'}`}
+                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${conversationActive ? 'bg-success-700 hover:bg-success-600' : 'bg-voice-700 hover:bg-voice-600'}`}
               >
                 {conversationActive
                   ? 'Stop conversation'
@@ -1033,7 +1033,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
               <button
                 type="submit"
                 disabled={!doc || thinking || micState !== 'idle' || conversationActive || question.trim() === ''}
-                className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-md bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Send
               </button>

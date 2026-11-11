@@ -34,7 +34,7 @@ export function PageToolbar({ position, widthPt, heightPt }: PageToolbarProps) {
         disabled={pagePlan.length <= 1}
         aria-label="Delete Page"
         title="Delete page"
-        className="rounded px-2 py-1 font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded px-2 py-1 font-medium text-danger-600 hover:bg-danger-50 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <svg
           aria-hidden="true"

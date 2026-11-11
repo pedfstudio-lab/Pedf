@@ -82,7 +82,7 @@ export function SavedFilesColumn({
                 <li
                   key={project.id}
                   className={`relative flex items-stretch rounded-lg border ${current
-                    ? 'border-blue-200 bg-blue-50'
+                    ? 'border-brand-200 bg-brand-50'
                     : 'border-transparent hover:border-neutral-200 hover:bg-neutral-50'}`}
                 >
                   <button
@@ -91,7 +91,7 @@ export function SavedFilesColumn({
                     aria-current={current ? 'true' : undefined}
                     disabled={current || (openingId !== null && !opening)}
                     onClick={() => void openProject(project)}
-                    className={`min-w-0 flex-1 px-2 py-2.5 text-left disabled:cursor-default ${current ? 'text-blue-950' : 'disabled:opacity-60'}`}
+                    className={`min-w-0 flex-1 px-2 py-2.5 text-left disabled:cursor-default ${current ? 'text-brand-950' : 'disabled:opacity-60'}`}
                   >
                     <span className="block truncate text-sm font-semibold">{project.fileName}</span>
                     <span className="mt-1 block truncate text-xs text-neutral-500">
@@ -114,7 +114,7 @@ export function SavedFilesColumn({
                         <button
                           type="button"
                           onClick={() => void deleteProject(project)}
-                          className="w-full rounded px-2 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50"
+                          className="w-full rounded px-2 py-2 text-left text-sm font-medium text-danger-700 hover:bg-danger-50"
                         >
                           Delete saved file
                         </button>

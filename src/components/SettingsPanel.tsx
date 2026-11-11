@@ -114,7 +114,7 @@ export function SettingsPanel({
               aria-label="Preferred language"
               value={preferredLanguage}
               onChange={(event) => setPreferredLanguage(event.target.value as SupportedLanguageCode)}
-              className="mt-3 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className="mt-3 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
             >
               {SUPPORTED_LANGUAGES.map(({ code, label }) => (
                 <option key={code} value={code}>{label}</option>
@@ -153,7 +153,7 @@ export function SettingsPanel({
                   else setSavedFilesError(true);
                 });
               }}
-              className="mt-3 rounded-md border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-3 rounded-md border border-danger-300 px-3 py-2 text-sm font-semibold text-danger-700 hover:bg-danger-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Delete all saved files on this device
             </button>
@@ -167,12 +167,12 @@ export function SettingsPanel({
                 <h3 id="sarvam-settings-title" className="text-sm font-semibold text-neutral-900">Sarvam API key</h3>
                 <span
                   role="status"
-                  className={`rounded-full px-2 py-1 text-xs font-semibold ${keyIsSet ? 'bg-emerald-100 text-emerald-800' : 'bg-neutral-100 text-neutral-600'}`}
+                  className={`rounded-full px-2 py-1 text-xs font-semibold ${keyIsSet ? 'bg-success-100 text-success-800' : 'bg-neutral-100 text-neutral-600'}`}
                 >
                   {keyIsSet ? 'Set' : 'Not set'}
                 </span>
               </div>
-              <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+              <div className="mt-3 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-950">
                 <strong>Personal use only.</strong> The key is stored in this browser. Production keeps provider keys on the server.
               </div>
               <form
@@ -194,7 +194,7 @@ export function SettingsPanel({
                   value={keyDraft}
                   onChange={(event) => setKeyDraft(event.target.value)}
                   placeholder={keyIsSet ? 'Enter a replacement key' : 'Enter your Sarvam API key'}
-                  className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                  className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
                 />
                 <div className="mt-3 flex justify-end gap-2">
                   <button

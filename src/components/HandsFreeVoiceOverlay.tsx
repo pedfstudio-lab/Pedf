@@ -47,7 +47,7 @@ export function HandsFreeVoiceOverlay({
           >
             <span
               aria-hidden="true"
-              className={`h-2.5 w-2.5 shrink-0 rounded-full ${phase === 'listening' ? 'animate-pulse bg-emerald-400' : phase === 'thinking' ? 'bg-amber-400' : 'bg-violet-400'}`}
+              className={`h-2.5 w-2.5 shrink-0 rounded-full ${phase === 'listening' ? 'animate-pulse bg-success-400' : phase === 'thinking' ? 'bg-warning-400' : 'bg-voice-400'}`}
             />
             <span className="min-w-0 truncate font-semibold">{handsFreePhaseLabel(phase)}</span>
             <button
@@ -60,7 +60,7 @@ export function HandsFreeVoiceOverlay({
             <button
               type="button"
               onClick={onStop}
-              className="shrink-0 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500"
+              className="shrink-0 rounded-full bg-danger-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-danger-500"
             >
               Stop
             </button>

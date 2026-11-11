@@ -75,7 +75,7 @@ export function FontSizeCombobox({ value, onApply }: FontSizeComboboxProps) {
             setOpen(true);
           }
         }}
-        className="w-[3.5em] rounded-l border border-neutral-200 bg-white px-1 py-1 text-right text-sm outline-none focus:border-blue-500"
+        className="w-[3.5em] rounded-l border border-neutral-200 bg-white px-1 py-1 text-right text-sm outline-none focus:border-brand-500"
       />
       <button
         type="button"
@@ -103,7 +103,7 @@ export function FontSizeCombobox({ value, onApply }: FontSizeComboboxProps) {
                 aria-selected={preset === value}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => apply(String(preset))}
-                className="block w-full rounded px-2 py-1 text-right text-sm hover:bg-neutral-100 aria-selected:bg-blue-100 aria-selected:text-blue-800"
+                className="block w-full rounded px-2 py-1 text-right text-sm hover:bg-neutral-100 aria-selected:bg-brand-100 aria-selected:text-brand-800"
               >
                 {preset}
               </button>

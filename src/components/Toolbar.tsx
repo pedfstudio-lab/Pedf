@@ -166,7 +166,7 @@ export function Toolbar({
       type="button"
       onClick={onHome}
       title="Save and go to the home page"
-      className={`min-w-0 cursor-pointer truncate whitespace-nowrap rounded font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${phoneLayout ? 'text-base' : 'shrink-0 text-lg'}`}
+      className={`min-w-0 cursor-pointer truncate whitespace-nowrap rounded font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${phoneLayout ? 'text-base' : 'shrink-0 text-lg'}`}
     >
       PEDF Studio
     </button>
@@ -186,13 +186,13 @@ export function Toolbar({
     </span>
   );
   const saveProblemBanner = saveProblem && (
-    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-danger-200 bg-danger-50 px-4 py-2 text-sm text-danger-800">
       <span className="font-semibold">{statusText}</span>
       <button
         type="button"
         onClick={onExport}
         disabled={!fileName || exporting}
-        className="whitespace-nowrap rounded-md bg-red-700 px-3 py-1 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-40"
+        className="whitespace-nowrap rounded-md bg-danger-700 px-3 py-1 text-sm font-medium text-white hover:bg-danger-800 disabled:opacity-40"
       >
         Download PDF now
       </button>
@@ -219,7 +219,7 @@ export function Toolbar({
       type="button"
       onClick={onExport}
       disabled={!fileName || exporting}
-      className="shrink-0 whitespace-nowrap rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-40"
+      className="shrink-0 whitespace-nowrap rounded-md bg-success-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-success-800 disabled:cursor-wait disabled:opacity-40"
     >
       {exporting ? 'Preparing PDF…' : 'Download PDF'}
     </button>
@@ -300,7 +300,7 @@ export function Toolbar({
       aria-pressed={editMode}
       onClick={() => onEditModeChange(!editMode)}
       disabled={!fileName}
-      className={editMode ? `${PRESSED_BUTTON} bg-blue-600 hover:bg-blue-700` : PLAIN_BUTTON}
+      className={editMode ? `${PRESSED_BUTTON} bg-brand-600 hover:bg-brand-700` : PLAIN_BUTTON}
     >
       Edit text
     </button>
@@ -311,7 +311,7 @@ export function Toolbar({
       aria-pressed={textAddMode}
       onClick={() => onTextAddModeChange(!textAddMode)}
       disabled={!fileName}
-      className={textAddMode ? `${PRESSED_BUTTON} bg-violet-700 hover:bg-violet-800` : PLAIN_BUTTON}
+      className={textAddMode ? `${PRESSED_BUTTON} bg-addtext-700 hover:bg-addtext-800` : PLAIN_BUTTON}
     >
       Add text
     </button>
@@ -322,7 +322,7 @@ export function Toolbar({
       aria-pressed={imageMode}
       onClick={() => onImageModeChange(!imageMode)}
       disabled={!fileName}
-      className={imageMode ? `${PRESSED_BUTTON} bg-cyan-700 hover:bg-cyan-800` : PLAIN_BUTTON}
+      className={imageMode ? `${PRESSED_BUTTON} bg-image-700 hover:bg-image-800` : PLAIN_BUTTON}
     >
       Add image
     </button>

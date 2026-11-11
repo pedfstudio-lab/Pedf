@@ -1,19 +1,10 @@
-:root {
-  --site-blue: #1e6bff;
-  --site-blue-dark: #0753e6;
-  /* Small blue text: readable (4.5:1) on white and on the pale band. */
-  --site-blue-text: #1a5fe0;
-  --site-ink: #0b1220;
-  --site-body: #5b6472;
-  --site-line: #dbe6f7;
-  --site-band: #eef4ff;
-}
+/* Colours come from the shared colour list in src/index.css (the --color-site-* names). */
 
 .site-page {
   min-height: 100%;
   overflow-x: hidden;
   background: #fff;
-  color: var(--site-ink);
+  color: var(--color-site-ink);
   /* The app's one font setting (index.css): the device's own font, never a download. */
   font-family: var(--font-sans);
 }
@@ -26,7 +17,7 @@
 .site-page a:focus-visible,
 .site-page button:focus-visible,
 .site-page summary:focus-visible {
-  outline: 3px solid rgba(30, 107, 255, 0.45);
+  outline: 3px solid color-mix(in srgb, var(--color-site-brand) 45%, transparent);
   outline-offset: 4px;
 }
 
@@ -55,7 +46,7 @@
   flex: none;
   align-items: center;
   gap: 10px;
-  color: var(--site-ink);
+  color: var(--color-site-ink);
   font-size: 1.22rem;
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -63,7 +54,7 @@
 }
 
 .site-brand strong {
-  color: var(--site-blue);
+  color: var(--color-site-brand);
   font-weight: 800;
 }
 
@@ -76,7 +67,7 @@
   border: 1px solid #d7e8ff;
   border-radius: 12px;
   background: linear-gradient(145deg, #f9fcff, #d9ebff);
-  box-shadow: 0 8px 20px rgba(30, 107, 255, 0.15), inset 0 1px 0 #fff;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-site-brand) 15%, transparent), inset 0 1px 0 #fff;
 }
 
 .site-brand__mark svg {
@@ -111,7 +102,7 @@
 
 .site-nav__links a:hover,
 .site-footer nav a:hover {
-  color: var(--site-blue);
+  color: var(--color-site-brand);
 }
 
 .site-button {
@@ -124,7 +115,7 @@
   border-radius: 999px;
   /* Dark enough for white text across the whole gradient (4.7:1 or more). */
   background: linear-gradient(135deg, #1f6fe5 0%, #0b4fd6 100%);
-  box-shadow: 0 14px 32px rgba(30, 107, 255, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--color-site-brand) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
   color: #fff;
   font-weight: 750;
   padding: 0 26px;
@@ -136,7 +127,7 @@
 @media (hover: hover) {
   .site-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 18px 38px rgba(30, 107, 255, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    box-shadow: 0 18px 38px color-mix(in srgb, var(--color-site-brand) 34%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
   }
 }
 
@@ -153,7 +144,7 @@
   left: 16px;
   padding: 10px 16px;
   border-radius: 10px;
-  background: var(--site-ink);
+  background: var(--color-site-ink);
   color: #fff;
   font-weight: 700;
   text-decoration: none;
@@ -172,7 +163,7 @@
 
 .site-eyebrow {
   margin: 0 0 16px;
-  color: var(--site-blue-text);
+  color: var(--color-site-brand-text);
   font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.18em;
@@ -227,7 +218,7 @@
 .hero__lede {
   max-width: 510px;
   margin: 34px 0 28px;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: clamp(1.1rem, 1.7vw, 1.28rem);
   line-height: 1.55;
 }
@@ -304,7 +295,7 @@
   height: 27px;
   place-items: center;
   border-radius: 50%;
-  background: var(--site-blue);
+  background: var(--color-site-brand);
   color: #fff;
   font-size: 0.46rem;
   transform: translateY(-50%);
@@ -330,7 +321,7 @@
 }
 
 .chat-demo__field span {
-  color: var(--site-blue);
+  color: var(--color-site-brand);
   font-size: 0.58rem;
 }
 
@@ -344,7 +335,7 @@
 .privacy-band h2,
 .faq h2 {
   margin: 0;
-  color: var(--site-ink);
+  color: var(--color-site-ink);
   font-size: clamp(2.15rem, 4vw, 3.4rem);
   font-weight: 800;
   letter-spacing: -0.05em;
@@ -404,7 +395,7 @@
   border: 1px solid #dce9fb;
   border-radius: 42px;
   background: linear-gradient(135deg, #f9fcff 0%, #edf5ff 100%);
-  box-shadow: 0 26px 70px rgba(30, 107, 255, 0.08);
+  box-shadow: 0 26px 70px color-mix(in srgb, var(--color-site-brand) 8%, transparent);
 }
 
 .how__steps {
@@ -433,8 +424,8 @@
   flex: none;
   place-items: center;
   border-radius: 14px;
-  background: var(--site-blue);
-  box-shadow: 0 10px 22px rgba(30, 107, 255, 0.2);
+  background: var(--color-site-brand);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--color-site-brand) 20%, transparent);
   color: #fff;
   font-weight: 800;
 }
@@ -447,7 +438,7 @@
 
 .how__steps p {
   margin: 0;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 1rem;
   line-height: 1.55;
 }
@@ -456,7 +447,7 @@
   margin-top: 116px;
   background:
     radial-gradient(circle at 15% 48%, rgba(72, 158, 255, 0.13), transparent 34%),
-    var(--site-band);
+    var(--color-site-band);
 }
 
 .privacy-band__inner {
@@ -474,7 +465,7 @@
   max-width: 600px;
   height: auto;
   margin-left: -8%;
-  filter: drop-shadow(0 28px 34px rgba(30, 107, 255, 0.2));
+  filter: drop-shadow(0 28px 34px color-mix(in srgb, var(--color-site-brand) 20%, transparent));
 }
 
 .privacy-band h2 {
@@ -483,13 +474,13 @@
 
 .privacy-band h2 span {
   display: block;
-  color: var(--site-blue);
+  color: var(--color-site-brand);
 }
 
 .privacy-band__copy > p:not(.site-eyebrow) {
   max-width: 570px;
   margin: 28px 0 0;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 1.13rem;
   line-height: 1.65;
 }
@@ -504,7 +495,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 28px;
-  color: var(--site-blue-dark);
+  color: var(--color-site-brand-strong);
   font-weight: 750;
   text-decoration: none;
 }
@@ -532,7 +523,7 @@
   height: 35px;
   place-items: center;
   border-radius: 12px;
-  background: var(--site-blue);
+  background: var(--color-site-brand);
   color: #fff;
   font-size: 1.05rem;
   font-weight: 850;
@@ -540,7 +531,7 @@
 
 .trust-strip__language {
   background: transparent;
-  color: var(--site-blue);
+  color: var(--color-site-brand);
   font-size: 1.45rem;
 }
 
@@ -554,7 +545,7 @@
 .trust-note {
   margin-top: -14px;
   margin-bottom: 0;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 0.9rem;
   text-align: center;
 }
@@ -573,11 +564,11 @@
 }
 
 .faq__grid {
-  border-top: 1px solid var(--site-line);
+  border-top: 1px solid var(--color-site-line);
 }
 
 .faq details {
-  border-bottom: 1px solid var(--site-line);
+  border-bottom: 1px solid var(--color-site-line);
 }
 
 .faq summary {
@@ -586,7 +577,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  color: var(--site-ink);
+  color: var(--color-site-ink);
   cursor: pointer;
   font-size: 1.08rem;
   font-weight: 740;
@@ -598,7 +589,7 @@
 }
 
 .faq summary span {
-  color: var(--site-blue);
+  color: var(--color-site-brand);
   font-size: 1.6rem;
   font-weight: 400;
   transition: transform 180ms ease;
@@ -611,7 +602,7 @@
 .faq details p {
   max-width: 650px;
   margin: -4px 44px 28px 0;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 1rem;
   line-height: 1.65;
 }
@@ -637,7 +628,7 @@
 .site-footer p {
   justify-self: end;
   margin: 0;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 0.9rem;
 }
 
@@ -657,7 +648,7 @@
 
 .site-static > p:not(.site-eyebrow) {
   margin: 0 0 22px;
-  color: var(--site-body);
+  color: var(--color-site-body);
   font-size: 1.1rem;
   line-height: 1.75;
 }
@@ -755,10 +746,10 @@
     flex: none;
     place-items: center;
     padding: 0;
-    border: 1px solid var(--site-line);
+    border: 1px solid var(--color-site-line);
     border-radius: 12px;
     background: #fff;
-    color: var(--site-ink);
+    color: var(--color-site-ink);
     cursor: pointer;
     font-size: 1.25rem;
     line-height: 1;
@@ -776,7 +767,7 @@
     gap: 0;
     margin: 0;
     padding: 6px 16px 14px;
-    border-bottom: 1px solid var(--site-line);
+    border-bottom: 1px solid var(--color-site-line);
     background: #fff;
     box-shadow: 0 18px 30px rgba(11, 18, 32, 0.08);
   }

@@ -22,7 +22,7 @@ describe('SmartSpanLayer', () => {
     const html = renderToStaticMarkup(<SmartSpanLayer dates={[date]} viewport={viewport} dpr={1} />);
 
     expect(html).toContain('aria-label="Date actions: 27 November 1943"');
-    expect(html.match(/border-amber-600/g)).toHaveLength(1);
+    expect(html.match(/border-warning-600/g)).toHaveLength(1);
     expect(html).not.toContain('Location actions');
     expect(html).not.toContain('data-location-underline');
   });

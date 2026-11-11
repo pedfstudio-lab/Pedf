@@ -45,7 +45,7 @@ export function SmartSpanLayer({
               setSelectionKey(closeSelectionKey);
               setSelectedDate(date);
             }}
-            className="absolute z-[15] cursor-pointer border-0 border-b-2 border-dotted border-amber-600 bg-amber-200/10 p-0 hover:bg-amber-200/25 focus:bg-amber-200/25 focus:outline-none focus:ring-2 focus:ring-amber-500/70"
+            className="absolute z-[15] cursor-pointer border-0 border-b-2 border-dotted border-warning-600 bg-warning-200/10 p-0 hover:bg-warning-200/25 focus:bg-warning-200/25 focus:outline-none focus:ring-2 focus:ring-warning-500/70"
             style={{
               left: rect.left,
               top: rect.top,

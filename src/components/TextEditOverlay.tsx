@@ -1441,11 +1441,11 @@ export function TextEditOverlay({
         </button>
         <span aria-hidden="true" className="h-5 w-px bg-neutral-200" />
         {bulletMode && (
-          <span className="whitespace-nowrap px-1 text-xs font-semibold text-amber-700">Bullet list</span>
+          <span className="whitespace-nowrap px-1 text-xs font-semibold text-warning-700">Bullet list</span>
         )}
         <FontSizeCombobox value={selectionStyle.fontSizePt} onApply={applyFontSize} />
-        <button type="button" aria-pressed={selectionStyle.bold} aria-label="Bold" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>B</button>
-        <button type="button" aria-pressed={selectionStyle.italic} aria-label="Italic" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-blue-100 text-blue-800' : 'hover:bg-neutral-100'}`}>I</button>
+        <button type="button" aria-pressed={selectionStyle.bold} aria-label="Bold" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('bold')} className={`rounded px-2 py-1 text-sm font-bold ${selectionStyle.bold ? 'bg-brand-100 text-brand-800' : 'hover:bg-neutral-100'}`}>B</button>
+        <button type="button" aria-pressed={selectionStyle.italic} aria-label="Italic" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => applyInlineStyle('italic')} className={`rounded px-2 py-1 text-sm italic ${selectionStyle.italic ? 'bg-brand-100 text-brand-800' : 'hover:bg-neutral-100'}`}>I</button>
         <select
           aria-label="Font family"
           value={selectionStyle.family}
@@ -1468,7 +1468,7 @@ export function TextEditOverlay({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setColorPanelOpen((open) => !open)}
             className={`flex h-7 w-8 items-center justify-center rounded border ${
-              selectionStyle.colorKnown ? 'border-neutral-300' : 'border-dashed border-amber-500'
+              selectionStyle.colorKnown ? 'border-neutral-300' : 'border-dashed border-warning-500'
             }`}
           >
             <span
@@ -1533,7 +1533,7 @@ export function TextEditOverlay({
         <div
           ref={errorRef}
           role="alert"
-          className="absolute z-30 max-w-sm rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 shadow"
+          className="absolute z-30 max-w-sm rounded-md border border-danger-300 bg-danger-50 px-2 py-1 text-xs font-medium text-danger-800 shadow"
           style={errorOffset}
         >
           {visibleError}
@@ -1616,7 +1616,7 @@ export function TextEditOverlay({
       <div
         data-testid="text-editor-frame"
         aria-hidden="true"
-        className="pointer-events-none absolute z-10 rounded-sm outline outline-1 outline-blue-500"
+        className="pointer-events-none absolute z-10 rounded-sm outline outline-1 outline-brand-500"
         style={visualFrame}
       />
       <button
@@ -1625,7 +1625,7 @@ export function TextEditOverlay({
         onPointerDown={beginWidthDrag}
         style={{ left: visualFrame.left + visualFrame.width - 5, top: visualFrame.top + visualFrame.height / 2 - 5 }}
         // Above the corner handles, so a short box's corners never cover it.
-        className="absolute z-30 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+        className="absolute z-30 h-2.5 w-2.5 cursor-ew-resize rounded-sm border border-white bg-brand-500 hover:bg-brand-600"
       >
         <HandleGrabArea x={1} y={0} />
       </button>
@@ -1635,7 +1635,7 @@ export function TextEditOverlay({
           aria-label="Drag to change box height"
           onPointerDown={beginHeightDrag}
           style={{ left: visualFrame.left + visualFrame.width / 2 - 5, top: visualFrame.top + visualFrame.height - 5 }}
-          className="absolute z-30 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-blue-500 hover:bg-blue-600"
+          className="absolute z-30 h-2.5 w-2.5 cursor-ns-resize rounded-sm border border-white bg-brand-500 hover:bg-brand-600"
         >
           <HandleGrabArea x={0} y={1} />
         </button>
@@ -1663,7 +1663,7 @@ export function TextEditOverlay({
             left: visualFrame.left + (corner.x > 0 ? visualFrame.width : 0) - 5,
             top: visualFrame.top + (corner.y > 0 ? visualFrame.height : 0) - 5,
           }}
-          className={`absolute z-20 h-2.5 w-2.5 touch-none ${corner.x === corner.y ? 'cursor-nwse-resize' : 'cursor-nesw-resize'} rounded-sm border border-white bg-blue-500 hover:bg-blue-600`}
+          className={`absolute z-20 h-2.5 w-2.5 touch-none ${corner.x === corner.y ? 'cursor-nwse-resize' : 'cursor-nesw-resize'} rounded-sm border border-white bg-brand-500 hover:bg-brand-600`}
         >
           <HandleGrabArea x={corner.x} y={corner.y} />
         </button>

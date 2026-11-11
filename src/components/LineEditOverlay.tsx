@@ -125,7 +125,7 @@ export function LineEditOverlay({
       }}
       aria-label="Selected divider line"
     >
-      <div className="absolute inset-0 rounded-sm bg-fuchsia-500/40 outline outline-2 outline-fuchsia-500" />
+      <div className="absolute inset-0 rounded-sm bg-line-500/40 outline outline-2 outline-line-500" />
       <div
         ref={toolbarRef}
         role="toolbar"
@@ -138,14 +138,14 @@ export function LineEditOverlay({
           aria-label="Drag to move divider line"
           title="Drag to move"
           onPointerDown={beginMoveDrag}
-          className="cursor-move rounded bg-fuchsia-600 px-2 py-1 text-xs font-semibold text-white hover:bg-fuchsia-700"
+          className="cursor-move rounded bg-line-600 px-2 py-1 text-xs font-semibold text-white hover:bg-line-700"
         >
           Move ✥
         </button>
         <button
           type="button"
           onClick={onDelete}
-          className="rounded px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+          className="rounded px-2 py-1 text-xs font-semibold text-danger-700 hover:bg-danger-50"
         >
           Delete
         </button>

@@ -13,20 +13,20 @@
   border: 2px dashed #63a1ff;
   border-radius: 24px;
   background: rgba(249, 252, 255, 0.84);
-  box-shadow: 0 16px 44px rgba(30, 107, 255, 0.08);
-  color: var(--site-ink, #0b1220);
+  box-shadow: 0 16px 44px color-mix(in srgb, var(--color-site-brand) 8%, transparent);
+  color: var(--color-site-ink);
   cursor: pointer;
   text-align: left;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
 .drop-zone:focus-visible {
-  outline: 3px solid rgba(30, 107, 255, 0.45);
+  outline: 3px solid color-mix(in srgb, var(--color-site-brand) 45%, transparent);
   outline-offset: 4px;
 }
 
 .drop-zone--active {
-  border-color: var(--site-blue, #1e6bff);
+  border-color: var(--color-site-brand);
   background: #eef6ff;
   transform: translateY(-2px);
 }
@@ -34,14 +34,14 @@
 /* Lift on hover only where there is a mouse; on touch it would stay stuck after a tap. */
 @media (hover: hover) {
   .drop-zone:hover {
-    border-color: var(--site-blue, #1e6bff);
+    border-color: var(--color-site-brand);
     background: #eef6ff;
     transform: translateY(-2px);
   }
 }
 
 .drop-zone:active {
-  border-color: var(--site-blue, #1e6bff);
+  border-color: var(--color-site-brand);
   background: #eef6ff;
   transform: scale(0.99);
 }
@@ -70,7 +70,7 @@
   border: 1px solid #d8eaff;
   border-radius: 18px;
   background: linear-gradient(145deg, #fff, #ddebff);
-  box-shadow: 0 12px 26px rgba(30, 107, 255, 0.16);
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--color-site-brand) 16%, transparent);
 }
 
 .drop-zone__icon svg {

@@ -46,8 +46,8 @@ function ImageCanvas({ label, image }: ImageCanvasProps) {
 
 function ResultCard({ result }: { readonly result: ScenarioResult }) {
   const statusClasses = result.pass
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    : 'border-red-200 bg-red-50 text-red-800';
+    ? 'border-success-200 bg-success-50 text-success-800'
+    : 'border-danger-200 bg-danger-50 text-danger-800';
 
   return (
     <article className={`rounded-xl border p-5 shadow-sm ${statusClasses}`}>
@@ -64,7 +64,7 @@ function ResultCard({ result }: { readonly result: ScenarioResult }) {
       </div>
 
       {result.error && (
-        <pre className="mt-4 overflow-auto whitespace-pre-wrap rounded-lg bg-red-950 p-3 text-xs text-red-50">
+        <pre className="mt-4 overflow-auto whitespace-pre-wrap rounded-lg bg-danger-950 p-3 text-xs text-danger-50">
           {result.error}
         </pre>
       )}
@@ -143,7 +143,7 @@ export default function VerifyPage() {
         </header>
 
         {running && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-sm font-medium text-blue-800">
+          <div className="rounded-xl border border-brand-200 bg-brand-50 p-5 text-sm font-medium text-brand-800">
             Rendering and comparing scenarios…
           </div>
         )}

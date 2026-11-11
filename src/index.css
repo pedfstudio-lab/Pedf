@@ -12,6 +12,132 @@
     "Nirmala UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+/*
+ * The colour list: every colour of the website and the editor is set here, named by its
+ * job (brand, success, danger…), never by its hue, so a new colour set only changes values
+ * in this block. The editor uses these as Tailwind classes (bg-brand-600, text-neutral-700);
+ * the website CSS uses them as var(--color-site-…).
+ *
+ * Nothing inside a PDF uses this list: page content, text colours, highlight, shape and
+ * signature ink, watermark colours and the logo artwork keep their own values.
+ */
+@theme static {
+  /* Website and PDF tools pages */
+  --color-site-brand: #1e6bff; /* buttons, links, highlighted words */
+  --color-site-brand-strong: #0753e6; /* hover, strong links */
+  --color-site-brand-text: #1a5fe0; /* small brand text: 4.5:1 on white and on the band */
+  --color-site-brand-dark: #1855b8; /* signature buttons, selected tab */
+  --color-site-brand-ink: #255093; /* brand-tinted notes */
+  --color-site-ink: #0b1220; /* headings and main text */
+  --color-site-body: #5b6472; /* paragraphs */
+  --color-site-line: #dbe6f7; /* card and section borders */
+  --color-site-band: #eef4ff; /* soft band background */
+  --color-site-field-border: #b8c9df; /* inputs and selects */
+  --color-site-control-border: #c9d8ed; /* secondary buttons */
+  --color-site-success: #17633f;
+  --color-site-success-border: #a7d9c6;
+  --color-site-success-soft: #f2fcf7;
+  --color-site-warning: #79520c;
+  --color-site-warning-border: #e9cf8f;
+  --color-site-warning-soft: #fff9e8;
+  --color-site-danger: #a32020;
+  --color-site-danger-border: #efb4b4;
+  --color-site-danger-soft: #fff2f2;
+
+  /* Editor: brand (main buttons, selection, links, focus rings) */
+  --color-brand-50: oklch(97% 0.014 254.604);
+  --color-brand-100: oklch(93.2% 0.032 255.585);
+  --color-brand-200: oklch(88.2% 0.059 254.128);
+  --color-brand-300: oklch(80.9% 0.105 251.813);
+  --color-brand-400: oklch(70.7% 0.165 254.624);
+  --color-brand-500: oklch(62.3% 0.214 259.815);
+  --color-brand-600: oklch(54.6% 0.245 262.881);
+  --color-brand-700: oklch(48.8% 0.243 264.376);
+  --color-brand-800: oklch(42.4% 0.199 265.638);
+  --color-brand-900: oklch(37.9% 0.146 265.522);
+  --color-brand-950: oklch(28.2% 0.091 267.935);
+
+  /* Editor: greys (text, borders, backgrounds) */
+  --color-neutral-50: oklch(98.5% 0 none);
+  --color-neutral-100: oklch(97% 0 none);
+  --color-neutral-200: oklch(92.2% 0 none);
+  --color-neutral-300: oklch(87% 0 none);
+  --color-neutral-400: oklch(70.8% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-600: oklch(43.9% 0 none);
+  --color-neutral-700: oklch(37.1% 0 none);
+  --color-neutral-800: oklch(26.9% 0 none);
+  --color-neutral-900: oklch(20.5% 0 none);
+  --color-neutral-950: oklch(14.5% 0 none);
+
+  /* Editor: success (Download PDF, saved, voice on) */
+  --color-success-50: oklch(97.9% 0.021 166.113);
+  --color-success-100: oklch(95% 0.052 163.051);
+  --color-success-200: oklch(90.5% 0.093 164.15);
+  --color-success-300: oklch(84.5% 0.143 164.978);
+  --color-success-400: oklch(76.5% 0.177 163.223);
+  --color-success-500: oklch(69.6% 0.17 162.48);
+  --color-success-600: oklch(59.6% 0.145 163.225);
+  --color-success-700: oklch(50.8% 0.118 165.612);
+  --color-success-800: oklch(43.2% 0.095 166.913);
+  --color-success-900: oklch(37.8% 0.077 168.94);
+  --color-success-950: oklch(26.2% 0.051 172.552);
+
+  /* Editor: warning (save problems, cautions) */
+  --color-warning-50: oklch(98.7% 0.022 95.277);
+  --color-warning-100: oklch(96.2% 0.059 95.617);
+  --color-warning-200: oklch(92.4% 0.12 95.746);
+  --color-warning-300: oklch(87.9% 0.169 91.605);
+  --color-warning-400: oklch(82.8% 0.189 84.429);
+  --color-warning-500: oklch(76.9% 0.188 70.08);
+  --color-warning-600: oklch(66.6% 0.179 58.318);
+  --color-warning-700: oklch(55.5% 0.163 48.998);
+  --color-warning-800: oklch(47.3% 0.137 46.201);
+  --color-warning-900: oklch(41.4% 0.112 45.904);
+  --color-warning-950: oklch(27.9% 0.077 45.635);
+
+  /* Editor: danger (Delete, errors) */
+  --color-danger-50: oklch(97.1% 0.013 17.38);
+  --color-danger-100: oklch(93.6% 0.032 17.717);
+  --color-danger-200: oklch(88.5% 0.062 18.334);
+  --color-danger-300: oklch(80.8% 0.114 19.571);
+  --color-danger-400: oklch(70.4% 0.191 22.216);
+  --color-danger-500: oklch(63.7% 0.237 25.331);
+  --color-danger-600: oklch(57.7% 0.245 27.325);
+  --color-danger-700: oklch(50.5% 0.213 27.518);
+  --color-danger-800: oklch(44.4% 0.177 26.899);
+  --color-danger-900: oklch(39.6% 0.141 25.723);
+  --color-danger-950: oklch(25.8% 0.092 26.042);
+
+  /* Editor tool colours: each tool has its own, so you can see which one is on */
+  --color-addtext-300: oklch(81.1% 0.111 293.571); /* Add text */
+  --color-addtext-500: oklch(60.6% 0.25 292.717);
+  --color-addtext-600: oklch(54.1% 0.281 293.009);
+  --color-addtext-700: oklch(49.1% 0.27 292.581);
+  --color-addtext-800: oklch(43.2% 0.232 292.759);
+  --color-image-300: oklch(86.5% 0.127 207.078); /* Add image, move and resize images */
+  --color-image-600: oklch(60.9% 0.126 221.723);
+  --color-image-700: oklch(52% 0.105 223.128);
+  --color-image-800: oklch(45% 0.085 224.283);
+  --color-crop-600: oklch(54.1% 0.281 293.009); /* Image crop */
+  --color-crop-700: oklch(49.1% 0.27 292.581);
+  --color-crop-950: oklch(28.3% 0.141 291.089);
+  --color-line-400: oklch(74% 0.238 322.16); /* Divider lines and move guides */
+  --color-line-500: oklch(66.7% 0.295 322.15);
+  --color-line-600: oklch(59.1% 0.293 322.896);
+  --color-line-700: oklch(51.8% 0.253 323.949);
+  --color-translate-50: oklch(96.2% 0.018 272.314); /* Translate */
+  --color-translate-200: oklch(87% 0.065 274.039);
+  --color-translate-500: oklch(58.5% 0.233 277.117);
+  --color-translate-600: oklch(51.1% 0.262 276.966);
+  --color-translate-700: oklch(45.7% 0.24 277.023);
+  --color-translate-800: oklch(39.8% 0.195 277.366);
+  --color-translate-950: oklch(25.7% 0.09 281.288);
+  --color-voice-400: oklch(70.2% 0.183 293.541); /* Voice chat */
+  --color-voice-600: oklch(54.1% 0.281 293.009);
+  --color-voice-700: oklch(49.1% 0.27 292.581);
+}
+
 html,
 body,
 #root {

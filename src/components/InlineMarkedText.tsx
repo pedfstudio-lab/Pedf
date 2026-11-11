@@ -54,7 +54,7 @@ export function InlineMarkedText({
           aria-label={`Date actions: ${segment.date.raw}`}
           title={`${segment.date.raw} - calendar actions`}
           onClick={(event) => onDateClick(segment.date as DetectedDate, event.currentTarget)}
-          className="pointer-events-auto inline cursor-pointer border-0 bg-transparent p-0 text-left align-baseline focus:outline-none focus:ring-2 focus:ring-amber-500/70"
+          className="pointer-events-auto inline cursor-pointer border-0 bg-transparent p-0 text-left align-baseline focus:outline-none focus:ring-2 focus:ring-warning-500/70"
           style={{
             ...segmentStyle,
             ...underlineStyle(DATE_UNDERLINE_COLOR, DATE_UNDERLINE_OFFSET, 'dotted'),

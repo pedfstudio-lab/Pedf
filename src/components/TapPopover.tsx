@@ -94,12 +94,12 @@ export function TapPopover({
           {language && <p role="status" lang={language} className="max-h-56 overflow-auto whitespace-pre-wrap text-sm" style={{ fontFamily: scriptFonts[language] }}>
             {result?.text ?? result?.error ?? 'Translating…'}
           </p>}
-          {result?.error && <button type="button" onClick={() => setRetry(value => value + 1)} className="text-left text-xs text-indigo-700 underline">Try again</button>}
+          {result?.error && <button type="button" onClick={() => setRetry(value => value + 1)} className="text-left text-xs text-translate-700 underline">Try again</button>}
           <div className="flex items-center justify-between">
             <button type="button" onClick={() => setCard(false)} className="rounded px-2 py-1 text-xs hover:bg-neutral-100">Back</button>
             <button type="button" disabled={!result?.text} onClick={() => {
               if (result?.text) void navigator.clipboard.writeText(result.text).then(() => setCopied(true)).catch(() => setCopied(false));
-            }} className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-40">{copied ? 'Copied' : 'Copy'}</button>
+            }} className="rounded bg-translate-600 px-3 py-1 text-xs text-white disabled:opacity-40">{copied ? 'Copied' : 'Copy'}</button>
           </div>
         </div> : <div className="grid gap-1" role="menu">
           <button
@@ -107,7 +107,7 @@ export function TapPopover({
             type="button"
             role="menuitem"
             onClick={onEdit}
-            className="rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            className="rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
           >
             Edit
           </button>
@@ -116,7 +116,7 @@ export function TapPopover({
             type="button"
             role="menuitem"
             onClick={() => setCard(true)}
-            className="rounded-lg px-3 py-2 text-left text-sm hover:bg-neutral-100 focus:outline-none focus-visible:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-blue-600"
+            className="rounded-lg px-3 py-2 text-left text-sm hover:bg-neutral-100 focus:outline-none focus-visible:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-brand-600"
           >
             Translate
           </button>
