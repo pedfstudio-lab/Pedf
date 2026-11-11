@@ -21,6 +21,7 @@ import {
 import type { PdfRect, Rgb } from './lib/export/types';
 import type { SignatureAsset } from './lib/tools/signOptions';
 import { editorSignatureEdit } from './lib/sign/editorSignature';
+import { pageInView, scrollPageIntoView } from './lib/util/pageInView';
 import { DocumentStoreProvider, useDocumentStore } from './state/documentStore';
 import { EditsStoreProvider, useEdits } from './state/editsStore';
 import { createPagePlan, planToGeometry } from './state/pagePlan';
@@ -266,6 +267,7 @@ function EditorApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
+  const [signPage, setSignPage] = useState(0);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
   const pendingFileChecked = useRef(false);
@@ -498,24 +500,7 @@ function EditorApp() {
     scrollFrame.current = null;
     const scroll = scrollRef.current;
     if (!scroll) return;
-    const center = scroll.getBoundingClientRect().top + scroll.clientHeight / 2;
-    let closestPage = 0;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    for (const box of scroll.querySelectorAll<HTMLElement>('[data-page-index]')) {
-      const index = Number(box.dataset.pageIndex);
-      if (!Number.isInteger(index)) continue;
-      const rect = box.getBoundingClientRect();
-      if (rect.top <= center && rect.bottom >= center) {
-        closestPage = index;
-        closestDistance = 0;
-        break;
-      }
-      const distance = Math.min(Math.abs(center - rect.top), Math.abs(center - rect.bottom));
-      if (distance < closestDistance) {
-        closestPage = index;
-        closestDistance = distance;
-      }
-    }
+    const closestPage = pageInView(scroll);
     setLastPage((page) => (page === closestPage ? page : closestPage));
   }, []);
 
@@ -780,26 +765,24 @@ function EditorApp() {
     if (await handleSaveAndClose('click PEDF Studio again')) navigate('/');
   }, [handleSaveAndClose]);
 
-  const addSignature = useCallback((signature: SignatureAsset) => {
+  /** Sign starts on the page the user is looking at; the signature window lets them pick another. */
+  const openSign = useCallback(() => {
+    const scroll = scrollRef.current;
+    setSignPage(scroll ? pageInView(scroll) : 0);
+    setSignOpen(true);
+  }, []);
+  const closeSign = useCallback(() => setSignOpen(false), []);
+
+  const addSignature = useCallback((signature: SignatureAsset, pageIndex: number) => {
     if (!document) return;
-    const geometries = planToGeometry(pagePlan, document.loaded.pages);
-    const viewport = scrollRef.current?.getBoundingClientRect();
-    let pageIndex = 0;
-    let bestVisible = -1;
-    for (let index = 0; index < geometries.length; index++) {
-      const rect = getPageCanvas(index)?.canvas.getBoundingClientRect();
-      if (!rect || !viewport) continue;
-      const width = Math.max(0, Math.min(rect.right, viewport.right) - Math.max(rect.left, viewport.left));
-      const height = Math.max(0, Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top));
-      const visible = width * height;
-      if (visible > bestVisible) { bestVisible = visible; pageIndex = index; }
-    }
-    const page = geometries[pageIndex];
+    const page = planToGeometry(pagePlan, document.loaded.pages)[pageIndex];
     if (!page) return;
-    const image = editorSignatureEdit(signature, pageIndex, page, edits);
-    addEdits([image]);
+    addEdits([editorSignatureEdit(signature, pageIndex, page, edits)]);
     setSignOpen(false);
-  }, [addEdits, document, edits, getPageCanvas, pagePlan]);
+    // A page picked from the list may be off screen: bring it into view so the signature shows.
+    const scroll = scrollRef.current;
+    if (scroll && pageInView(scroll) !== pageIndex) scrollPageIntoView(scroll, pageIndex);
+  }, [addEdits, document, edits, pagePlan]);
 
   return (
     <div className="flex h-full flex-col bg-neutral-100">
@@ -844,7 +827,7 @@ function EditorApp() {
             setTextAddMode(false);
           }
         }}
-        onOpenSign={() => setSignOpen(true)}
+        onOpenSign={openSign}
         onOpenChat={() => {
           setSettingsOpen(false);
           setChatOpen(true);
@@ -881,7 +864,7 @@ function EditorApp() {
         projectStore={projectStore}
         onClose={() => setSettingsOpen(false)}
       />
-      <SignatureModal open={signOpen} onClose={() => setSignOpen(false)} onDone={addSignature} />
+      <SignatureModal open={signOpen} pageCount={pagePlan.length} currentPage={signPage} onClose={closeSign} onDone={addSignature} />
       <PdfChat
         open={chatOpen}
         doc={document?.loaded.doc ?? null}

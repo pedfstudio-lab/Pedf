@@ -47,7 +47,12 @@
 .signature-modal h2 { margin: 0 0 5px; font-size: 1.35rem; }
 .signature-modal header p { margin: 0; color: #64748b; font-size: .9rem; }
 .signature-modal header > button { width: 38px; height: 38px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid #d3dce9; border-radius: 9px; background: #fff; color: #263750; font-size: 1.4rem; cursor: pointer; }
+.signature-page-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: -4px 0 18px; padding: 12px 14px; border-radius: 12px; background: var(--color-site-band); }
+.signature-page-choice label { color: var(--color-site-ink); font-weight: 700; }
+.signature-page-choice select { min-height: 42px; min-width: min(240px, 100%); border: 1px solid var(--color-site-field-border); border-radius: 9px; background: #fff; color: var(--color-site-ink); font: inherit; padding: 8px 11px; }
+.signature-page-choice select:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-site-brand) 35%, transparent); outline-offset: 2px; }
 @media (max-width: 640px) {
+  .signature-page-choice select { flex: 1; }
   .signature-fonts { grid-template-columns: 1fr; }
   .signature-fonts button { min-height: 76px; }
   .signature-clean-controls { grid-template-columns: 1fr; align-items: start; }
