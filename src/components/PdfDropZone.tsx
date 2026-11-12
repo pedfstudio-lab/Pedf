@@ -75,7 +75,7 @@ export function PdfDropZone({
         aria-describedby={`${helpId}${error && !onError ? ` ${errorId}` : ''}`}
       >
         <span className="drop-zone__icon" aria-hidden="true">
-          <svg viewBox="0 0 48 56" fill="none"><path d="M9 3h21l9 9v41H9z" fill="white"/><path d="M30 3v10h9" stroke="#8EC8FF" strokeWidth="3"/><path d="M24 39V22m-7 7 7-7 7 7" stroke="#126BFF" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg viewBox="0 0 48 56" fill="none"><path d="M9 3h21l9 9v41H9z" fill="white"/><path d="M30 3v10h9" style={{ stroke: 'var(--color-accent)' }} strokeWidth="3"/><path d="M24 39V22m-7 7 7-7 7 7" style={{ stroke: 'var(--color-site-brand)' }} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </span>
         <span><strong>{label}</strong><small id={helpId}>{sublabel}</small></span>
       </button>

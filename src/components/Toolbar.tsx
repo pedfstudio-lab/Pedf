@@ -219,13 +219,13 @@ export function Toolbar({
       type="button"
       onClick={onExport}
       disabled={!fileName || exporting}
-      className="shrink-0 whitespace-nowrap rounded-md bg-success-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-success-800 disabled:cursor-wait disabled:opacity-40"
+      className="shrink-0 whitespace-nowrap rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-brand-900 hover:bg-accent-hover disabled:cursor-wait disabled:opacity-40"
     >
       {exporting ? 'Preparing PDF…' : 'Download PDF'}
     </button>
   );
   // A real button (reachable by keyboard and announced as a button) that opens a hidden
-  // file chooser. Outlined, so the green Download PDF stays the one strong button.
+  // file chooser. Outlined, so the marigold Download PDF stays the one strong button.
   const openPdfButton = (
     <>
       <button type="button" onClick={() => fileInputRef.current?.click()} className={PLAIN_BUTTON}>

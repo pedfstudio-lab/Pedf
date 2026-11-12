@@ -8,8 +8,8 @@ export function Brand() {
       <span className="site-brand__mark" aria-hidden="true">
         <svg viewBox="0 0 34 34" fill="none">
           <path d="M8 5.5h12.5L27 12v16.5H8z" fill="white" />
-          <path d="M20.5 5.5V12H27" stroke="#83C9FF" strokeWidth="2" />
-          <path d="M4 22h15m-5-5 5 5-5 5" stroke="#0868FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M20.5 5.5V12H27" style={{ stroke: 'var(--color-accent)' }} strokeWidth="2" />
+          <path d="M4 22h15m-5-5 5 5-5 5" style={{ stroke: 'var(--color-site-brand)' }} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
       <span><strong>PEDF</strong> Studio</span>

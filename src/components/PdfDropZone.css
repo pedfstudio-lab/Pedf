@@ -10,9 +10,9 @@
   align-items: center;
   gap: 20px;
   padding: 18px 24px;
-  border: 2px dashed #63a1ff;
+  border: 2px dashed color-mix(in srgb, var(--color-site-brand) 45%, transparent);
   border-radius: 24px;
-  background: rgba(249, 252, 255, 0.84);
+  background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 16px 44px color-mix(in srgb, var(--color-site-brand) 8%, transparent);
   color: var(--color-site-ink);
   cursor: pointer;
@@ -27,7 +27,7 @@
 
 .drop-zone--active {
   border-color: var(--color-site-brand);
-  background: #eef6ff;
+  background: var(--color-site-selected);
   transform: translateY(-2px);
 }
 
@@ -35,14 +35,14 @@
 @media (hover: hover) {
   .drop-zone:hover {
     border-color: var(--color-site-brand);
-    background: #eef6ff;
+    background: var(--color-site-selected);
     transform: translateY(-2px);
   }
 }
 
 .drop-zone:active {
   border-color: var(--color-site-brand);
-  background: #eef6ff;
+  background: var(--color-site-selected);
   transform: scale(0.99);
 }
 
@@ -57,7 +57,7 @@
 }
 
 .drop-zone small {
-  color: #657087;
+  color: var(--color-site-body);
   font-size: 0.94rem;
 }
 
@@ -67,9 +67,9 @@
   height: 76px;
   flex: none;
   place-items: center;
-  border: 1px solid #d8eaff;
+  border: 1px solid var(--color-site-line);
   border-radius: 18px;
-  background: linear-gradient(145deg, #fff, #ddebff);
+  background: linear-gradient(145deg, #fff, var(--color-site-band));
   box-shadow: 0 12px 26px color-mix(in srgb, var(--color-site-brand) 16%, transparent);
 }
 
@@ -81,7 +81,7 @@
 .drop-zone__error {
   min-height: 24px;
   margin: 8px 0 0;
-  color: #b42318;
+  color: var(--color-site-danger);
   font-size: 0.88rem;
 }
 

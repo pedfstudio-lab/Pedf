@@ -1079,7 +1079,7 @@ function EditorApp() {
               </button>
               <button
                 type="button"
-                className="rounded-md bg-success-700 px-4 py-2 text-sm font-semibold text-white hover:bg-success-800"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-brand-900 hover:bg-accent-hover"
                 onClick={() => {
                   setSaveFailure(null);
                   setPendingSwitch(null);
@@ -1114,7 +1114,7 @@ function EditorApp() {
       {downloadReady && (
         <aside className="fixed bottom-4 left-4 z-[100] flex items-center gap-3 rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-950 shadow-xl" role="status">
           <span>Your PDF is ready</span>
-          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-success-700 px-3 py-1.5 font-semibold text-white hover:bg-success-800">
+          <a href={downloadReady.url} download={downloadReady.name} className="rounded bg-accent px-3 py-1.5 font-semibold text-brand-900 hover:bg-accent-hover">
             Download edited PDF
           </a>
           <button type="button" onClick={() => setDownloadReady(null)} className="rounded px-1 text-lg leading-none hover:bg-success-100" aria-label="Dismiss download">×</button>

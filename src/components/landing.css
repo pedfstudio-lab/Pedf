@@ -3,7 +3,7 @@
 .site-page {
   min-height: 100%;
   overflow-x: hidden;
-  background: #fff;
+  background: var(--color-site-page);
   color: var(--color-site-ink);
   /* The app's one font setting (index.css): the device's own font, never a download. */
   font-family: var(--font-sans);
@@ -29,8 +29,8 @@
 .site-header {
   position: relative;
   z-index: 50;
-  border-bottom: 1px solid rgba(219, 230, 247, 0.68);
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-site-line) 68%, transparent);
+  background: color-mix(in srgb, var(--color-site-page) 92%, transparent);
   backdrop-filter: blur(20px);
 }
 
@@ -64,9 +64,9 @@
   height: 42px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #d7e8ff;
+  border: 1px solid var(--color-site-line);
   border-radius: 12px;
-  background: linear-gradient(145deg, #f9fcff, #d9ebff);
+  background: linear-gradient(145deg, #fff, var(--color-site-band));
   box-shadow: 0 8px 20px color-mix(in srgb, var(--color-site-brand) 15%, transparent), inset 0 1px 0 #fff;
 }
 
@@ -85,7 +85,7 @@
 .site-nav__links a,
 .site-nav__tools,
 .site-footer nav a {
-  color: #3d485b;
+  color: var(--color-site-brand-ink);
   font-size: 0.94rem;
   font-weight: 650;
   text-decoration: none;
@@ -113,10 +113,10 @@
   justify-content: center;
   gap: 8px;
   border-radius: 999px;
-  /* Dark enough for white text across the whole gradient (4.7:1 or more). */
-  background: linear-gradient(135deg, #1f6fe5 0%, #0b4fd6 100%);
-  box-shadow: 0 14px 32px color-mix(in srgb, var(--color-site-brand) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  color: #fff;
+  /* Marigold with forest text (6.57:1); white on marigold would be unreadable (1.88:1). */
+  background: var(--color-accent);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--color-site-brand-text) 24%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  color: var(--color-site-ink);
   font-weight: 750;
   padding: 0 26px;
   text-decoration: none;
@@ -127,7 +127,8 @@
 @media (hover: hover) {
   .site-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 18px 38px color-mix(in srgb, var(--color-site-brand) 34%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    background: var(--color-accent-hover);
+    box-shadow: 0 18px 38px color-mix(in srgb, var(--color-site-brand-text) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.4);
   }
 }
 
@@ -188,7 +189,7 @@
   width: 760px;
   height: 620px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(88, 182, 255, 0.17), rgba(69, 125, 255, 0.04) 54%, transparent 72%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 22%, transparent), color-mix(in srgb, var(--color-accent) 5%, transparent) 54%, transparent 72%);
   content: "";
   pointer-events: none;
 }
@@ -209,10 +210,11 @@
   line-height: 0.88;
 }
 
-.hero__blue {
-  background: linear-gradient(105deg, #0560f5 8%, #168bff 92%);
-  background-clip: text;
-  color: transparent;
+.hero__accent {
+  /* Forest words on a marigold highlighter stroke. */
+  width: fit-content;
+  background: linear-gradient(transparent 58%, color-mix(in srgb, var(--color-accent) 80%, transparent) 58% 86%, transparent 86%);
+  color: var(--color-site-brand);
 }
 
 .hero__lede {
@@ -238,7 +240,7 @@
   width: 114%;
   max-width: none;
   height: auto;
-  filter: drop-shadow(0 30px 40px rgba(37, 100, 206, 0.18));
+  filter: drop-shadow(0 30px 40px color-mix(in srgb, var(--color-site-brand) 18%, transparent));
   animation: hero-float 6s ease-in-out infinite;
 }
 
@@ -249,7 +251,7 @@
   width: 78%;
   height: 60%;
   border-radius: 50%;
-  background: rgba(58, 145, 255, 0.22);
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
   filter: blur(60px);
 }
 
@@ -262,8 +264,8 @@
   padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 24px;
-  background: rgba(250, 253, 255, 0.76);
-  box-shadow: 0 24px 46px rgba(21, 80, 169, 0.22), inset 0 1px 0 #fff;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 24px 46px color-mix(in srgb, var(--color-site-brand) 20%, transparent), inset 0 1px 0 #fff;
   backdrop-filter: blur(14px);
   transform: rotate(-1deg);
 }
@@ -272,7 +274,7 @@
 .chat-demo__answer,
 .chat-demo__field {
   border: 1px solid rgba(255, 255, 255, 0.82);
-  box-shadow: 0 8px 16px rgba(41, 103, 190, 0.12);
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--color-site-brand) 12%, transparent);
   font-size: 0.75rem;
   line-height: 1.35;
 }
@@ -306,8 +308,8 @@
   margin: 10px 0 16px;
   padding: 13px;
   border-radius: 18px 18px 18px 5px;
-  background: linear-gradient(140deg, rgba(225, 240, 255, 0.96), rgba(189, 219, 255, 0.88));
-  color: #164b9b;
+  background: linear-gradient(140deg, #fbf6e8, var(--color-site-band));
+  color: var(--color-site-brand-ink);
 }
 
 .chat-demo__field {
@@ -317,7 +319,7 @@
   padding: 11px 13px;
   border-radius: 15px;
   background: #fff;
-  color: #8a96ab;
+  color: var(--color-site-body);
 }
 
 .chat-demo__field span {
@@ -354,17 +356,17 @@
   min-width: 0;
   margin: 0;
   padding: 14px 14px 24px;
-  border: 1px solid #e4edfa;
+  border: 1px solid var(--color-site-line);
   border-radius: 30px;
-  background: linear-gradient(150deg, #fff, #f8fbff);
-  box-shadow: 0 18px 46px rgba(22, 75, 154, 0.08);
+  background: linear-gradient(150deg, #fff, var(--color-site-surface));
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-site-ink) 8%, transparent);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
 @media (hover: hover) {
   .feature:hover {
     transform: translateY(-7px);
-    box-shadow: 0 26px 52px rgba(22, 75, 154, 0.14);
+    box-shadow: 0 26px 52px color-mix(in srgb, var(--color-site-ink) 14%, transparent);
   }
 }
 
@@ -392,9 +394,9 @@
   gap: 78px;
   align-items: start;
   padding: 78px;
-  border: 1px solid #dce9fb;
+  border: 1px solid var(--color-site-line);
   border-radius: 42px;
-  background: linear-gradient(135deg, #f9fcff 0%, #edf5ff 100%);
+  background: linear-gradient(135deg, #fff 0%, var(--color-site-band) 100%);
   box-shadow: 0 26px 70px color-mix(in srgb, var(--color-site-brand) 8%, transparent);
 }
 
@@ -413,7 +415,7 @@
 }
 
 .how__steps li:not(:last-child) {
-  border-bottom: 1px solid #d7e4f5;
+  border-bottom: 1px solid var(--color-site-line);
   margin-bottom: 32px;
 }
 
@@ -446,7 +448,7 @@
 .privacy-band {
   margin-top: 116px;
   background:
-    radial-gradient(circle at 15% 48%, rgba(72, 158, 255, 0.13), transparent 34%),
+    radial-gradient(circle at 15% 48%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 34%),
     var(--color-site-band);
 }
 
@@ -512,7 +514,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  color: #43506a;
+  color: var(--color-site-brand-ink);
   font-size: 0.93rem;
 }
 
@@ -538,7 +540,7 @@
 .trust-strip__divider {
   width: 1px;
   height: 34px;
-  background: #ccd9ec;
+  background: var(--color-site-control-border);
 }
 
 /* The privacy promise's one exception, said right next to it. */
@@ -608,8 +610,8 @@
 }
 
 .site-footer {
-  border-top: 1px solid #e2e9f3;
-  background: #fbfdff;
+  border-top: 1px solid var(--color-site-line);
+  background: var(--color-site-surface);
 }
 
 .site-footer__inner {
@@ -769,12 +771,12 @@
     padding: 6px 16px 14px;
     border-bottom: 1px solid var(--color-site-line);
     background: #fff;
-    box-shadow: 0 18px 30px rgba(11, 18, 32, 0.08);
+    box-shadow: 0 18px 30px color-mix(in srgb, var(--color-site-ink) 8%, transparent);
   }
 
   .site-nav.is-open .site-nav__links a {
     padding: 14px 4px;
-    border-bottom: 1px solid #edf2fa;
+    border-bottom: 1px solid var(--color-site-line);
     font-size: 1rem;
   }
 

@@ -54,7 +54,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
         <section className="site-shell hero" aria-labelledby="hero-title">
           <div className="hero__copy">
             <p className="site-eyebrow">Your PDF, finally editable</p>
-            <h1 id="hero-title"><span>Read it. </span><span className="hero__blue">Ask it. </span><span>Edit it.</span></h1>
+            <h1 id="hero-title"><span>Read it. </span><span className="hero__accent">Ask it. </span><span>Edit it.</span></h1>
             <p className="hero__lede">Type or talk to understand any PDF, then edit the text and images. Runs on your computer.</p>
             <ContinueEditingCard store={projectStore} onContinue={continueProject} />
             <PdfDropZone onFile={openFile} />
