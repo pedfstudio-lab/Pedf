@@ -7,22 +7,60 @@ import { useSavedProjects } from '@/lib/projects/useSavedProjects';
 interface ContinueEditingCardProps {
   readonly store?: ProjectStore;
   onContinue(id: string): boolean | Promise<boolean>;
+  /** The home page's slim one-row bar above the drop area, instead of the full card. */
+  readonly compact?: boolean;
 }
 
 function ProjectSummary({
   project,
   newest,
   broken,
+  compact = false,
   onContinue,
   onDelete,
 }: {
   readonly project: ProjectMetadata;
   readonly newest: boolean;
   readonly broken: boolean;
+  readonly compact?: boolean;
   onContinue(): void;
   onDelete(): void;
 }) {
   const changes = `${project.changeCount} ${project.changeCount === 1 ? 'change' : 'changes'}`;
+  if (compact) {
+    return (
+      <article className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-brand-200 bg-brand-50 px-3 py-2 text-left sm:gap-x-4 sm:px-4">
+        {/* One row on a laptop and on a phone, so the drop area and cards still fit the first
+            screen. Phones drop the details and shorten the buttons; their names stay full. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+          <p className="min-w-0 max-w-full truncate text-sm font-semibold text-brand-950">Continue editing <em>{project.fileName}</em>?</p>
+          <p className="hidden text-xs text-neutral-600 sm:block">
+            Saved {savedAgo(project.updatedAt)} · page {project.lastPage + 1} of {project.pageCount} · {changes}
+          </p>
+          {broken && <p className="mt-1 w-full text-sm font-medium text-danger-700">This saved file can&apos;t be opened.</p>}
+        </div>
+        {!broken && (
+          <button
+            type="button"
+            onClick={onContinue}
+            aria-label="Continue editing"
+            className="shrink-0 rounded-full bg-brand-700 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-600 sm:px-4"
+          >
+            <span className="sm:hidden">Continue</span><span className="hidden sm:inline">Continue editing</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Delete saved file"
+          title="Delete saved file"
+          className="min-h-9 min-w-9 shrink-0 rounded-full border border-danger-200 bg-white px-2 py-1.5 text-xs font-medium text-danger-700 hover:bg-danger-50 sm:min-h-0 sm:min-w-0 sm:px-3"
+        >
+          <span aria-hidden="true" className="sm:hidden">✕</span><span className="hidden sm:inline">Delete saved file</span>
+        </button>
+      </article>
+    );
+  }
   return (
     <article className={newest
       ? 'rounded-xl border border-brand-200 bg-brand-50 p-4 text-left shadow-sm'
@@ -60,6 +98,7 @@ function ProjectSummary({
 export function ContinueEditingCard({
   store = defaultProjectStore,
   onContinue,
+  compact = false,
 }: ContinueEditingCardProps) {
   const [brokenIds, setBrokenIds] = useState<ReadonlySet<string>>(new Set());
   const { projects } = useSavedProjects(store);
@@ -83,17 +122,18 @@ export function ContinueEditingCard({
   };
 
   return (
-    <section aria-label="Saved PDF projects" className="w-full max-w-xl space-y-3">
+    <section aria-label="Saved PDF projects" className={compact ? 'w-full space-y-2' : 'w-full max-w-xl space-y-3'}>
       <ProjectSummary
         project={newest}
         newest
+        compact={compact}
         broken={brokenIds.has(newest.id)}
         onContinue={() => void continueProject(newest)}
         onDelete={() => void deleteProject(newest)}
       />
       {projects.length > 1 && (
-        <details className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-left">
-          <summary className="cursor-pointer text-sm font-semibold text-neutral-800">Other saved files</summary>
+        <details className={compact ? 'text-left' : 'rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-left'}>
+          <summary className={compact ? 'cursor-pointer px-1 text-xs font-semibold text-neutral-700' : 'cursor-pointer text-sm font-semibold text-neutral-800'}>Other saved files</summary>
           <div className="mt-3 space-y-2">
             {projects.slice(1).map((project) => (
               <ProjectSummary
@@ -108,7 +148,8 @@ export function ContinueEditingCard({
           </div>
         </details>
       )}
-      <p className="text-xs text-neutral-500">Saved only on this device.</p>
+      {/* On the home page the privacy line under the drop area says this. */}
+      {!compact && <p className="text-xs text-neutral-500">Saved only on this device.</p>}
     </section>
   );
 }

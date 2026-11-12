@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HistoryState } from '@/state/editsStore';
 import { MemoryProjectStore } from '@/lib/projects/projectStore';
@@ -107,6 +107,23 @@ describe('ContinueEditingCard', () => {
 
     expect(await screen.findByText('New-save.pdf')).toBeTruthy();
   });
+  it('fits the home page as one slim bar, keeping Continue and Delete', async () => {
+    const store = new MemoryProjectStore();
+    await addProject(store, 'Goa', 1, 1, 17);
+    await addProject(store, 'Older', 0, 2, 3);
+    const onContinue = vi.fn(() => true);
+    render(<ContinueEditingCard store={store} onContinue={onContinue} compact />);
+
+    const bar = (await screen.findByLabelText('Saved PDF projects')).querySelector('article')!;
+    expect(bar.className).toContain('rounded-2xl');
+    expect(within(bar).getByRole('button', { name: 'Delete saved file' })).toBeTruthy();
+    expect(screen.getByText('Other saved files')).toBeTruthy();
+    // The home page's privacy line says this; the bar stays one row.
+    expect(screen.queryByText('Saved only on this device.')).toBeNull();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Continue editing' }));
+    await waitFor(() => expect(onContinue).toHaveBeenCalledWith(expect.any(String)));
+  });
+
 });
 
 it('formats saved time in quiet human units', () => {
@@ -114,4 +131,5 @@ it('formats saved time in quiet human units', () => {
   expect(savedAgo(now - 30_000, now)).toBe('just now');
   expect(savedAgo(now - 2 * 60_000, now)).toBe('2 min ago');
   expect(savedAgo(now - 2 * 60 * 60_000, now)).toBe('2 hours ago');
+
 });

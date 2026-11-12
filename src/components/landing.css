@@ -171,160 +171,133 @@
   text-transform: uppercase;
 }
 
+/* "Drop-first" first screen: headline, wide drop area, privacy line, Read · Ask · Edit cards. */
 .hero {
   position: relative;
-  display: grid;
-  min-height: 700px;
-  grid-template-columns: minmax(360px, 0.88fr) minmax(520px, 1.12fr);
-  align-items: center;
-  gap: 16px;
-  padding-block: 72px 80px;
+  padding-block: 32px 64px;
+  text-align: center;
 }
 
 .hero::before {
   position: absolute;
   z-index: 0;
-  top: 34px;
-  right: -280px;
-  width: 760px;
-  height: 620px;
+  top: -60px;
+  left: 50%;
+  width: min(980px, 140%);
+  height: 560px;
   border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 22%, transparent), color-mix(in srgb, var(--color-accent) 5%, transparent) 54%, transparent 72%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 18%, transparent), color-mix(in srgb, var(--color-accent) 4%, transparent) 54%, transparent 72%);
   content: "";
   pointer-events: none;
+  transform: translateX(-50%);
 }
 
-.hero__copy {
+.hero > * {
   position: relative;
-  z-index: 3;
-  padding-left: 8px;
+  z-index: 1;
 }
 
 .hero h1 {
-  display: flex;
-  flex-direction: column;
   margin: 0;
-  font-size: clamp(4.4rem, 7vw, 6.7rem);
+  font-size: clamp(2.6rem, 4.3vw, 3.65rem);
   font-weight: 830;
-  letter-spacing: -0.075em;
-  line-height: 0.88;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+/* Each phrase stays whole when the headline wraps. */
+.hero h1 > span {
+  white-space: nowrap;
 }
 
 .hero__accent {
   /* Forest words on a marigold highlighter stroke. */
-  width: fit-content;
   background: linear-gradient(transparent 58%, color-mix(in srgb, var(--color-accent) 80%, transparent) 58% 86%, transparent 86%);
   color: var(--color-site-brand);
 }
 
 .hero__lede {
-  max-width: 510px;
-  margin: 34px 0 28px;
+  max-width: 640px;
+  margin: 14px auto 22px;
   color: var(--color-site-body);
-  font-size: clamp(1.1rem, 1.7vw, 1.28rem);
+  font-size: 1.125rem;
   line-height: 1.55;
 }
 
-.hero__visual {
-  position: relative;
-  z-index: 2;
-  min-height: 560px;
-  align-self: center;
-}
-
-.hero__visual > img {
-  position: absolute;
-  z-index: 1;
-  top: -6%;
-  right: -12%;
-  width: 114%;
-  max-width: none;
-  height: auto;
-  filter: drop-shadow(0 30px 40px color-mix(in srgb, var(--color-site-brand) 18%, transparent));
-  animation: hero-float 6s ease-in-out infinite;
-}
-
-.hero__glow {
-  position: absolute;
-  top: 21%;
-  right: -1%;
-  width: 78%;
-  height: 60%;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
-  filter: blur(60px);
-}
-
-.chat-demo {
-  position: absolute;
-  z-index: 3;
-  right: -1%;
-  bottom: 3%;
-  width: 47%;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 24px 46px color-mix(in srgb, var(--color-site-brand) 20%, transparent), inset 0 1px 0 #fff;
-  backdrop-filter: blur(14px);
-  transform: rotate(-1deg);
-}
-
-.chat-demo__question,
-.chat-demo__answer,
-.chat-demo__field {
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  box-shadow: 0 8px 16px color-mix(in srgb, var(--color-site-brand) 12%, transparent);
-  font-size: 0.75rem;
-  line-height: 1.35;
-}
-
-.chat-demo__question {
-  position: relative;
-  width: 92%;
-  margin-left: auto;
-  padding: 11px 38px 11px 13px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.chat-demo__mic {
-  position: absolute;
-  top: 50%;
-  right: 8px;
+.hero__start {
   display: grid;
-  width: 27px;
-  height: 27px;
+  width: min(820px, 100%);
+  gap: 12px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.hero__privacy {
+  margin: 0;
+  color: var(--color-site-body);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.hero__privacy strong {
+  color: var(--color-site-ink);
+}
+
+.hero__tick {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
   place-items: center;
   border-radius: 50%;
   background: var(--color-site-brand);
   color: #fff;
-  font-size: 0.46rem;
-  transform: translateY(-50%);
+  font-size: 0.7rem;
+  font-weight: 800;
+  vertical-align: -3px;
 }
 
-.chat-demo__answer {
-  width: 86%;
-  margin: 10px 0 16px;
-  padding: 13px;
-  border-radius: 18px 18px 18px 5px;
-  background: linear-gradient(140deg, #fbf6e8, var(--color-site-band));
-  color: var(--color-site-brand-ink);
+.hero__cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.chat-demo__field {
+.hero__cards li {
   display: flex;
+  min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  padding: 11px 13px;
-  border-radius: 15px;
-  background: #fff;
-  color: var(--color-site-body);
+  gap: 12px;
+  padding: 10px 14px 10px 8px;
+  border: 1px solid var(--color-site-line);
+  border-radius: 18px;
+  background: var(--color-site-surface);
 }
 
-.chat-demo__field span {
-  color: var(--color-site-brand);
-  font-size: 0.58rem;
+.hero__cards img {
+  width: 62px;
+  height: 62px;
+  flex: none;
+  object-fit: contain;
+}
+
+.hero__cards strong {
+  display: block;
+  color: var(--color-site-ink);
+  font-size: 1rem;
+}
+
+.hero__cards div > span {
+  color: var(--color-site-body);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.hero__short {
+  display: none;
 }
 
 .features {
@@ -664,45 +637,17 @@
   font-size: 0.93rem;
 }
 
-@keyframes hero-float {
-  0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(0, -9px, 0); }
-}
 
 @media (max-width: 1000px) {
   .site-nav__links {
     gap: 22px;
   }
 
-  .hero {
-    min-height: auto;
-    grid-template-columns: 1fr;
-    padding-top: 72px;
-  }
 
-  .hero__copy {
-    max-width: 720px;
-  }
 
-  .hero h1 {
-    font-size: clamp(4.7rem, 12vw, 7rem);
-  }
 
-  .hero__visual {
-    width: min(780px, 100%);
-    min-height: 650px;
-    margin: 16px auto 0;
-  }
 
-  .hero__visual > img {
-    right: -7%;
-    width: 108%;
-  }
 
-  .chat-demo {
-    right: 2%;
-    bottom: 12%;
-  }
 
   .features__grid {
     grid-template-columns: repeat(2, 1fr);
@@ -728,6 +673,58 @@
 }
 
 @media (max-width: 760px) {
+
+  /* First screen on a phone: "Edit it." on its own line, cards stacked. */
+  .hero {
+    padding-block: 22px 44px;
+  }
+
+  .hero h1 {
+    font-size: 2.5rem;
+    line-height: 1.02;
+  }
+
+  .hero h1 > span:last-child {
+    display: block;
+  }
+
+  .hero__lede {
+    margin: 12px 0 16px;
+    font-size: 0.97rem;
+    line-height: 1.45;
+  }
+
+  .hero__start {
+    gap: 10px;
+  }
+
+  .hero__privacy {
+    font-size: 0.8125rem;
+    text-align: left;
+  }
+
+  .hero__cards {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .hero__cards li {
+    padding: 6px 12px 6px 6px;
+  }
+
+  .hero__cards img {
+    width: 48px;
+    height: 48px;
+  }
+
+  .hero__long {
+    display: none;
+  }
+
+  .hero__short {
+    display: inline;
+  }
   .site-shell {
     width: min(100% - 32px, 620px);
   }
@@ -793,47 +790,13 @@
     padding-inline: 18px;
   }
 
-  .hero {
-    padding-block: 62px 48px;
-  }
 
-  .hero__copy {
-    padding: 0;
-  }
 
-  .hero h1 {
-    font-size: clamp(4rem, 20vw, 5.7rem);
-  }
 
-  .hero__lede {
-    margin-top: 28px;
-    font-size: 1.06rem;
-  }
 
-  .hero__visual {
-    min-height: 460px;
-    margin-top: 6px;
-  }
 
-  .hero__visual > img {
-    top: 3%;
-    right: -16%;
-    width: 124%;
-  }
 
-  .chat-demo {
-    right: 1%;
-    bottom: 1%;
-    width: 56%;
-    padding: 10px;
-    border-radius: 18px;
-  }
 
-  .chat-demo__question,
-  .chat-demo__answer,
-  .chat-demo__field {
-    font-size: 0.65rem;
-  }
 
   .features {
     padding-block: 78px;
@@ -932,17 +895,8 @@
     height: 42px;
   }
 
-  .hero h1 {
-    font-size: 3.85rem;
-  }
 
-  .hero__visual {
-    min-height: 400px;
-  }
 
-  .chat-demo {
-    width: 62%;
-  }
 
   .feature img {
     height: 126px;
@@ -950,9 +904,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero__visual > img {
-    animation: none;
-  }
 
   .site-button,
   .feature,

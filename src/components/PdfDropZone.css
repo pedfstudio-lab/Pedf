@@ -98,6 +98,91 @@
   }
 }
 
+/* Home page: the wide drop area on the first screen ("Drop-first"). */
+.pdf-drop-zone--wide,
+.drop-zone--wide {
+  width: 100%;
+}
+
+.drop-zone--wide {
+  min-height: 132px;
+  gap: 22px;
+  padding: 24px 28px;
+  border: 2px dashed var(--color-site-brand);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 18px 40px color-mix(in srgb, var(--color-site-ink) 9%, transparent);
+}
+
+.drop-zone--wide strong {
+  margin-bottom: 2px;
+  font-size: 1.375rem;
+  letter-spacing: -0.01em;
+}
+
+.drop-zone__or {
+  margin-left: auto;
+  color: var(--color-site-body);
+  font-size: 0.94rem;
+}
+
+/* Looks like a button; the whole drop area is the real one. Forest text on marigold. */
+.drop-zone__choose {
+  display: inline-flex;
+  min-height: 56px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 30px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-site-brand-text) 22%, transparent);
+  color: var(--color-site-ink);
+  font-size: 1.06rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.drop-zone--wide:hover .drop-zone__choose,
+.drop-zone--wide.drop-zone--active .drop-zone__choose {
+  background: var(--color-accent-hover);
+}
+
+.pdf-drop-zone--wide .drop-zone__error {
+  min-height: 0;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.pdf-drop-zone--wide .drop-zone__error:empty {
+  display: none;
+}
+
+/* Touch screens can't drag a file in: no "Drop your PDF here", no "or"; the button says Tap. */
+.drop-zone--touch .drop-zone__text strong,
+.drop-zone--touch .drop-zone__or { display: none; }
+.drop-zone--touch .drop-zone__choose { margin-left: auto; }
+
+/* Phones and narrow windows: one big button, then "It stays on your device." */
+@media (max-width: 760px) {
+  .drop-zone--wide {
+    display: grid;
+    min-height: 0;
+    justify-items: center;
+    gap: 8px;
+    padding: 18px 16px;
+    border-radius: 22px;
+    text-align: center;
+  }
+
+  .drop-zone--wide .drop-zone__icon { order: 0; width: 48px; height: 54px; }
+  .drop-zone--wide .drop-zone__icon svg { width: 30px; height: 36px; }
+  .drop-zone--wide .drop-zone__choose { order: 1; width: 100%; min-height: 52px; margin-left: 0; font-size: 1rem; }
+  .drop-zone--wide .drop-zone__text { order: 2; }
+  .drop-zone--wide .drop-zone__text strong,
+  .drop-zone--wide .drop-zone__or { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .drop-zone {
     transition: none;

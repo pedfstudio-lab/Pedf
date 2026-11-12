@@ -52,7 +52,7 @@ describe('Landing', () => {
     const file = new File(['%PDF-1.7'], 'dropped-test.pdf', { type: 'application/pdf' });
     render(<Landing />);
 
-    fireEvent.drop(screen.getByRole('button', { name: /drag & drop your PDF here/i }), {
+    fireEvent.drop(screen.getByRole('button', { name: 'Drop your PDF here' }), {
       dataTransfer: { files: [file] },
     });
 
@@ -103,7 +103,8 @@ describe('Landing', () => {
   it('never says "upload": the PDF stays on this device', () => {
     const { container } = render(<Landing />);
     expect(container.textContent).not.toMatch(/upload/i);
-    expect(screen.getByText('Only Ask, voice and Translate send text out — to get your answer.')).toBeTruthy();
+    // Said on the first screen (under the drop area) and again in the trust strip.
+    expect(screen.getAllByText('Only Ask, voice and Translate send text out — to get your answer.', { exact: false }).length).toBeGreaterThan(0);
   });
 
   it('writes each language in its own script and reads the privacy heading as two sentences', () => {
@@ -140,4 +141,21 @@ describe('Landing', () => {
     fireEvent.pointerDown(document.body);
     expect(menu.getAttribute('aria-expanded')).toBe('false');
   });
+
+  it('opens on the Drop-first screen: headline, wide drop area, privacy line, then Read · Ask · Edit', () => {
+    const { container } = render(<Landing />);
+    const hero = container.querySelector('.hero')!;
+    const drop = screen.getByRole('button', { name: 'Drop your PDF here' });
+    expect(drop.textContent).toContain('Choose your PDF');
+    expect(hero.querySelector('.hero__privacy')?.textContent).toContain('Your PDF never leaves your device.');
+    expect(hero.querySelector('.hero__privacy')?.textContent).toContain('Only Ask, voice and Translate send text out');
+    const cards = screen.getByRole('list', { name: 'What you can do' });
+    expect([...cards.querySelectorAll('strong')].map((title) => title.textContent)).toEqual(['Read it', 'Ask it', 'Edit it']);
+    // The order on the page: drop area, then the privacy line, then the cards.
+    const order = [drop, hero.querySelector('.hero__privacy')!, cards];
+    expect(order.every((node, index) => index === 0 || (order[index - 1]!.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+    // The old picture-and-chat panel is gone from the first screen.
+    expect(container.querySelector('.chat-demo')).toBeNull();
+  });
+
 });

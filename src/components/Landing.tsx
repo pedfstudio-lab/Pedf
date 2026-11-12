@@ -51,23 +51,34 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
     <div className="site-page landing-page">
       <SiteHeader />
       <main id="main-content">
+        {/* "Drop-first": one wide drop area is the first thing you see; three cards under
+            it say what happens after. Everything fits on a 1366 × 768 laptop. */}
         <section className="site-shell hero" aria-labelledby="hero-title">
-          <div className="hero__copy">
-            <p className="site-eyebrow">Your PDF, finally editable</p>
-            <h1 id="hero-title"><span>Read it. </span><span className="hero__accent">Ask it. </span><span>Edit it.</span></h1>
-            <p className="hero__lede">Type or talk to understand any PDF, then edit the text and images. Runs on your computer.</p>
-            <ContinueEditingCard store={projectStore} onContinue={continueProject} />
-            <PdfDropZone onFile={openFile} />
-          </div>
-
-          <div className="hero__visual">
-            <div className="hero__glow" aria-hidden="true" />
-            <img src={siteHref('landing/hero-doc.webp')} width="1100" height="825" alt="3D PDF document opening into a voice chat panel" />
-            <div className="chat-demo" aria-hidden="true">
-              <div className="chat-demo__question">What does clause 4 mean?<span className="chat-demo__mic">●</span></div>
-              <div className="chat-demo__answer">Clause 4 refers to termination by either party with 30 days’ written notice.</div>
-              <div className="chat-demo__field">Ask anything…<span>●</span></div>
-            </div>
+          <p className="site-eyebrow">Your PDF, finally editable</p>
+          <h1 id="hero-title"><span>Read it. </span><span className="hero__accent">Ask it. </span><span>Edit it.</span></h1>
+          <p className="hero__lede">Type or talk to understand any PDF, then edit the text and images. Runs on your computer.</p>
+          <div className="hero__start">
+            <ContinueEditingCard store={projectStore} onContinue={continueProject} compact />
+            <PdfDropZone onFile={openFile} variant="wide" />
+            <p className="hero__privacy">
+              <span className="hero__tick" aria-hidden="true">✓</span>
+              <strong>Your PDF never leaves your device.</strong> Only Ask, voice and Translate send text out — to get your answer.
+            </p>
+            <ul className="hero__cards" aria-label="What you can do">
+              <li>
+                <img src={siteHref('landing/hero-doc.webp')} width="62" height="62" alt="" />
+                {/* Phones show the shorter wording, so the first card fits the first screen. */}
+                <div><strong>Read it</strong><span>See any page in <span lang="hi">हिन्दी</span>, <span lang="ta">தமிழ்</span><span className="hero__long">, <span lang="bn">বাংলা</span> and more</span><span className="hero__short">…</span></span></div>
+              </li>
+              <li>
+                <img src={siteHref('landing/cube-bot.webp')} width="62" height="62" alt="" />
+                <div><strong>Ask it</strong><span>Type or talk<span className="hero__long">, and get answers from your PDF</span><span className="hero__short">, get answers</span></span></div>
+              </li>
+              <li>
+                <img src={siteHref('landing/cube-text.webp')} width="62" height="62" alt="" />
+                <div><strong>Edit it</strong><span>Click any word and change it</span></div>
+              </li>
+            </ul>
           </div>
         </section>
 

@@ -102,4 +102,34 @@ describe('PdfDropZone', () => {
     expect(onFile).toHaveBeenCalledTimes(1);
     expect(onFile).toHaveBeenCalledWith(file);
   });
+
+  describe('wide (home page first screen)', () => {
+    it('is one big button named "Drop your PDF here", with a "Choose your PDF" look inside', () => {
+      const onFile = vi.fn();
+      render(<PdfDropZone onFile={onFile} variant="wide" />);
+      const area = screen.getByRole('button', { name: 'Drop your PDF here' });
+      expect(area.classList.contains('drop-zone--wide')).toBe(true);
+      expect(area.textContent).toContain('Choose your PDF');
+      expect(screen.getByText('It stays on your device.')).toBeTruthy();
+      expect(document.querySelectorAll('button')).toHaveLength(1);
+      const file = new File(['%PDF-1.7'], 'wide.pdf', { type: 'application/pdf' });
+      fireEvent.drop(area, { dataTransfer: { files: [file] } });
+      expect(onFile).toHaveBeenCalledWith(file);
+    });
+
+    it('asks phone and tablet users to tap, without "drop" or "or"', () => {
+      vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query === '(pointer: coarse)', media: query })));
+      render(<PdfDropZone onFile={vi.fn()} variant="wide" />);
+      const area = screen.getByRole('button', { name: 'Tap to choose your PDF' });
+      expect(area.classList.contains('drop-zone--touch')).toBe(true);
+      expect(area.querySelector('.drop-zone__choose')?.textContent).toBe('Tap to choose your PDF');
+    });
+
+    it("keeps the editor's own upload box unchanged", () => {
+      render(<PdfDropZone onFile={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /Drag & drop your PDF here/ }).classList.contains('drop-zone--wide')).toBe(false);
+      expect(document.querySelector('.drop-zone__choose')).toBeNull();
+    });
+  });
+
 });
