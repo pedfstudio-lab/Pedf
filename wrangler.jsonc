@@ -10,10 +10,10 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // Sites allowed to use the Sarvam route. Add the custom domain here when it is connected.
+  // Sites allowed to use the Sarvam route: the highpal.ai domain and the workers.dev address.
   // The key itself is the encrypted secret SARVAM_API_KEY, set in the Cloudflare dashboard.
   "vars": {
-    "APP_ORIGINS": "https://pedf.pedf-studio.workers.dev"
+    "APP_ORIGINS": "https://highpal.ai,https://www.highpal.ai,https://pedf.pedf-studio.workers.dev"
   },
   // Each visitor (by IP) may make up to 60 Sarvam requests a minute, so nobody can drain the
   // owner's credits. Translating a long PDF uses about 4–5 requests a page.

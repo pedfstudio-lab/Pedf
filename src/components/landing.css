@@ -47,32 +47,24 @@
   align-items: center;
   gap: 10px;
   color: var(--color-site-ink);
-  font-size: 1.22rem;
-  font-weight: 700;
+  font-size: 1.32rem;
+  font-weight: 800;
   letter-spacing: -0.035em;
   text-decoration: none;
 }
 
-.site-brand strong {
-  color: var(--color-site-brand);
-  font-weight: 800;
-}
-
+/* The HighPal mark (HighPalMark.tsx) in dark forest, beside the name. */
 .site-brand__mark {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--color-site-line);
-  border-radius: 12px;
-  background: linear-gradient(145deg, #fff, var(--color-site-band));
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-site-brand) 15%, transparent), inset 0 1px 0 #fff;
+  color: var(--color-site-ink);
 }
 
 .site-brand__mark svg {
-  width: 34px;
-  height: 34px;
+  width: 100%;
+  height: 100%;
 }
 
 .site-nav__links {
@@ -877,8 +869,8 @@
   }
 
   .site-brand__mark {
-    width: 38px;
-    height: 38px;
+    width: 30px;
+    height: 30px;
   }
 
   .site-button--small {

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- HighPal: the mark in dark forest on a marigold tile, visible in light and dark browser tabs. -->
+  <rect width="64" height="64" rx="14" fill="#f2b233"/>
+  <g transform="translate(12 12) scale(0.4)" fill="#1f3a2e" stroke="#1f3a2e" stroke-width="3" stroke-linejoin="round">
+    <path d="M45.5 45.5H1.5A44 44 0 0 1 45.5 1.5Z"/>
+    <path d="M54.5 45.5V1.5A44 44 0 0 1 98.5 45.5Z"/>
+    <path d="M45.5 54.5H1.5A44 44 0 0 0 45.5 98.5Z"/>
+    <path d="M98.5 98.5H54.5A44 44 0 0 1 98.5 54.5Z"/>
+  </g>
+</svg>

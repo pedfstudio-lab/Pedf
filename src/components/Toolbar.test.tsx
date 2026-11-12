@@ -208,7 +208,7 @@ describe('Toolbar signature action', () => {
 
     it('shows one row: the logo, Ask, Download PDF and a ☰ for everything else', () => {
       render(<EditsStoreProvider><Toolbar {...phoneProps()} /></EditsStoreProvider>);
-      for (const name of ['PEDF Studio', '💬 Ask', 'Download PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
+      for (const name of ['HighPal', '💬 Ask', 'Download PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
       const more = screen.getByRole('button', { name: 'More tools' });
       expect(more.getAttribute('aria-expanded')).toBe('false');
       expect(screen.queryByRole('button', { name: 'Edit text' })).toBeNull();
@@ -254,7 +254,7 @@ describe('Toolbar signature action', () => {
     });
   });
 
-  it('makes the PEDF Studio logo a button that goes home (Task 82)', () => {
+  it('makes the HighPal logo a button that goes home (Task 82)', () => {
     const onHome = vi.fn();
     const onSaveAndClose = vi.fn();
     const props = {
@@ -267,7 +267,7 @@ describe('Toolbar signature action', () => {
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
     };
     render(<EditsStoreProvider><Toolbar {...props} /></EditsStoreProvider>);
-    const logo = screen.getByRole('button', { name: 'PEDF Studio' });
+    const logo = screen.getByRole('button', { name: 'HighPal' });
     expect(logo.getAttribute('title')).toBe('Save and go to the home page');
     fireEvent.click(logo);
     expect(onHome).toHaveBeenCalledTimes(1);

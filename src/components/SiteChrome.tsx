@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { siteHref } from '@/lib/site/config';
+import { HighPalMark } from './HighPalMark';
 
 export function Brand() {
   return (
-    <a className="site-brand" href={siteHref()} aria-label="PEDF Studio home">
-      <span className="site-brand__mark" aria-hidden="true">
-        <svg viewBox="0 0 34 34" fill="none">
-          <path d="M8 5.5h12.5L27 12v16.5H8z" fill="white" />
-          <path d="M20.5 5.5V12H27" style={{ stroke: 'var(--color-accent)' }} strokeWidth="2" />
-          <path d="M4 22h15m-5-5 5 5-5 5" style={{ stroke: 'var(--color-site-brand)' }} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </span>
-      <span><strong>PEDF</strong> Studio</span>
+    <a className="site-brand" href={siteHref()} aria-label="HighPal home">
+      <span className="site-brand__mark" aria-hidden="true"><HighPalMark /></span>
+      <span>HighPal</span>
     </a>
   );
 }
@@ -84,7 +79,7 @@ export function SiteFooter() {
           <a href={siteHref('/terms')}>Terms</a>
           <a href={siteHref('/support')}>Support</a>
         </nav>
-        <p>© 2026 PEDF Studio</p>
+        <p>© 2026 HighPal</p>
       </div>
     </footer>
   );

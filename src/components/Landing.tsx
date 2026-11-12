@@ -27,7 +27,7 @@ const languageList = SUPPORTED_LANGUAGES.map((language, index) => (
 ));
 
 const faqs: ReadonlyArray<readonly [string, ReactNode]> = [
-  ['Is it free?', 'Yes. PEDF Studio is free to use.'],
+  ['Is it free?', 'Yes. HighPal is free to use.'],
   ['Do I need an account?', 'No. Open the page and start with a PDF.'],
   ['Does it work offline?', 'Editing works offline once the page is open. Chat, voice and Translate need an internet connection.'],
   ['Which languages are supported?', <>{languageList}.</>],

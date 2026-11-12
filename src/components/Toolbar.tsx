@@ -6,6 +6,7 @@ import { useEdits } from '@/state/editsStore';
 import type { SaveStatus } from '@/lib/projects/useProjectAutosave';
 import { savedAgo } from '@/lib/projects/savedTime';
 import { TranslationControls } from './TranslationControls';
+import { HighPalMark } from './HighPalMark';
 
 interface ToolbarProps {
   onOpen: (file: File) => void;
@@ -166,9 +167,10 @@ export function Toolbar({
       type="button"
       onClick={onHome}
       title="Save and go to the home page"
-      className={`min-w-0 cursor-pointer truncate whitespace-nowrap rounded font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${phoneLayout ? 'text-base' : 'shrink-0 text-lg'}`}
+      className={`inline-flex min-w-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${phoneLayout ? 'text-base' : 'shrink-0 text-lg'}`}
     >
-      PEDF Studio
+      <HighPalMark className={`shrink-0 text-brand-900 ${phoneLayout ? 'h-5 w-5' : 'h-6 w-6'}`} />
+      <span className="truncate">HighPal</span>
     </button>
   );
   const fileLabel = fileName && (

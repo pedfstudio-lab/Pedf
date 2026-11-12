@@ -130,7 +130,7 @@ describe('ToolPage', () => {
     const { unmount } = show();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(dummy.title);
     expect((screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement).disabled).toBe(true);
-    expect(document.title).toBe('Test PDF tool — PEDF Studio');
+    expect(document.title).toBe('Test PDF tool — HighPal');
     expect(meta.content).toBe(dummy.description);
     unmount();
     expect(document.title).toBe('Original title');

@@ -22,13 +22,13 @@ describe('Landing', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the core PEDF Studio experience', () => {
+  it('renders the core HighPal experience', () => {
     const { container } = render(<Landing />);
 
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Read it. Ask it. Edit it.');
     expect(screen.getByRole('link', { name: 'Start editing' }).getAttribute('href')).toBe('/app');
     expect(screen.getByText(/& 7 more Indian languages/).textContent).toBe('English, हिन्दी, தமிழ் & 7 more Indian languages');
-    expect(screen.getByText('© 2026 PEDF Studio')).toBeTruthy();
+    expect(screen.getByText('© 2026 HighPal')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Tools' }).getAttribute('href')).toBe('/tools');
     expect(screen.getByRole('link', { name: 'PDF tools' }).getAttribute('href')).toBe('/tools');
     expect(screen.getByRole('link', { name: /Edit Text/ }).getAttribute('href')).toBe('/app');

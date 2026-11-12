@@ -11,7 +11,7 @@ export function useToolMetadata(title: string, description: string): void {
       meta.name = 'description';
       document.head.append(meta);
     }
-    document.title = `${title} — PEDF Studio`;
+    document.title = `${title} — HighPal`;
     meta.content = description;
     return () => {
       document.title = previousTitle;

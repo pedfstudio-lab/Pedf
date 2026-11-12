@@ -762,7 +762,7 @@ function EditorApp() {
       navigate('/');
       return;
     }
-    if (await handleSaveAndClose('click PEDF Studio again')) navigate('/');
+    if (await handleSaveAndClose('click HighPal again')) navigate('/');
   }, [handleSaveAndClose]);
 
   /** Sign starts on the page the user is looking at; the signature window lets them pick another. */
@@ -1040,7 +1040,7 @@ function EditorApp() {
             <p className="mt-2 text-sm text-neutral-600">
               {saveFailure === 'full'
                 ? `There isn't enough space on this device to save ${document.fileName}.`
-                : `This browser isn't allowing PEDF Studio to save ${document.fileName} (for example in a private window).`}
+                : `This browser isn't allowing HighPal to save ${document.fileName} (for example in a private window).`}
               {' '}Your file is still open. Download your PDF to keep your work.
             </p>
             <div className="mt-5 flex flex-wrap justify-end gap-3">

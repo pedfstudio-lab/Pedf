@@ -37,7 +37,7 @@ describe('Sarvam route (Cloudflare Worker)', () => {
     expect(env.assets).not.toHaveBeenCalled();
   });
 
-  it('refuses other websites, so only PEDF can spend the credits', async () => {
+  it('refuses other websites, so only HighPal can spend the credits', async () => {
     const upstream = vi.fn();
     vi.stubGlobal('fetch', upstream);
     const response = await worker.fetch(ask('https://someone-else.example'), environment());
@@ -90,7 +90,7 @@ describe('Cloudflare setup (wrangler.jsonc)', () => {
   });
 
   it('allows the live site and limits each visitor', () => {
-    expect(config.vars.APP_ORIGINS.split(',')).toContain(LIVE);
+    expect(config.vars.APP_ORIGINS.split(',')).toEqual(expect.arrayContaining([LIVE, 'https://highpal.ai', 'https://www.highpal.ai']));
     expect(config.ratelimits).toEqual([expect.objectContaining({ name: 'SARVAM_LIMITER', simple: { limit: 60, period: 60 } })]);
   });
 

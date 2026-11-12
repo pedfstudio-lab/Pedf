@@ -213,7 +213,7 @@ describe('App saved projects', () => {
     expect(mocks.projectStore.delete).not.toHaveBeenCalled();
   });
 
-  describe('the PEDF Studio logo (Task 82)', () => {
+  describe('the HighPal logo (Task 82)', () => {
     beforeEach(() => window.history.pushState({}, '', '/app'));
     afterEach(() => window.history.pushState({}, '', '/'));
 
@@ -223,7 +223,7 @@ describe('App saved projects', () => {
       expect(await screen.findByText('Contract.pdf')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Make test change' }));
 
-      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+      fireEvent.click(screen.getByRole('button', { name: 'HighPal' }));
 
       await waitFor(() => expect(window.location.pathname).toBe('/'));
       expect(mocks.projectStore.create).toHaveBeenCalledTimes(1);
@@ -240,9 +240,9 @@ describe('App saved projects', () => {
       done.disabled = true;
       document.body.append(editable, done);
 
-      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+      fireEvent.click(screen.getByRole('button', { name: 'HighPal' }));
 
-      expect(await screen.findByText('Finish or cancel the open text box, then click PEDF Studio again.')).toBeTruthy();
+      expect(await screen.findByText('Finish or cancel the open text box, then click HighPal again.')).toBeTruthy();
       expect(window.location.pathname).toBe('/app');
       expect(screen.getAllByText('Contract.pdf').length).toBeGreaterThan(0);
       editable.remove(); done.remove();
@@ -252,7 +252,7 @@ describe('App saved projects', () => {
       render(<App />);
       expect(await screen.findByRole('region', { name: 'PDF drop area' })).toBeTruthy();
 
-      fireEvent.click(screen.getByRole('button', { name: 'PEDF Studio' }));
+      fireEvent.click(screen.getByRole('button', { name: 'HighPal' }));
 
       expect(window.location.pathname).toBe('/');
       expect(mocks.projectStore.create).not.toHaveBeenCalled();
