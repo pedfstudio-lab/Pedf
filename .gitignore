@@ -2,6 +2,8 @@ node_modules
 dist
 dist-ssr
 *.local
+# Local Sarvam key for development (read by vite.config.ts and wrangler dev). Never commit.
+.dev.vars
 .DS_Store
 /output/
 /tmp/

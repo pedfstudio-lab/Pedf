@@ -61,6 +61,16 @@ describe('SettingsPanel saved files', () => {
     );
   });
 
+  it('has no Sarvam key box: the key lives only on the server', async () => {
+    render(
+      <PrefsStoreProvider>
+        <SettingsPanel open fileOpen={false} projectStore={new MemoryProjectStore()} onClose={() => undefined} />
+      </PrefsStoreProvider>,
+    );
+    expect(screen.queryByLabelText(/Sarvam API key/i)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/API key/i);
+  });
+
   it('disables Delete all while a PDF is open', async () => {
     const store = new MemoryProjectStore();
     await store.create({

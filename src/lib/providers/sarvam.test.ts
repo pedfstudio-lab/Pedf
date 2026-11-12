@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderConfig } from './config';
 import { NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
-import { base64ToBytes, SarvamProvider } from './sarvam';
+import { base64ToBytes, SarvamProvider, sarvamUnavailableMessage, TRANSLATION_KEY_MESSAGE } from './sarvam';
 
 describe('SarvamProvider.translate', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -16,7 +16,7 @@ describe('SarvamProvider.translate', () => {
   });
   it('refuses a missing direct key without making a request', async () => {
     const request = vi.fn(); vi.stubGlobal('fetch', request);
-    await expect(new SarvamProvider(directConfig('')).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow('Translation needs a Sarvam key in Settings');
+    await expect(new SarvamProvider(directConfig('')).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow("Translation isn't available right now");
     expect(request).not.toHaveBeenCalled();
   });
   it('uses the production proxy without putting a key in browser headers', async () => {
@@ -478,19 +478,28 @@ describe('SarvamProvider.speakStream', () => {
     expect(socket.close).toHaveBeenCalledWith(1000, 'stream failed');
   });
 
-  it('keeps proxy mode on the existing REST batch fallback until WS proxying lands', async () => {
-    const factory = vi.fn();
+  it('streams spoken answers through the site route, with no key in the browser', async () => {
+    const socket = new FakeWebSocket();
+    const factory = vi.fn(() => socket as unknown as WebSocket);
     const config: ProviderConfig = {
       mode: 'proxy',
       sarvamBaseUrl: '/api/sarvam',
       getSarvamKey: () => 'must-not-leave-the-browser',
     };
+    const controller = new AbortController();
 
-    await expect(new SarvamProvider(config, factory).speakStream(
+    const speaking = new SarvamProvider(config, factory).speakStream(
       { text: 'Hello', language: 'en-IN' },
       vi.fn(),
-    )).rejects.toThrow('WebSocket proxy support');
-    expect(factory).not.toHaveBeenCalled();
+      controller.signal,
+    );
+    const [url, protocols] = factory.mock.calls[0]! as unknown as [string, string[]];
+    expect(url.startsWith('ws://localhost/api/sarvam/text-to-speech/ws?')).toBe(true);
+    expect(new URL(url).searchParams.get('model')).toBe('bulbul:v3');
+    expect(protocols).toEqual([]);
+    expect(`${url} ${protocols.join(' ')}`).not.toContain('must-not-leave-the-browser');
+    controller.abort();
+    await expect(speaking).rejects.toThrow();
   });
 });
 
@@ -624,18 +633,25 @@ describe('SarvamProvider.transcribeStream', () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('leaves proxy mode on the batch fallback until WebSocket proxying lands', () => {
-    const factory = vi.fn();
+  it("opens Conversation's live connection through the site route, with no key in the browser", () => {
+    const socket = new FakeWebSocket();
+    const factory = vi.fn(() => socket as unknown as WebSocket);
     const config: ProviderConfig = {
       mode: 'proxy',
       sarvamBaseUrl: '/api/sarvam',
       getSarvamKey: () => 'must-not-leave-the-browser',
     };
 
-    expect(() => new SarvamProvider(config, factory).transcribeStream()).toThrow(
-      'WebSocket proxy support',
-    );
-    expect(factory).not.toHaveBeenCalled();
+    const session = new SarvamProvider(config, factory).transcribeStream({ language: 'hi-IN' });
+    session.ready.catch(() => undefined);
+    const [url, protocols] = factory.mock.calls[0]! as unknown as [string, string[]];
+    const settings = new URL(url).searchParams;
+    expect(url.startsWith('ws://localhost/api/sarvam/speech-to-text-realtime/ws?')).toBe(true);
+    expect(settings.get('model')).toBe('saaras:v3-realtime');
+    expect(settings.get('language_code')).toBe('hi-IN');
+    expect(protocols).toEqual([]);
+    expect(`${url} ${protocols.join(' ')}`).not.toContain('must-not-leave-the-browser');
+    session.close();
   });
 });
 
@@ -722,5 +738,24 @@ describe('SarvamProvider.transcribe', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe('/api/sarvam/speech-to-text');
     expect(init?.headers).not.toHaveProperty('api-subscription-key');
+  });
+});
+
+describe('when the site route cannot help', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const proxy = (): ProviderConfig => ({ ...directConfig(), mode: 'proxy', sarvamBaseUrl: '/api/sarvam' });
+
+  it('says plainly that translation is unavailable: route not set up, credits used up, or refused', async () => {
+    for (const status of [402, 403, 503]) {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status })));
+      await expect(new SarvamProvider(proxy()).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow(TRANSLATION_KEY_MESSAGE);
+    }
+  });
+
+  it('turns busy and unavailable statuses into plain words, keeping other details', () => {
+    expect(sarvamUnavailableMessage(429)).toBe('Too many requests right now. Wait a minute and try again.');
+    for (const status of [401, 402, 403, 404, 405, 503]) expect(sarvamUnavailableMessage(status)).toBe("This isn't available right now. Please try again later.");
+    expect(sarvamUnavailableMessage(400)).toBeUndefined();
+    expect(sarvamUnavailableMessage(500)).toBeUndefined();
   });
 });

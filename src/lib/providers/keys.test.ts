@@ -32,10 +32,11 @@ describe('Sarvam key storage', () => {
     expect(getSarvamKey()).toBe('');
   });
 
-  it('feeds the Task 18 config accessor in direct mode', () => {
-    expect(providerConfig.mode).toBe('direct');
-    setSarvamKey('configured-key');
-    expect(providerConfig.getSarvamKey()).toBe('configured-key');
+  it('never hands a key to the browser: every Sarvam request goes through the site route', () => {
+    expect(providerConfig.mode).toBe('proxy');
+    expect(providerConfig.sarvamBaseUrl).toBe('/api/sarvam');
+    setSarvamKey('stale-key-from-an-old-version');
+    expect(providerConfig.getSarvamKey()).toBe('');
   });
 
   it('returns an empty key and tolerates writes without a browser window', () => {

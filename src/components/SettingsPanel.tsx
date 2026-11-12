@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { clearSarvamKey, getSarvamKey, setSarvamKey } from '@/lib/providers/keys';
 import {
   SUPPORTED_LANGUAGES,
   usePrefs,
@@ -34,18 +33,12 @@ export function SettingsPanel({
   onClose,
 }: SettingsPanelProps) {
   const { preferredLanguage, setPreferredLanguage } = usePrefs();
-  const [keyDraft, setKeyDraft] = useState('');
-  const [keyIsSet, setKeyIsSet] = useState(
-    () => import.meta.env.DEV && getSarvamKey() !== '',
-  );
   const [savedSummary, setSavedSummary] = useState({ count: 0, bytes: 0 });
   const [storageEstimate, setStorageEstimate] = useState<{ usage?: number; quota?: number }>({});
   const [savedFilesError, setSavedFilesError] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setKeyDraft('');
-    if (import.meta.env.DEV) setKeyIsSet(getSarvamKey() !== '');
     let cancelled = false;
     void projectStore.list().then((result) => {
       if (cancelled) return;
@@ -94,7 +87,7 @@ export function SettingsPanel({
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 id="settings-title" className="text-xl font-semibold text-neutral-900">Settings</h2>
-            <p className="mt-1 text-sm text-neutral-500">Language and provider preferences for this browser.</p>
+            <p className="mt-1 text-sm text-neutral-500">Language and saved files for this browser.</p>
           </div>
           <button
             type="button"
@@ -159,71 +152,6 @@ export function SettingsPanel({
             </button>
           </section>
 
-          <div className="h-px bg-neutral-200" />
-
-          {import.meta.env.DEV ? (
-            <section aria-labelledby="sarvam-settings-title">
-              <div className="flex items-center justify-between gap-3">
-                <h3 id="sarvam-settings-title" className="text-sm font-semibold text-neutral-900">Sarvam API key</h3>
-                <span
-                  role="status"
-                  className={`rounded-full px-2 py-1 text-xs font-semibold ${keyIsSet ? 'bg-success-100 text-success-800' : 'bg-neutral-100 text-neutral-600'}`}
-                >
-                  {keyIsSet ? 'Set' : 'Not set'}
-                </span>
-              </div>
-              <div className="mt-3 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-950">
-                <strong>Personal use only.</strong> The key is stored in this browser. Production keeps provider keys on the server.
-              </div>
-              <form
-                className="mt-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const key = keyDraft.trim();
-                  if (!key) return;
-                  setSarvamKey(key);
-                  setKeyDraft('');
-                  setKeyIsSet(true);
-                }}
-              >
-                <label htmlFor="sarvam-key" className="sr-only">Sarvam API key</label>
-                <input
-                  id="sarvam-key"
-                  type="password"
-                  autoComplete="new-password"
-                  value={keyDraft}
-                  onChange={(event) => setKeyDraft(event.target.value)}
-                  placeholder={keyIsSet ? 'Enter a replacement key' : 'Enter your Sarvam API key'}
-                  className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
-                />
-                <div className="mt-3 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    disabled={!keyIsSet}
-                    onClick={() => {
-                      clearSarvamKey();
-                      setKeyDraft('');
-                      setKeyIsSet(false);
-                    }}
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={keyDraft.trim() === ''}
-                    className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Save
-                  </button>
-                </div>
-              </form>
-            </section>
-          ) : (
-            <section aria-label="Provider key handling" className="text-sm text-neutral-600">
-              Provider keys are handled securely by the server in production.
-            </section>
-          )}
         </div>
       </section>
     </div>

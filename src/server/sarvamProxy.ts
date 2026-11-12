@@ -20,7 +20,7 @@ function endpointPath(request: Request): string {
   return new URL(request.url).pathname.replace(/^.*\/api\/sarvam\//, '');
 }
 
-function clientIp(headers: Headers): string {
+export function clientIp(headers: Headers): string {
   const cloudflareIp = headers.get('cf-connecting-ip')?.trim();
   if (cloudflareIp) return cloudflareIp;
   return headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
@@ -79,13 +79,14 @@ export async function handleSarvamProxy(
     return new Response('Too many requests', { status: 429 });
   }
 
-  const upstream = await fetch(`${UPSTREAM_ORIGIN}/${path}`, {
+  // Node (the local dev route) requires duplex for streamed request bodies; edge runtimes ignore it.
+  const init: RequestInit & { duplex?: 'half' } = {
     method: 'POST',
     headers: forwardHeaders(request.headers, apiKey),
     body: request.body,
-    // @ts-expect-error Node requires duplex for streamed request bodies; edge runtimes ignore it.
     duplex: 'half',
-  });
+  };
+  const upstream = await fetch(`${UPSTREAM_ORIGIN}/${path}`, init);
 
   return new Response(upstream.body, {
     status: upstream.status,

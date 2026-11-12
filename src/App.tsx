@@ -869,10 +869,6 @@ function EditorApp() {
         open={chatOpen}
         doc={document?.loaded.doc ?? null}
         onClose={() => setChatOpen(false)}
-        onOpenSettings={() => {
-          setChatOpen(false);
-          setSettingsOpen(true);
-        }}
       />
       <div className="relative flex min-h-0 flex-1">
         {!phoneLayout && savedFilesOpen && (

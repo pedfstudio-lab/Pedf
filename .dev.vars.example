@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars and paste your Sarvam key after the = sign.
+# .dev.vars is git-ignored: the key stays on this computer and is only used by the
+# local dev server's /api/sarvam route. The live site uses the Cloudflare secret instead.
+SARVAM_API_KEY=

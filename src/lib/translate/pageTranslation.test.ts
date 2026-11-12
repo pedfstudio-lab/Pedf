@@ -1,3 +1,4 @@
+import { TRANSLATION_KEY_MESSAGE } from '@/lib/providers/sarvam';
 import { describe, expect, it, vi } from 'vitest';
 import { PageTranslationCache, parseTranslationBatch, translationChunks, translationError, translationScale } from './pageTranslation';
 import { indicEditMessage, indicLanguage, withoutIndicText } from './indicText';
@@ -101,7 +102,7 @@ describe('screen-only page translation', () => {
     expect(translationScale(() => false)).toBe(0.7);
   });
   it('shows useful key errors through the provider chain, never arbitrary upstream details', () => {
-    expect(translationError(new AggregateError([new Error('Translation needs a Sarvam key in Settings')]))).toBe('Translation needs a Sarvam key in Settings');
+    expect(translationError(new AggregateError([new Error(TRANSLATION_KEY_MESSAGE)]))).toBe(TRANSLATION_KEY_MESSAGE);
     expect(translationError(new Error('sensitive upstream detail'))).toBe("Couldn't translate this page — try again");
   });
 });

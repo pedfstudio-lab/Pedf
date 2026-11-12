@@ -1,3 +1,4 @@
+import { SARVAM_STT_STREAM_PATH, SARVAM_TTS_STREAM_PATH, STT_REALTIME_MODEL, STT_REALTIME_SAMPLE_RATE, TTS_MODEL } from './sarvamVoice';
 import type { ProviderConfig } from './config';
 import { providerConfig } from './config';
 import { buildDiscussMessages, NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
@@ -31,10 +32,22 @@ const CHAT_MODEL = 'sarvam-105b-conversations';
 // https://docs.sarvam.ai/api-reference/text/translate-text (checked 2026-10-17).
 export const TRANSLATE_MODEL = 'sarvam-translate:v1';
 export const TRANSLATE_MAX_CHARS = 2000;
-export const TRANSLATION_KEY_MESSAGE = 'Translation needs a Sarvam key in Settings';
+/** Shown when the site's Sarvam route can't translate at all right now (not set up, out of credits, refused). */
+export const TRANSLATION_KEY_MESSAGE = "Translation isn't available right now. Please try again later.";
+
+/**
+ * Plain words for the statuses the site's Sarvam route returns when it can't help: too many
+ * requests from this visitor (its rate limit or Sarvam's), or no service (route not set up,
+ * credits used up, request refused). Other failures keep their technical detail.
+ */
+export function sarvamUnavailableMessage(status: number): string | undefined {
+  if (status === 429) return 'Too many requests right now. Wait a minute and try again.';
+  // 404/405: the route is missing (e.g. the live site before it was deployed), never a raw code.
+  if ([401, 402, 403, 404, 405, 503].includes(status)) return "This isn't available right now. Please try again later.";
+  return undefined;
+}
 const CHAT_MAX_TOKENS = 600;
 const SPOKEN_CHAT_MAX_TOKENS = 120;
-const TTS_MODEL = 'bulbul:v3';
 const TTS_MAX_CHARS = 2500;
 const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
 const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
@@ -43,8 +56,6 @@ const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 
 const TTS_STREAM_CODEC = 'mp3';
 const TTS_STREAM_BITRATE = '256k';
 const TTS_STREAM_SAMPLE_RATE = 24_000;
-const STT_REALTIME_MODEL = 'saaras:v3-realtime';
-const STT_REALTIME_SAMPLE_RATE = 16_000;
 const STT_FINAL_TIMEOUT_MS = 2_500;
 const STT_KEEPALIVE_MS = 15_000;
 
@@ -101,8 +112,16 @@ function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
+/**
+ * A live-connection (WebSocket) address. The site's own route (/api/sarvam) is relative, so it
+ * resolves against the page: wss://<this site>/api/sarvam/... on the live site.
+ */
+function streamingUrl(base: string, path: string): URL {
+  return new URL(joinUrl(base, path), globalThis.location?.origin ?? 'http://localhost');
+}
+
 function streamingTtsUrl(base: string): string {
-  const url = new URL(joinUrl(base, '/text-to-speech/ws'));
+  const url = streamingUrl(base, SARVAM_TTS_STREAM_PATH);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('model', TTS_MODEL);
   url.searchParams.set('send_completion_event', 'true');
@@ -110,7 +129,7 @@ function streamingTtsUrl(base: string): string {
 }
 
 function streamingSttUrl(base: string, language: string): string {
-  const url = new URL(joinUrl(base, '/speech-to-text-realtime/ws'));
+  const url = streamingUrl(base, SARVAM_STT_STREAM_PATH);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('language_code', language === 'od-IN' ? 'or-IN' : language);
   url.searchParams.set('model', STT_REALTIME_MODEL);
@@ -255,7 +274,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
 
     if (!response.ok) {
       const detail = await readErrorMessage(response);
-      throw new Error(`Sarvam request failed (${response.status}): ${detail}`);
+      throw new Error(sarvamUnavailableMessage(response.status) ?? `Sarvam request failed (${response.status}): ${detail}`);
     }
 
     let rawAnswer: unknown;
@@ -299,7 +318,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
         body: JSON.stringify({ input: input.text, source_language_code: input.from ?? 'en-IN',
           target_language_code: input.to, model: TRANSLATE_MODEL, numerals_format: 'international' }),
       });
-      if (response.status === 503 && this.config.mode === 'proxy') throw new Error(TRANSLATION_KEY_MESSAGE);
+      if ([401, 402, 403, 503].includes(response.status) && this.config.mode === 'proxy') throw new Error(TRANSLATION_KEY_MESSAGE);
       if (!response.ok) throw new Error(`Translation request failed (${response.status}).`);
       const payload = await response.json() as { translated_text?: unknown };
       if (typeof payload.translated_text !== 'string' || !payload.translated_text.trim()) throw new Error('Translation returned no text.');
@@ -341,7 +360,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
 
     if (!response.ok) {
       const detail = await readErrorMessage(response);
-      throw new Error(`Sarvam TTS failed (${response.status}): ${detail}`);
+      throw new Error(sarvamUnavailableMessage(response.status) ?? `Sarvam TTS failed (${response.status}): ${detail}`);
     }
 
     const payload = await response.json() as SarvamTtsResponse;
@@ -362,12 +381,8 @@ export class SarvamProvider implements ProviderWithCapabilities {
     onAudioChunk: AudioChunkHandler,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.config.mode !== 'direct') {
-      throw new Error('Streaming TTS needs WebSocket proxy support in production.');
-    }
-
     const key = this.config.getSarvamKey().trim();
-    if (key === '') {
+    if (this.config.mode === 'direct' && key === '') {
       throw new Error('Add your Sarvam API key in Settings before playing audio.');
     }
     if (signal?.aborted) throw abortError();
@@ -375,11 +390,12 @@ export class SarvamProvider implements ProviderWithCapabilities {
     await new Promise<void>((resolve, reject) => {
       let socket: WebSocket;
       try {
-        // Browser WebSockets cannot set custom headers. Sarvam's JS SDK sends the key
-        // through this WebSocket subprotocol in direct mode.
+        // Browser WebSockets cannot set custom headers. In direct mode (tests) the key rides
+        // in a subprotocol, as Sarvam's JS SDK does; through the site's route the browser
+        // sends no key at all and the route adds it on the server.
         socket = this.createWebSocket(
           streamingTtsUrl(this.config.sarvamBaseUrl),
-          [`api-subscription-key.${key}`],
+          this.config.mode === 'direct' ? [`api-subscription-key.${key}`] : [],
         );
       } catch (error) {
         reject(error);
@@ -486,19 +502,15 @@ export class SarvamProvider implements ProviderWithCapabilities {
 
   /** Open a persistent Saaras realtime session and accept 16 kHz mono PCM frames. */
   transcribeStream(input: TranscribeStreamInput = {}): TranscribeStreamSession {
-    if (this.config.mode !== 'direct') {
-      throw new Error('Streaming STT needs WebSocket proxy support in production.');
-    }
-
     const key = this.config.getSarvamKey().trim();
-    if (key === '') {
+    if (this.config.mode === 'direct' && key === '') {
       throw new Error('Add your Sarvam API key in Settings before using the mic.');
     }
     if (input.signal?.aborted) throw abortError();
 
     const socket = this.createWebSocket(
       streamingSttUrl(this.config.sarvamBaseUrl, input.language ?? 'auto'),
-      [`api-subscription-key.${key}`],
+      this.config.mode === 'direct' ? [`api-subscription-key.${key}`] : [],
     );
     const queuedAudio: Uint8Array<ArrayBuffer>[] = [];
     let opened = false;
@@ -736,7 +748,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
 
     if (!response.ok) {
       const detail = await readErrorMessage(response);
-      throw new Error(`Sarvam STT failed (${response.status}): ${detail}`);
+      throw new Error(sarvamUnavailableMessage(response.status) ?? `Sarvam STT failed (${response.status}): ${detail}`);
     }
 
     const payload = await response.json() as SarvamSttResponse;

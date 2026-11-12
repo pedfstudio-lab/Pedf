@@ -12,7 +12,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
           <p className="site-eyebrow">Privacy</p>
           <h1>Your PDF stays yours.</h1>
           <p>PEDF Studio processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
-          <p>When you use chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent to Sarvam AI. PEDF Studio does not store them.</p>
+          <p>When you use chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent, through PEDF Studio's server, to Sarvam AI. PEDF Studio does not store them.</p>
           <p>There are no accounts and no analytics. You stay in control of the original file and the edited copy you download.</p>
         </main>
       </StaticPageShell>

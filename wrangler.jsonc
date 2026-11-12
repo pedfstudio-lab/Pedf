@@ -1,8 +1,27 @@
 {
   "name": "pedf",
   "compatibility_date": "2025-01-01",
+  // The Sarvam route (src/server/worker.ts). It runs only for /api/*; everything else is a
+  // plain website file from dist/.
+  "main": "src/server/worker.ts",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // Sites allowed to use the Sarvam route. Add the custom domain here when it is connected.
+  // The key itself is the encrypted secret SARVAM_API_KEY, set in the Cloudflare dashboard.
+  "vars": {
+    "APP_ORIGINS": "https://pedf.pedf-studio.workers.dev"
+  },
+  // Each visitor (by IP) may make up to 60 Sarvam requests a minute, so nobody can drain the
+  // owner's credits. Translating a long PDF uses about 4–5 requests a page.
+  "ratelimits": [
+    {
+      "name": "SARVAM_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ]
 }

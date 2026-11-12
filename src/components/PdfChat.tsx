@@ -6,7 +6,6 @@ import { getEditedDocumentText } from '@/lib/pdf/editedDocumentText';
 import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
 import { fingerprintDocumentText, recentChatHistory } from '@/lib/providers/chatHistory';
 import { NOT_IN_DOCUMENT_MARKER } from '@/lib/providers/discussPrompt';
-import { getSarvamKey } from '@/lib/providers/keys';
 import {
   MAX_BRIDGING_FILLERS,
   preloadAcknowledgments,
@@ -54,7 +53,6 @@ interface PdfChatProps {
   readonly open: boolean;
   readonly doc: PDFDocumentProxy | null;
   onClose(): void;
-  onOpenSettings(): void;
 }
 
 interface ChatEntry {
@@ -110,7 +108,7 @@ function microphoneError(error: unknown): string {
   return message;
 }
 
-export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
+export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   const { preferredLanguage, setPreferredLanguage } = usePrefs();
   const { edits, pagePlan } = useEdits();
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -147,7 +145,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const conversationUserSpeaking = useRef(false);
   const finalizeConversationTurnRef = useRef<() => void>(() => undefined);
   const handleConversationFinalRef = useRef<(text: string) => void>(() => undefined);
-  const keyMissing = import.meta.env.DEV && getSarvamKey().trim() === '';
 
   const updateConversationPhase = useCallback((phase: ConversationPhase) => {
     conversationPhaseRef.current = phase;
@@ -223,9 +220,9 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   }, [preferredLanguage, stopConversation]);
 
   useEffect(() => {
-    if (!open || keyMissing) return;
+    if (!open) return;
     void preloadAcknowledgments(preferredLanguage);
-  }, [keyMissing, open, preferredLanguage]);
+  }, [open, preferredLanguage]);
 
   useEffect(() => () => {
     askRequest.current += 1;
@@ -397,7 +394,7 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
 
   const ask = async (questionText: string, options: AskOptions) => {
     const nextQuestion = questionText.trim();
-    if (!doc || !nextQuestion || thinking || keyMissing) return;
+    if (!doc || !nextQuestion || thinking) return;
     if (!options.spoken) stopPlayback();
     const request = askRequest.current + 1;
     askRequest.current = request;
@@ -550,13 +547,13 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const nextQuestion = question.trim();
-    if (!doc || !nextQuestion || thinking || keyMissing || micState !== 'idle') return;
+    if (!doc || !nextQuestion || thinking || micState !== 'idle') return;
     setQuestion('');
     void ask(nextQuestion, { spoken: false });
   };
 
   const beginRecording = async () => {
-    if (!doc || thinking || keyMissing || micState !== 'idle') return;
+    if (!doc || thinking || micState !== 'idle') return;
     stopPlayback();
     const request = micRequest.current + 1;
     micRequest.current = request;
@@ -706,7 +703,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
     if (
       !doc
       || thinking
-      || keyMissing
       || micState !== 'idle'
       || conversationUnavailable
       || conversationPhaseRef.current !== 'idle'
@@ -959,18 +955,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
         </div>
 
         <footer className="border-t border-neutral-200 p-4">
-          {keyMissing ? (
-            <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-950">
-              <p>Add your Sarvam API key in Settings to ask this PDF.</p>
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="mt-3 rounded-md bg-neutral-900 px-3 py-1.5 font-medium text-white hover:bg-neutral-700"
-              >
-                Open Settings
-              </button>
-            </div>
-          ) : (
             <form onSubmit={submit} className="flex items-end gap-2">
               <label htmlFor="pdf-chat-question" className="sr-only">Ask a question about this PDF</label>
               <textarea
@@ -1038,7 +1022,6 @@ export function PdfChat({ open, doc, onClose, onOpenSettings }: PdfChatProps) {
                 Send
               </button>
             </form>
-          )}
         </footer>
       </section>
     </div>

@@ -32,7 +32,7 @@ const faqs: ReadonlyArray<readonly [string, ReactNode]> = [
   ['Does it work offline?', 'Editing works offline once the page is open. Chat, voice and Translate need an internet connection.'],
   ['Which languages are supported?', <>{languageList}.</>],
   ['Where is my file stored?', 'Your PDF and saved edits stay only in this browser on this device. You download the edited copy when you are ready.'],
-  ['What do voice and chat need?', 'For now, voice and chat need a key from Sarvam AI, which you paste in Settings.'],
+  ['What do voice and chat need?', 'Nothing to set up. Ask, voice and Translate work straight away; they just need an internet connection.'],
   ['Can I use it on my phone?', 'Yes. You can open and read your PDF, ask questions and translate it on a phone. Editing works best on a computer.'],
 ];
 

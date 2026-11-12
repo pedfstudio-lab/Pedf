@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   extractTextRuns: vi.fn(),
 }));
 
-vi.mock('@/lib/providers/keys', () => ({ getSarvamKey: () => 'unit-test-placeholder' }));
 vi.mock('@/lib/providers', () => ({
   defaultProviders: () => ({ discuss: mocks.discuss, transcribe: mocks.transcribe }),
   providerConfig: {},
@@ -98,7 +97,7 @@ function Harness({ doc }: { readonly doc: PDFDocumentProxy }) {
       setCurrentDoc({ numPages: doc.numPages, getPage: doc.getPage } as unknown as PDFDocumentProxy);
     }}>Open another PDF</button>
     <button onClick={undo}>Undo test edit</button>
-    <PdfChat open doc={currentDoc} onClose={() => undefined} onOpenSettings={() => undefined} />
+    <PdfChat open doc={currentDoc} onClose={() => undefined} />
   </>;
 }
 
