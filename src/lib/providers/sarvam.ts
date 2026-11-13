@@ -56,9 +56,12 @@ const TTS_MAX_CHARS = 2500;
 const TTS_SPEAKER = 'ritu';   // default Bulbul v3 voice (SpeakInput.voice overrides per call)
 const TTS_PACE = 1.15;        // 1.0 = normal; higher = faster (bulbul:v3 range 0.5–2.0)
 // MP3 is the most broadly MediaSource-compatible Sarvam streaming container.
-// Use Sarvam's maximum documented lossy bitrate and streaming sample rate.
+// Sarvam's live speech accepts only 32k, 64k, 96k, 128k or 192k (checked 2026-11-13). Any other value is
+// refused, which silently sent every spoken sentence to the slow batch backup (~1.5–3 s instead of ~0.5 s).
+// 128k is more than a speaking voice needs and lighter than 192k on slow phone connections.
 const TTS_STREAM_CODEC = 'mp3';
-const TTS_STREAM_BITRATE = '256k';
+export const TTS_STREAM_BITRATE = '128k';
+export const TTS_STREAM_BITRATES = ['32k', '64k', '96k', '128k', '192k'] as const;
 const TTS_STREAM_SAMPLE_RATE = 24_000;
 const STT_FINAL_TIMEOUT_MS = 2_500;
 const STT_KEEPALIVE_MS = 15_000;

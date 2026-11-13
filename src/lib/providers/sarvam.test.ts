@@ -1,7 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderConfig } from './config';
 import { NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
-import { base64ToBytes, CONTENT_FILTER_MESSAGE, SarvamProvider, sarvamUnavailableMessage, TRANSLATION_FILTER_MESSAGE, TRANSLATION_KEY_MESSAGE } from './sarvam';
+import {
+  base64ToBytes, CONTENT_FILTER_MESSAGE, SarvamProvider, sarvamUnavailableMessage, TRANSLATION_FILTER_MESSAGE, TRANSLATION_KEY_MESSAGE,
+  TTS_STREAM_BITRATE, TTS_STREAM_BITRATES,
+} from './sarvam';
+
+describe('Sarvam live speech settings', () => {
+  it('asks for an audio quality Sarvam accepts, so live speech is not refused into the slow backup', () => {
+    // Sarvam refused '256k' on every request (checked 2026-11-13): only these values are allowed.
+    expect(TTS_STREAM_BITRATES).toContain(TTS_STREAM_BITRATE);
+    expect(TTS_STREAM_BITRATE).toBe('128k');
+  });
+});
 
 describe("Sarvam's content filter and look-alike maths letters", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -479,7 +490,7 @@ describe('SarvamProvider.speakStream', () => {
           speaker: 'priya',
           pace: 1.15,
           output_audio_codec: 'mp3',
-          output_audio_bitrate: '256k',
+          output_audio_bitrate: '128k',
           speech_sample_rate: 24000,
         },
       },
