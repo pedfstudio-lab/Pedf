@@ -5,9 +5,12 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
 import { PdfViewer } from './components/PdfViewer';
 import { PdfDropZone } from './components/PdfDropZone';
+import { PdfPasswordDialog } from './components/PdfPasswordDialog';
 import { SignatureModal } from './components/sign/SignatureModal';
 import { loadDocument } from './lib/pdf/loadDocument';
 import type { LoadedDocument } from './lib/pdf/loadDocument';
+import { PdfPasswordError } from './lib/pdf/passwordError';
+import { UnlockPdfError } from './lib/unlockPdf/protocol';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
 import { sampleDominantColor } from './lib/export/colorSample';
@@ -143,6 +146,25 @@ interface PendingSwitch {
   open(): Promise<boolean>;
 }
 
+/** A locked PDF waiting for its password. `attempt` gives the box a fresh start after each wrong try. */
+interface PasswordPrompt {
+  readonly source: File | ArrayBuffer;
+  readonly name: string;
+  readonly incorrect: boolean;
+  readonly busy: boolean;
+  readonly attempt: number;
+}
+
+/** Puts the file's own password back on the edited copy. Loaded only when someone ticks the box. */
+async function relockWithPassword(bytes: Uint8Array, password: string): Promise<Uint8Array> {
+  const { lockPdf } = await import('./lib/lockPdf/client');
+  try {
+    return await lockPdf(bytes, password, new AbortController().signal, undefined, { existingPassword: true });
+  } catch {
+    throw new Error('Couldn\'t put the password back on this PDF. Untick "Keep the password" to download it without one.');
+  }
+}
+
 const SAVED_FILES_COLUMN_KEY = 'pedf.savedFilesColumn';
 const PHONE_NOTICE_KEY = 'pedf.phoneNoticeDismissed';
 
@@ -214,6 +236,11 @@ function EditorApp() {
   const [manualSaving, setManualSaving] = useState(false);
   const [evictionNote, setEvictionNote] = useState<string | null>(null);
   const [matchingFile, setMatchingFile] = useState<MatchingFilePrompt | null>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<PasswordPrompt | null>(null);
+  // In memory only, for the file it opened, so "Keep the password" can re-lock the download. Never saved.
+  const [documentPassword, setDocumentPassword] = useState<{ readonly loaded: LoadedDocument; readonly password: string } | null>(null);
+  // The box is ticked per file: opening another file starts with downloads unlocked again.
+  const [keepPasswordFor, setKeepPasswordFor] = useState<LoadedDocument | null>(null);
   const [saveFailure, setSaveFailure] = useState<'full' | 'unavailable' | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
   const [closedNote, setClosedNote] = useState<string | null>(null);
@@ -441,6 +468,7 @@ function EditorApp() {
         return false;
       }
       setDocument({ loaded, fileName: stored.value.metadata.fileName });
+      setDocumentPassword(null);
       setClosedNote(null);
       restoreDocument(restored.value.history, stored.value.metadata.changeCount);
       openingPlan.current = restored.value.history.present.plan.map((entry) => ({ ...entry }));
@@ -521,17 +549,32 @@ function EditorApp() {
     pendingRestorePage.current = null;
   }, []);
 
-  const open = useCallback(async (source: File | ArrayBuffer, name: string): Promise<boolean> => {
+  const open = useCallback(async (source: File | ArrayBuffer, name: string, password?: string): Promise<boolean> => {
     setError(null);
     setRepairFile(null);
     let loaded: LoadedDocument;
     try {
-      loaded = await loadDocument(source);
+      loaded = password ? await loadDocument(source, { password }) : await loadDocument(source);
     } catch (e) {
+      const wrongPassword = e instanceof UnlockPdfError && e.code === 'password';
+      if (e instanceof PdfPasswordError || wrongPassword) {
+        setPasswordPrompt((current) => ({
+          source,
+          name,
+          incorrect: wrongPassword || (e as PdfPasswordError).reason === 'incorrect',
+          busy: false,
+          attempt: (current?.attempt ?? 0) + 1,
+        }));
+        return false;
+      }
+      setPasswordPrompt(null);
       setError(e instanceof Error ? e.message : String(e));
-      if (source instanceof File) setRepairFile(source);
+      // Repair can't help a file that only failed to unlock.
+      if (source instanceof File && !(e instanceof UnlockPdfError)) setRepairFile(source);
       return false;
     }
+    setPasswordPrompt(null);
+    setDocumentPassword(password && loaded.protection === 'password' ? { loaded, password } : null);
 
     let sha256: string;
     try {
@@ -612,7 +655,11 @@ function EditorApp() {
         plan: pagePlan,
         sampleBackground,
       });
-      const blob = new Blob([result.bytes.slice().buffer], { type: 'application/pdf' });
+      const password = keepPasswordFor === document.loaded && documentPassword?.loaded === document.loaded
+        ? documentPassword.password
+        : undefined;
+      const bytes = password ? await relockWithPassword(result.bytes, password) : result.bytes;
+      const blob = new Blob([bytes.slice().buffer], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement('a');
       const baseName = document.fileName.replace(/\.pdf$/i, '');
@@ -630,7 +677,10 @@ function EditorApp() {
     } finally {
       setExporting(false);
     }
-  }, [document, edits, exporting, pagePlan, sampleBackground]);
+  }, [document, documentPassword, edits, exporting, keepPasswordFor, pagePlan, sampleBackground]);
+
+  const openedWithPassword = Boolean(document && documentPassword?.loaded === document.loaded);
+  const keepPassword = Boolean(document && keepPasswordFor === document.loaded);
 
   /** Saves now, creating the project only when this document has its first real change. */
   const saveProjectNow = autosave.saveNow;
@@ -709,6 +759,8 @@ function EditorApp() {
     setSaveFailure(null);
     setPendingSwitch(null);
     setDocument(null);
+    setDocumentPassword(null);
+    setKeepPasswordFor(null);
     resetDocument([]);
     setCurrentProject(null);
     setCurrentSha256(null);
@@ -845,6 +897,15 @@ function EditorApp() {
         onHome={() => void goHome()}
       />
       <TranslationPrivacyNote />
+      {openedWithPassword && (
+        <aside className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-brand-100 bg-brand-50 px-3 py-1.5 text-xs text-brand-950">
+          <span><span aria-hidden="true">🔒 </span>This PDF was opened with its password.</span>
+          <label className="flex items-center gap-1.5 font-medium">
+            <input type="checkbox" checked={keepPassword} onChange={(event) => setKeepPasswordFor(event.target.checked ? document?.loaded ?? null : null)} />
+            Keep the password on the downloaded PDF
+          </label>
+        </aside>
+      )}
       {phoneLayout && !phoneNoticeDismissed && (
         <aside role="note" className="flex shrink-0 items-start gap-3 border-b border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-950">
           <span>Editing works best on a computer. You can still open and read your PDF here.</span>
@@ -1025,6 +1086,20 @@ function EditorApp() {
             </div>
           </section>
         </div>
+      )}
+      {passwordPrompt && (
+        <PdfPasswordDialog
+          key={passwordPrompt.attempt}
+          fileName={passwordPrompt.name}
+          incorrect={passwordPrompt.incorrect}
+          busy={passwordPrompt.busy}
+          onSubmit={(password) => {
+            const prompt = passwordPrompt;
+            setPasswordPrompt({ ...prompt, busy: true });
+            void open(prompt.source, prompt.name, password);
+          }}
+          onCancel={() => setPasswordPrompt(null)}
+        />
       )}
       {saveFailure && document && (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-neutral-950/45 p-4">

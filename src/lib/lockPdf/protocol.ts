@@ -1,7 +1,9 @@
 export const MAX_LOCK_BYTES = 100 * 1024 * 1024;
 export type LockErrorCode = 'invalid' | 'locked' | 'signed' | 'unsupported' | 'failed' | 'password';
 export type LockProgress = 'checking' | 'encrypting';
-export interface LockRequest { bytes: ArrayBuffer; password: string }
+/** `existingPassword`: re-locking a file with the password it already had, so no new-password length rule. */
+export interface LockOptions { existingPassword?: boolean }
+export interface LockRequest extends LockOptions { bytes: ArrayBuffer; password: string }
 export type LockResponse = { type: 'progress'; phase: LockProgress }
   | { type: 'done'; bytes: ArrayBuffer }
   | { type: 'error'; code: LockErrorCode };

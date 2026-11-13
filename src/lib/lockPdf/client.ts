@@ -1,8 +1,8 @@
-import { LockPdfError, type LockProgress, type LockResponse } from './protocol';
+import { LockPdfError, type LockOptions, type LockProgress, type LockResponse } from './protocol';
 
 /** One worker/realm per file. Termination drops its virtual files, WASM memory and password copies. */
 export function lockPdf(bytes: Uint8Array, password: string, signal: AbortSignal,
-  progress?: (phase: LockProgress) => void): Promise<Uint8Array> {
+  progress?: (phase: LockProgress) => void, options: LockOptions = {}): Promise<Uint8Array> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     let worker: Worker;
@@ -31,7 +31,7 @@ export function lockPdf(bytes: Uint8Array, password: string, signal: AbortSignal
     worker.onmessageerror = () => finish(new LockPdfError('failed'));
     try {
       const input = Uint8Array.from(bytes).buffer;
-      worker.postMessage({ bytes: input, password }, [input]);
+      worker.postMessage({ bytes: input, password, existingPassword: options.existingPassword === true }, [input]);
     } catch { finish(new LockPdfError('failed')); }
     if (signal.aborted) abort();
   });

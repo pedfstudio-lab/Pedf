@@ -28,6 +28,10 @@
 .tool-file-name { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
 .tool-file-name strong { overflow-wrap: anywhere; }
 .tool-file-name span { font-size: .875rem; color: var(--color-site-body); }
+.tool-file-password { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 6px; }
+.tool-file-password .lock-field { flex: 1 1 220px; }
+.tool-file-password .lock-field span { font-size: .875rem; color: var(--color-site-ink); }
+.tool-file-password .tool-file-error { flex-basis: 100%; margin: 0; font-size: .875rem; }
 .tool-result-note { margin: 5px 0 0; font-size: .9rem; line-height: 1.5; }
 .tool-result-note-ok { color: var(--color-site-success); }
 .tool-result-note-warn { color: var(--color-site-warning); }

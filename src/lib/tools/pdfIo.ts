@@ -1,9 +1,10 @@
 import { EncryptedPDFError, PDFDocument } from 'pdf-lib';
 import { isPdf } from '@/lib/site/pdfFile';
+import { UnlockPdfError } from '@/lib/unlockPdf/protocol';
 import { isUserFacingError, ToolError } from './errors';
 
 export const PDF_ERRORS = {
-  encrypted: 'This PDF has a password. Unlock it first.',
+  encrypted: 'This PDF is locked with a password. Type its password to continue.',
   corrupt: 'This file could not be read. Try Repair PDF.',
   type: 'Choose a PDF file.',
 } as const;
@@ -11,7 +12,8 @@ export const PDF_ERRORS = {
 function isEncryptedError(error: unknown): boolean {
   // pdf-lib's downlevel Error subclass can lose its prototype in some builds.
   return error instanceof EncryptedPDFError || (error instanceof Error
-    && (error.name === 'PasswordException' || error.message === new EncryptedPDFError().message));
+    && (error.name === 'PasswordException' || error.name === 'PdfPasswordError'
+      || error.message === new EncryptedPDFError().message));
 }
 
 export function friendlyError(error: unknown): string {
@@ -19,6 +21,8 @@ export function friendlyError(error: unknown): string {
   if (error instanceof Error) {
     if (Object.values(PDF_ERRORS).some((message) => message === error.message)) return error.message;
     if (isEncryptedError(error)) return PDF_ERRORS.encrypted;
+    // The unlock engine's messages are written for people (wrong password, browser too old…).
+    if (error instanceof UnlockPdfError) return error.message;
   }
   return 'Something went wrong. Please try again.';
 }
@@ -39,7 +43,8 @@ export async function loadPdfJs(file: File) {
     const { loadDocument } = await import('@/lib/pdf/loadDocument');
     return await loadDocument(file);
   } catch (error) {
-    if (error instanceof Error && error.name === 'PasswordException') throw new ToolError(PDF_ERRORS.encrypted);
+    if (isEncryptedError(error)) throw new ToolError(PDF_ERRORS.encrypted);
+    if (error instanceof UnlockPdfError) throw new ToolError(error.message);
     throw new ToolError(PDF_ERRORS.corrupt);
   }
 }

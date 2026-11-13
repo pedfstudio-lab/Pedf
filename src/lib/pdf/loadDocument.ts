@@ -1,5 +1,5 @@
-import { pdfjs } from './worker';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { isEncrypted, openWithPdfjs, removeProtection, type PdfProtection } from './protection';
 import type { PageGeometry } from './types';
 
 export interface LoadedDocument {
@@ -8,9 +8,12 @@ export interface LoadedDocument {
    * Pristine copy of the original file bytes. This is the ONLY thing the
    * export path ever hands to pdf-lib. It is never passed to pdf.js, because
    * `getDocument({ data })` DETACHES (neuters) the buffer it receives.
+   * For a locked or restricted PDF these are the unlocked copy's bytes.
    */
   originalBytes: Uint8Array;
   pages: PageGeometry[];
+  /** How the file was protected before it was unlocked on the device (absent = not protected). */
+  protection?: PdfProtection;
 }
 
 async function toBytes(source: File | ArrayBuffer | Uint8Array): Promise<Uint8Array> {
@@ -19,22 +22,28 @@ async function toBytes(source: File | ArrayBuffer | Uint8Array): Promise<Uint8Ar
   return new Uint8Array(source);
 }
 
+/**
+ * Opens a PDF. Locked and restricted PDFs are unlocked on the device first, so editing,
+ * saving and exporting see an ordinary file. Throws PdfPasswordError when a password is needed.
+ */
 export async function loadDocument(
   source: File | ArrayBuffer | Uint8Array,
+  options: { password?: string } = {},
 ): Promise<LoadedDocument> {
-  const bytes = await toBytes(source);
-
-  // Two independent copies (slice() copies): one kept pristine for export, one
-  // thrown to pdf.js (which detaches whatever buffer it's given).
+  let bytes = await toBytes(source);
+  const password = options.password || undefined;
+  let doc = await openWithPdfjs(bytes, password);
+  let protection: PdfProtection = 'none';
+  if (await isEncrypted(doc)) {
+    await doc.destroy();
+    bytes = await removeProtection(bytes, password);
+    protection = password ? 'password' : 'restricted';
+    doc = await openWithPdfjs(bytes);
+  }
+  // Its own copy (slice() copies), separate from the one pdf.js was given.
   const originalBytes = bytes.slice();
-  const forPdfjs = bytes.slice();
-
-  const doc = await pdfjs.getDocument({
-    data: forPdfjs,
-    fontExtraProperties: true,
-  }).promise;
   const pages = await collectGeometry(doc);
-  return { doc, originalBytes, pages };
+  return { doc, originalBytes, pages, protection };
 }
 
 async function collectGeometry(doc: PDFDocumentProxy): Promise<PageGeometry[]> {

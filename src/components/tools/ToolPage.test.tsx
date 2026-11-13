@@ -2,15 +2,19 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PdfPasswordError } from '@/lib/pdf/passwordError';
 import { navigate } from '@/lib/site/navigate';
 import { setPendingFiles, takePendingFiles } from '@/lib/site/pendingFiles';
 import { downloadBytes, zipOutputs } from '@/lib/tools/download';
 import { ToolError } from '@/lib/tools/errors';
+import { PDF_ERRORS } from '@/lib/tools/pdfIo';
 import { previewPdf } from '@/lib/tools/preview';
 import { getTool, registerTool } from '@/lib/tools/registry';
 import type { ToolContext, ToolDefinition, ToolOutput } from '@/lib/tools/types';
 import { ToolPage } from './ToolPage';
 
+const protection = vi.hoisted(() => ({ unlockPdfFile: vi.fn() }));
+vi.mock('@/lib/pdf/protection', () => protection);
 vi.mock('@/lib/site/navigate', () => ({ navigate: vi.fn() }));
 vi.mock('@/lib/tools/download', () => ({ downloadBytes: vi.fn(), zipOutputs: vi.fn(() => new Uint8Array([80, 75])) }));
 vi.mock('@/lib/tools/preview', () => ({ previewPdf: vi.fn(async () => ({ pages: 2, thumbnail: 'data:image/png;base64,AA==' })) }));
@@ -34,6 +38,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   run.mockReset().mockResolvedValue([result]);
   vi.mocked(previewPdf).mockResolvedValue({ pages: 2, thumbnail: 'data:image/png;base64,AA==' });
+  // Ordinary PDFs come back unchanged from the on-device lock check.
+  protection.unlockPdfFile.mockReset().mockImplementation(async (input: File) => ({ file: input, protection: 'none' }));
 });
 afterEach(() => { cleanup(); takePendingFiles(); });
 
@@ -48,6 +54,7 @@ describe('ToolPage', () => {
     fireEvent.change(screen.getByLabelText('Output label'), { target: { value: 'Private passphrase' } });
     fireEvent.click(screen.getByRole('button', { name: dummy.title }));
     expect((screen.getByLabelText('Output label') as HTMLInputElement).value).toBe('Default');
+    await waitFor(() => expect(run).toHaveBeenCalled());
     await act(async () => finish([{ ...result, canOpenInEditor: false }]));
     await screen.findByRole('region', { name: 'Results' });
     expect(run.mock.calls[0]![1]).toEqual({});
@@ -193,7 +200,7 @@ describe('ToolPage', () => {
     });
     show(); pick(file('cancel.pdf'));
     fireEvent.click(screen.getByRole('button', { name: dummy.title }));
-    expect(screen.getByRole('status').textContent).toBe('Reading pages');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Reading pages'));
     expect(screen.getByRole('progressbar').getAttribute('value')).toBe('25');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(context.signal.aborted).toBe(true);
@@ -237,10 +244,10 @@ describe('ToolPage', () => {
   });
 
   it('shows friendly errors and allows a retry', async () => {
-    run.mockRejectedValueOnce(new Error('This PDF has a password. Unlock it first.'));
+    run.mockRejectedValueOnce(new Error(PDF_ERRORS.encrypted));
     show(); pick(file('locked.pdf'));
     fireEvent.click(screen.getByRole('button', { name: dummy.title }));
-    expect((await screen.findByRole('alert')).textContent).toBe('This PDF has a password. Unlock it first.');
+    expect((await screen.findByRole('alert')).textContent).toBe(PDF_ERRORS.encrypted);
     await waitFor(() => expect((screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement).disabled).toBe(false));
   });
 
@@ -255,7 +262,7 @@ describe('ToolPage', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Something went wrong. Please try again.'));
   });
 
-  it('aborts processing on unmount', () => {
+  it('aborts processing on unmount', async () => {
     let signal!: AbortSignal;
     run.mockImplementationOnce((_files, _options, ctx) => {
       signal = ctx.signal;
@@ -263,7 +270,59 @@ describe('ToolPage', () => {
     });
     const { unmount } = show(); pick(file('source.pdf'));
     fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+    await waitFor(() => expect(run).toHaveBeenCalled());
     unmount();
     expect(signal.aborted).toBe(true);
+  });
+
+  describe('password-protected PDFs', () => {
+    it('asks for a locked PDF\'s password in its file card, then runs the tool on the unlocked copy', async () => {
+      const unlocked = file('statement.pdf');
+      protection.unlockPdfFile.mockImplementation(async (_input: File, password?: string) => {
+        if (password === undefined) throw new PdfPasswordError('needed');
+        if (password !== 'RAHU1990') throw new PdfPasswordError('incorrect');
+        return { file: unlocked, protection: 'password' };
+      });
+      show(); pick(file('statement.pdf'));
+
+      const field = await screen.findByLabelText('Password for statement.pdf');
+      expect(field.getAttribute('autocomplete')).toBe('new-password');
+      expect(field.closest('form')).toBeNull();
+      const button = screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(screen.getByText('Type the password for the locked PDF to continue. It stays on this device.')).toBeTruthy();
+
+      fireEvent.change(field, { target: { value: 'wrong' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+      expect(await screen.findByText("That password isn't right. Try again.")).toBeTruthy();
+      expect(button.disabled).toBe(true);
+
+      fireEvent.change(screen.getByLabelText('Password for statement.pdf'), { target: { value: 'RAHU1990' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+      await waitFor(() => expect(screen.queryByLabelText('Password for statement.pdf')).toBeNull());
+      expect(protection.unlockPdfFile).toHaveBeenLastCalledWith(expect.any(File), 'RAHU1990');
+      expect(button.disabled).toBe(false);
+
+      fireEvent.click(button);
+      await screen.findByRole('region', { name: 'Results' });
+      expect(run.mock.calls[0]![0]).toEqual([unlocked]);
+      expect(run.mock.calls[0]![0][0]).toBe(unlocked);
+    });
+
+    it('swaps a restricted PDF for its unlocked copy, even when Run is pressed straight away', async () => {
+      const unlocked = file('restricted.pdf');
+      let finishCheck!: () => void;
+      protection.unlockPdfFile.mockImplementation((input: File) => new Promise((resolve) => {
+        finishCheck = () => resolve({ file: unlocked, protection: 'restricted' });
+        void input;
+      }));
+      show(); pick(file('restricted.pdf'));
+      fireEvent.click(screen.getByRole('button', { name: dummy.title }));
+      expect(run).not.toHaveBeenCalled();
+      await act(async () => finishCheck());
+      await screen.findByRole('region', { name: 'Results' });
+      expect(run.mock.calls[0]![0][0]).toBe(unlocked);
+      expect(screen.queryByLabelText(/Password for/)).toBeNull();
+    });
   });
 });

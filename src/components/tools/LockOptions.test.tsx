@@ -21,7 +21,13 @@ describe('Lock PDF options', () => {
     expect(password.type).toBe('password'); expect(confirmation.type).toBe('password');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Show passwords' }));
     expect(password.type).toBe('text'); expect(confirmation.type).toBe('text');
-    expect(password.autocomplete).toBe('off');
+    // Never filled with a password the browser saved for this site, and never offered to be saved.
+    for (const field of [password, confirmation]) {
+      expect(field.autocomplete).toBe('new-password');
+      expect(field.getAttribute('data-1p-ignore')).toBe('true');
+      expect(field.getAttribute('data-lpignore')).toBe('true');
+      expect(field.closest('form')).toBeNull();
+    }
     expect(screen.getByText(/cannot recover it/)).toBeTruthy();
   });
   it('disables the inputs and reveal control during processing', () => {

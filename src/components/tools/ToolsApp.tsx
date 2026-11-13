@@ -11,6 +11,7 @@ import { repairTool } from '@/lib/tools/repair';
 import { signTool } from '@/lib/tools/sign';
 import { compressTool } from '@/lib/tools/compress';
 import { lockTool } from '@/lib/tools/lock';
+import { unlockTool } from '@/lib/tools/unlock';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolPage } from './ToolPage';
@@ -31,6 +32,7 @@ if (!getTool('repair')) registerTool(repairTool);
 if (!getTool('sign')) registerTool(signTool);
 if (!getTool('compress')) registerTool(compressTool);
 if (!getTool('lock')) registerTool(lockTool);
+if (!getTool('unlock')) registerTool(unlockTool);
 
 function ToolsIndex() {
   const tools = listTools();

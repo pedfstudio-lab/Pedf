@@ -24,7 +24,8 @@ describe('ToolsApp index and lookup', () => {
     expect(screen.getByRole('link', { name: /Sign PDF/ }).getAttribute('href')).toBe('/tools/sign');
     expect(screen.getByRole('link', { name: /Compress PDF/ }).getAttribute('href')).toBe('/tools/compress');
     expect(screen.getByRole('link', { name: /Lock PDF/ }).getAttribute('href')).toBe('/tools/lock');
-    expect(document.querySelectorAll('.tool-card')).toHaveLength(13);
+    expect(screen.getByRole('link', { name: /Unlock PDF/ }).getAttribute('href')).toBe('/tools/unlock');
+    expect(document.querySelectorAll('.tool-card')).toHaveLength(14);
   });
 
   it('falls back to the tools index for an unknown slug', () => {

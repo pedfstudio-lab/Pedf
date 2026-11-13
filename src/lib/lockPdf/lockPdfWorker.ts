@@ -13,7 +13,8 @@ workerScope.onmessage = async (event: MessageEvent<LockRequest>) => {
   const request = event.data;
   try {
     const output = await encryptPdfBytes(new Uint8Array(request.bytes), request.password, wasmLocation,
-      phase => workerScope.postMessage({ type: 'progress', phase } satisfies LockResponse));
+      phase => workerScope.postMessage({ type: 'progress', phase } satisfies LockResponse),
+      { existingPassword: request.existingPassword === true });
     const bytes = output.buffer as ArrayBuffer;
     workerScope.postMessage({ type: 'done', bytes } satisfies LockResponse, [bytes]);
   } catch (error) {

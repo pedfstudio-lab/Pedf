@@ -46,7 +46,7 @@ describe('HighPal brand', () => {
   it('tells search engines where the pages are, without the hidden tool', () => {
     expect(readFileSync(resolve('public/robots.txt'), 'utf8')).toContain(`Sitemap: ${SITE}/sitemap.xml`);
     const sitemap = readFileSync(resolve('public/sitemap.xml'), 'utf8');
-    for (const page of ['/', '/app', '/tools', '/tools/merge', '/tools/sign', '/privacy', '/terms', '/support']) {
+    for (const page of ['/', '/app', '/tools', '/tools/merge', '/tools/sign', '/tools/unlock', '/privacy', '/terms', '/support']) {
       expect(sitemap).toContain(`<loc>${SITE}${page}</loc>`);
     }
     expect(sitemap).not.toContain('/tools/copy');

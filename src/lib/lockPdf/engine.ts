@@ -1,12 +1,13 @@
 import createModule from '@neslinesli93/qpdf-wasm';
 import { EncryptedPDFError, PDFDict, PDFDocument, PDFName } from 'pdf-lib';
-import { passwordProblem } from './password';
-import { LockPdfError, MAX_LOCK_BYTES, type LockProgress } from './protocol';
+import { existingPasswordProblem, passwordProblem } from './password';
+import { LockPdfError, MAX_LOCK_BYTES, type LockOptions, type LockProgress } from './protocol';
 
 /** Runs in a disposable worker. No document/password reaches a server or a log. */
 export async function encryptPdfBytes(bytes: Uint8Array, password: string, wasmLocation: string,
-  progress?: (phase: LockProgress) => void): Promise<Uint8Array> {
-  if (passwordProblem(password, password)) throw new LockPdfError('password');
+  progress?: (phase: LockProgress) => void, options: LockOptions = {}): Promise<Uint8Array> {
+  const problem = options.existingPassword ? existingPasswordProblem(password) : passwordProblem(password, password);
+  if (problem) throw new LockPdfError('password');
   if (!bytes.length || bytes.length > MAX_LOCK_BYTES) throw new LockPdfError('invalid');
   if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new LockPdfError('unsupported');
   progress?.('checking');

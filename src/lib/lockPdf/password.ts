@@ -8,3 +8,13 @@ export function passwordProblem(password: string, confirmation: string): string 
   }
   if (password !== confirmation) return 'The passwords do not match.';
 }
+
+/**
+ * Putting a file's own password back after editing (bank PDFs often use 4–6 digits).
+ * The length rule above is for choosing a new password, so it doesn't apply here.
+ */
+export function existingPasswordProblem(password: string): string | undefined {
+  if (!password) return 'Set a password to lock your PDF.';
+  if (new TextEncoder().encode(password).length > 127) return 'This password is too long. Use at most 127 UTF-8 bytes.';
+  if (/\p{Cc}/u.test(password)) return 'Use ordinary letters, numbers and symbols, without invisible or special formatting characters.';
+}

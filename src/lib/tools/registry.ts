@@ -2,7 +2,7 @@ import type { ToolDefinition } from './types';
 
 const roadmap = [
   'merge', 'split', 'jpg-to-pdf', 'pdf-to-jpg', 'rotate', 'organize',
-  'page-numbers', 'watermark', 'repair', 'sign', 'compress', 'lock',
+  'page-numbers', 'watermark', 'repair', 'sign', 'compress', 'lock', 'unlock',
 ];
 const tools = new Map<string, ToolDefinition>();
 
