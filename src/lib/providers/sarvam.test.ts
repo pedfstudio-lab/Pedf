@@ -1,7 +1,47 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderConfig } from './config';
 import { NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
-import { base64ToBytes, SarvamProvider, sarvamUnavailableMessage, TRANSLATION_KEY_MESSAGE } from './sarvam';
+import { base64ToBytes, CONTENT_FILTER_MESSAGE, SarvamProvider, sarvamUnavailableMessage, TRANSLATION_FILTER_MESSAGE, TRANSLATION_KEY_MESSAGE } from './sarvam';
+
+describe("Sarvam's content filter and look-alike maths letters", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const refused = () => jsonResponse({ error: {
+    message: 'Your request was rejected because the input contains content that violates our content policy.', code: 'content_filter',
+  } }, 400);
+
+  it('sends plain letters for Ask, so maths PDFs are not refused (the PDF itself is untouched)', async () => {
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => jsonResponse({ choices: [{ message: { content: 'Engineers cannot be athletes [Page 21].' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new SarvamProvider(directConfig()).discuss({ question: 'Explain 𝐴 → 𝐵', documentText: '[Page 21]\n𝐸𝑛𝑔𝑖𝑛𝑒𝑒𝑟𝑠 ⊂ 𝐺𝑟𝑎𝑑𝑢𝑎𝑡𝑒𝑠 ∩ 𝐴𝑡ℎ𝑙𝑒𝑡𝑒𝑠 = ∅' });
+    const sent = JSON.stringify(JSON.parse(String(fetchMock.mock.calls[0]![1].body)).messages);
+    expect(sent).toContain('Engineers ⊂ Graduates ∩ Athletes = ∅');
+    expect(sent).toContain('Explain A → B');
+    expect(sent).not.toMatch(/[\u{1D400}-\u{1D7FF}ℎ]/u);
+  });
+
+  it('shows a friendly message instead of the raw 400 when the filter still refuses', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => refused()));
+    await expect(new SarvamProvider(directConfig()).discuss(input)).rejects.toThrow(CONTENT_FILTER_MESSAGE);
+    await expect(new SarvamProvider(directConfig()).discuss(input)).rejects.not.toThrow(/400|content policy/);
+  });
+
+  it('translates plain letters, and says so plainly if the filter refuses', async () => {
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => jsonResponse({ translated_text: 'इंजीनियर' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new SarvamProvider(directConfig()).translate({ text: '𝐸𝑛𝑔𝑖𝑛𝑒𝑒𝑟𝑠', to: 'hi-IN' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body)).input).toBe('Engineers');
+
+    vi.stubGlobal('fetch', vi.fn(async () => refused()));
+    await expect(new SarvamProvider(directConfig()).translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow(TRANSLATION_FILTER_MESSAGE);
+  });
+
+  it('reads plain letters aloud', async () => {
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => jsonResponse({ audios: ['AA=='] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new SarvamProvider(directConfig()).speak({ text: '𝐴 → 𝐵', language: 'en-IN' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body)).text).toBe('A → B');
+  });
+});
 
 describe('SarvamProvider.translate', () => {
   afterEach(() => vi.unstubAllGlobals());

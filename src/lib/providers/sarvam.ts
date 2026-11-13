@@ -3,6 +3,7 @@ import type { ProviderConfig } from './config';
 import { providerConfig } from './config';
 import { buildDiscussMessages, NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
 import { NotImplementedError } from './errors';
+import { toPlainLetters } from './plainLetters';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
 import type {
   AudioChunkHandler,
@@ -34,6 +35,9 @@ export const TRANSLATE_MODEL = 'sarvam-translate:v1';
 export const TRANSLATE_MAX_CHARS = 2000;
 /** Shown when the site's Sarvam route can't translate at all right now (not set up, out of credits, refused). */
 export const TRANSLATION_KEY_MESSAGE = "Translation isn't available right now. Please try again later.";
+/** Sarvam's content filter refused the text: say so plainly instead of showing its raw 400 message. */
+export const CONTENT_FILTER_MESSAGE = "Sarvam's safety filter wouldn't answer about this part of the PDF. Try asking about a different part, or in different words.";
+export const TRANSLATION_FILTER_MESSAGE = "Sarvam's safety filter wouldn't translate this part of the PDF.";
 
 /**
  * Plain words for the statuses the site's Sarvam route returns when it can't help: too many
@@ -65,7 +69,7 @@ interface SarvamChatResponse {
   readonly choices?: readonly {
     readonly message?: { readonly content?: unknown };
   }[];
-  readonly error?: { readonly message?: unknown };
+  readonly error?: { readonly message?: unknown; readonly code?: unknown };
 }
 
 interface SarvamChatStreamChunk {
@@ -171,14 +175,21 @@ function bytesToBase64(bytes: Uint8Array<ArrayBuffer>): string {
   return btoa(binary);
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+/** Sarvam's error message, and whether it was its content filter refusing the input. */
+async function readErrorDetail(response: Response): Promise<{ message: string; contentFilter: boolean }> {
   try {
     const payload = await response.json() as SarvamChatResponse;
-    if (typeof payload.error?.message === 'string') return payload.error.message;
+    const message = typeof payload.error?.message === 'string' ? payload.error.message : undefined;
+    const contentFilter = payload.error?.code === 'content_filter' || /content policy/i.test(message ?? '');
+    return { message: message ?? (response.statusText || 'request failed'), contentFilter };
   } catch {
     // The status code still provides a useful error if the body is not JSON.
+    return { message: response.statusText || 'request failed', contentFilter: false };
   }
-  return response.statusText || 'request failed';
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  return (await readErrorDetail(response)).message;
 }
 
 /** Decode Sarvam's OpenAI-compatible SSE chat stream and return the assembled answer. */
@@ -265,7 +276,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
       headers,
       body: JSON.stringify({
         model: CHAT_MODEL,
-        messages,
+        messages: messages.map((message) => ({ ...message, content: toPlainLetters(message.content) })),
         temperature: 0.2,
         max_tokens: maxTokens,
         ...(stream ? { stream: true } : {}),
@@ -273,8 +284,9 @@ export class SarvamProvider implements ProviderWithCapabilities {
     });
 
     if (!response.ok) {
-      const detail = await readErrorMessage(response);
-      throw new Error(sarvamUnavailableMessage(response.status) ?? `Sarvam request failed (${response.status}): ${detail}`);
+      const detail = await readErrorDetail(response);
+      if (detail.contentFilter) throw new Error(CONTENT_FILTER_MESSAGE);
+      throw new Error(sarvamUnavailableMessage(response.status) ?? `Sarvam request failed (${response.status}): ${detail.message}`);
     }
 
     let rawAnswer: unknown;
@@ -307,25 +319,28 @@ export class SarvamProvider implements ProviderWithCapabilities {
   async translate(input: TranslateInput): Promise<TextResult> {
     const key = this.config.getSarvamKey().trim();
     if (this.config.mode === 'direct' && !key) throw new Error(TRANSLATION_KEY_MESSAGE);
-    if ([...input.text].length > TRANSLATE_MAX_CHARS) throw new Error('Translation text exceeds the 2,000-character limit.');
-    if (!input.text.trim()) return { text: input.text, provider: this.name };
+    const text = toPlainLetters(input.text);
+    if ([...text].length > TRANSLATE_MAX_CHARS) throw new Error('Translation text exceeds the 2,000-character limit.');
+    if (!text.trim()) return { text: input.text, provider: this.name };
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
     // Never forward upstream error bodies or fetch errors: they can echo credentials.
     try {
       const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/translate'), {
         method: 'POST', headers, signal: input.signal,
-        body: JSON.stringify({ input: input.text, source_language_code: input.from ?? 'en-IN',
+        body: JSON.stringify({ input: text, source_language_code: input.from ?? 'en-IN',
           target_language_code: input.to, model: TRANSLATE_MODEL, numerals_format: 'international' }),
       });
       if ([401, 402, 403, 503].includes(response.status) && this.config.mode === 'proxy') throw new Error(TRANSLATION_KEY_MESSAGE);
+      // Only whether it was the content filter is read from the body; the body itself is never shown.
+      if (response.status === 400 && (await readErrorDetail(response)).contentFilter) throw new Error(TRANSLATION_FILTER_MESSAGE);
       if (!response.ok) throw new Error(`Translation request failed (${response.status}).`);
       const payload = await response.json() as { translated_text?: unknown };
       if (typeof payload.translated_text !== 'string' || !payload.translated_text.trim()) throw new Error('Translation returned no text.');
       return { text: payload.translated_text, provider: this.name };
     } catch (error) {
       if (input.signal?.aborted) throw new DOMException('Translation stopped.', 'AbortError');
-      if (error instanceof Error && (error.message === TRANSLATION_KEY_MESSAGE
+      if (error instanceof Error && (error.message === TRANSLATION_KEY_MESSAGE || error.message === TRANSLATION_FILTER_MESSAGE
         || /^Translation (request failed \(\d+\)\.|returned no text\.)$/.test(error.message))) throw error;
       throw new Error('Translation is unavailable. Check your connection and try again.');
     }
@@ -350,7 +365,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        text: input.text.slice(0, TTS_MAX_CHARS),
+        text: toPlainLetters(input.text).slice(0, TTS_MAX_CHARS),
         target_language_code: input.language,
         model: TTS_MODEL,
         speaker: input.voice ?? TTS_SPEAKER,
@@ -446,7 +461,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
           }));
           socket.send(JSON.stringify({
             type: 'text',
-            data: { text: input.text.slice(0, TTS_MAX_CHARS) },
+            data: { text: toPlainLetters(input.text).slice(0, TTS_MAX_CHARS) },
           }));
           socket.send(JSON.stringify({ type: 'flush' }));
         } catch (error) {
