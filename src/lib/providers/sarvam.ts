@@ -2,6 +2,7 @@ import { SARVAM_STT_STREAM_PATH, SARVAM_TTS_STREAM_PATH, STT_REALTIME_MODEL, STT
 import type { ProviderConfig } from './config';
 import { providerConfig } from './config';
 import { buildDiscussMessages, NOT_IN_DOCUMENT_MARKER } from './discussPrompt';
+import { HumanCheckError } from '@/lib/turnstile/pass';
 import { NotImplementedError } from './errors';
 import { toPlainLetters } from './plainLetters';
 import type { ProviderMethod, ProviderWithCapabilities } from './providerTypes';
@@ -195,6 +196,46 @@ async function readErrorMessage(response: Response): Promise<string> {
   return (await readErrorDetail(response)).message;
 }
 
+/**
+ * A realtime transcription session that opens only after the human check passes. Audio pushed
+ * before then is queued and sent as soon as the real session exists; a failed check is
+ * reported like any other stream failure.
+ */
+function deferredTranscribeSession(
+  access: Promise<void>,
+  open: () => TranscribeStreamSession,
+  input: TranscribeStreamInput,
+): TranscribeStreamSession {
+  let inner: TranscribeStreamSession | undefined;
+  let closed = false;
+  const queued: Uint8Array<ArrayBuffer>[] = [];
+  const opened = access.then(() => {
+    if (closed) throw abortError();
+    inner = open();
+    for (const audio of queued.splice(0)) inner.pushAudio(audio);
+    return inner;
+  });
+  void opened.catch((error: unknown) => {
+    if (!closed) input.onError?.(error);
+  });
+  const ready = opened.then((session) => session.ready);
+  void ready.catch(() => undefined);
+  return {
+    ready,
+    pushAudio: (audio) => {
+      if (closed) return;
+      if (inner) inner.pushAudio(audio);
+      else queued.push(audio.slice());
+    },
+    finish: () => opened.then((session) => session.finish()),
+    close: () => {
+      closed = true;
+      queued.length = 0;
+      inner?.close();
+    },
+  };
+}
+
 /** Decode Sarvam's OpenAI-compatible SSE chat stream and return the assembled answer. */
 export async function readChatCompletionStream(
   response: Response,
@@ -260,6 +301,22 @@ export class SarvamProvider implements ProviderWithCapabilities {
     return SARVAM_METHODS.has(method);
   }
 
+  /** A one-off request through the site's route: human-check pass first, one fresh check if it expired. */
+  private async sarvamFetch(path: string, init: RequestInit): Promise<Response> {
+    await this.config.ensureAccess?.();
+    const url = joinUrl(this.config.sarvamBaseUrl, path);
+    const response = await fetch(url, init);
+    if (response.status !== 401 || !this.config.ensureAccess) return response;
+    const code = await response.clone().json().then(
+      (body: { error?: { code?: unknown } }) => body.error?.code,
+      () => undefined,
+    );
+    if (code !== 'pass_required') return response;
+    this.config.resetAccess?.();
+    await this.config.ensureAccess();
+    return fetch(url, init);
+  }
+
   private async requestChatCompletion(
     messages: readonly ChatMessage[],
     maxTokens: number,
@@ -274,7 +331,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
 
     const stream = typeof onTextDelta === 'function';
-    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/v1/chat/completions'), {
+    const response = await this.sarvamFetch('/v1/chat/completions', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -329,7 +386,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
     // Never forward upstream error bodies or fetch errors: they can echo credentials.
     try {
-      const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/translate'), {
+      const response = await this.sarvamFetch('/translate', {
         method: 'POST', headers, signal: input.signal,
         body: JSON.stringify({ input: text, source_language_code: input.from ?? 'en-IN',
           target_language_code: input.to, model: TRANSLATE_MODEL, numerals_format: 'international' }),
@@ -343,6 +400,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
       return { text: payload.translated_text, provider: this.name };
     } catch (error) {
       if (input.signal?.aborted) throw new DOMException('Translation stopped.', 'AbortError');
+      if (error instanceof HumanCheckError) throw error;
       if (error instanceof Error && (error.message === TRANSLATION_KEY_MESSAGE || error.message === TRANSLATION_FILTER_MESSAGE
         || /^Translation (request failed \(\d+\)\.|returned no text\.)$/.test(error.message))) throw error;
       throw new Error('Translation is unavailable. Check your connection and try again.');
@@ -364,7 +422,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
 
-    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/text-to-speech'), {
+    const response = await this.sarvamFetch('/text-to-speech', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -404,6 +462,11 @@ export class SarvamProvider implements ProviderWithCapabilities {
       throw new Error('Add your Sarvam API key in Settings before playing audio.');
     }
     if (signal?.aborted) throw abortError();
+    // The live connection sends the human-check pass cookie with its handshake.
+    if (this.config.ensureAccess) {
+      await this.config.ensureAccess();
+      if (signal?.aborted) throw abortError();
+    }
 
     await new Promise<void>((resolve, reject) => {
       let socket: WebSocket;
@@ -518,8 +581,18 @@ export class SarvamProvider implements ProviderWithCapabilities {
     });
   }
 
-  /** Open a persistent Saaras realtime session and accept 16 kHz mono PCM frames. */
+  /**
+   * Open a persistent Saaras realtime session and accept 16 kHz mono PCM frames. With a human
+   * check, the connection opens once the check passes; audio spoken meanwhile is kept and sent.
+   */
   transcribeStream(input: TranscribeStreamInput = {}): TranscribeStreamSession {
+    const ensureAccess = this.config.ensureAccess;
+    if (!ensureAccess) return this.openTranscribeStream(input);
+    if (input.signal?.aborted) throw abortError();
+    return deferredTranscribeSession(ensureAccess(), () => this.openTranscribeStream(input), input);
+  }
+
+  private openTranscribeStream(input: TranscribeStreamInput): TranscribeStreamSession {
     const key = this.config.getSarvamKey().trim();
     if (this.config.mode === 'direct' && key === '') {
       throw new Error('Add your Sarvam API key in Settings before using the mic.');
@@ -758,7 +831,7 @@ export class SarvamProvider implements ProviderWithCapabilities {
     const headers: Record<string, string> = {};
     if (this.config.mode === 'direct') headers['api-subscription-key'] = key;
 
-    const response = await fetch(joinUrl(this.config.sarvamBaseUrl, '/speech-to-text'), {
+    const response = await this.sarvamFetch('/speech-to-text', {
       method: 'POST',
       headers,
       body: form,

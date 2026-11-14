@@ -17,6 +17,10 @@ describe('Privacy page', () => {
     expect(page).toContain('without cookies');
     expect(page).toContain('never sees your PDFs');
     expect(page).toContain('There are no accounts');
+    // The human check in front of the AI features, and its pass cookie.
+    expect(page).toContain('Cloudflare Turnstile checks that you\'re a person');
+    expect(page).toContain('security-only pass for 30 minutes');
+    expect(page).toContain('Turnstile never sees your PDFs');
   });
 });
 

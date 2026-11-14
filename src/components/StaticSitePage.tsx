@@ -17,6 +17,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
           <h1>Your PDF stays yours.</h1>
           <p>HighPal processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
           <p>When you use chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent, through HighPal's server, to Sarvam AI. HighPal does not store them.</p>
+          <p>The first time you use chat, voice or Translate in a visit, Cloudflare Turnstile checks that you're a person and not a bot, so HighPal's AI can't be misused. If you pass, your browser keeps a security-only pass for 30 minutes. It isn't used for tracking, and Turnstile never sees your PDFs.</p>
           <p>There are no accounts. You stay in control of the original file and the edited copy you download.</p>
           <p>To see how many people visit and which pages they use, HighPal uses Cloudflare Web Analytics. It counts visits without cookies and does not track you across other sites. It never sees your PDFs or anything you type.</p>
         </main>

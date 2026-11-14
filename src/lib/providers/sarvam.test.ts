@@ -706,6 +706,102 @@ describe('SarvamProvider.transcribeStream', () => {
   });
 });
 
+describe('the human check (Turnstile pass) before every Sarvam request', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const proxyConfig = (ensureAccess: () => Promise<void>, resetAccess = vi.fn()): ProviderConfig => ({
+    mode: 'proxy', sarvamBaseUrl: '/api/sarvam', getSarvamKey: () => '', ensureAccess, resetAccess,
+  });
+  const passRequired = () => jsonResponse({ error: { message: 'Please confirm you are a person first.', code: 'pass_required' } }, 401);
+
+  it('runs the check before Ask, Translate, read-aloud and batch transcription reach the route', async () => {
+    const order: string[] = [];
+    const ensureAccess = vi.fn(async () => { order.push('check'); });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      order.push(`fetch ${url}`);
+      if (url.endsWith('/translate')) return jsonResponse({ translated_text: 'नमस्ते' });
+      if (url.endsWith('/text-to-speech')) return jsonResponse({ audios: ['AA=='] });
+      if (url.endsWith('/speech-to-text')) return jsonResponse({ transcript: 'hello' });
+      return jsonResponse({ choices: [{ message: { content: 'Check-in is at 3 PM [Page 1].' } }] });
+    }));
+    const provider = new SarvamProvider(proxyConfig(ensureAccess));
+    await provider.discuss(input);
+    await provider.translate({ text: 'Hello', to: 'hi-IN' });
+    await provider.speak({ text: 'Hello', language: 'en-IN' });
+    await provider.transcribe({ audio: new Blob(['x'], { type: 'audio/webm' }) });
+    expect(order).toEqual([
+      'check', 'fetch /api/sarvam/v1/chat/completions',
+      'check', 'fetch /api/sarvam/translate',
+      'check', 'fetch /api/sarvam/text-to-speech',
+      'check', 'fetch /api/sarvam/speech-to-text',
+    ]);
+  });
+
+  it('checks once more and retries when the route says the pass expired', async () => {
+    const ensureAccess = vi.fn(async () => undefined);
+    const resetAccess = vi.fn();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(passRequired())
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: 'Check-in is at 3 PM [Page 1].' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new SarvamProvider(proxyConfig(ensureAccess, resetAccess)).discuss(input);
+    expect(result.answer).toBe('Check-in is at 3 PM [Page 1].');
+    expect(resetAccess).toHaveBeenCalledOnce();
+    expect(ensureAccess).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the check\'s own plain message when it fails, in Ask and in Translate', async () => {
+    const { HumanCheckError, HUMAN_CHECK_FAILED } = await import('@/lib/turnstile/pass');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new SarvamProvider(proxyConfig(async () => { throw new HumanCheckError(); }));
+    await expect(provider.discuss(input)).rejects.toThrow(HUMAN_CHECK_FAILED);
+    await expect(provider.translate({ text: 'Hello', to: 'hi-IN' })).rejects.toThrow(HUMAN_CHECK_FAILED);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('opens live speech only after the check passes', async () => {
+    let pass!: () => void;
+    const ensureAccess = vi.fn(() => new Promise<void>((resolve) => { pass = resolve; }));
+    const socket = new FakeWebSocket();
+    const factory = vi.fn(() => socket as unknown as WebSocket);
+    const speaking = new SarvamProvider(proxyConfig(ensureAccess), factory).speakStream({ text: 'Hello', language: 'en-IN' }, () => undefined);
+    await Promise.resolve();
+    expect(factory).not.toHaveBeenCalled();
+    pass();
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledOnce());
+    socket.open();
+    socket.message({ type: 'event', data: { event_type: 'final' } });
+    await speaking;
+  });
+
+  it('opens live listening after the check passes, keeping audio spoken meanwhile', async () => {
+    let pass!: () => void;
+    const ensureAccess = vi.fn(() => new Promise<void>((resolve) => { pass = resolve; }));
+    const socket = new FakeWebSocket();
+    const factory = vi.fn(() => socket as unknown as WebSocket);
+    const session = new SarvamProvider(proxyConfig(ensureAccess), factory).transcribeStream({ language: 'hi-IN' });
+    session.pushAudio(new Uint8Array([1, 2, 3, 4]));
+    expect(factory).not.toHaveBeenCalled();
+    pass();
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledOnce());
+    socket.open();
+    await session.ready;
+    expect(socket.sent.map((message) => JSON.parse(message).event)).toEqual(['speech_start', 'audio_input']);
+    session.close();
+  });
+
+  it('reports a failed check on live listening like any other failure, without opening a connection', async () => {
+    const { HumanCheckError } = await import('@/lib/turnstile/pass');
+    const onError = vi.fn();
+    const factory = vi.fn();
+    const session = new SarvamProvider(proxyConfig(async () => { throw new HumanCheckError(); }), factory).transcribeStream({ onError });
+    await expect(session.ready).rejects.toMatchObject({ name: 'HumanCheckError' });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ name: 'HumanCheckError' }));
+    expect(factory).not.toHaveBeenCalled();
+  });
+});
+
 describe('SarvamProvider.transcribe', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

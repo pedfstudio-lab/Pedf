@@ -10,7 +10,7 @@ import {
   type SocketTimers,
 } from './sarvamSocket';
 
-const LIVE = 'https://pedf.pedf-studio.workers.dev';
+const LIVE = 'https://highpal.ai';
 const STT = 'speech-to-text-realtime/ws?language_code=hi-IN&model=saaras%3Av3-realtime&stream_type=fast&mode=transcribe&endpointing=manual&encoding=linear16&sample_rate=16000';
 const TTS = 'text-to-speech/ws?model=bulbul%3Av3&send_completion_event=true';
 
