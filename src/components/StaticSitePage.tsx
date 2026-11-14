@@ -17,7 +17,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
           <h1>Your PDF stays yours.</h1>
           <p>HighPal processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
           <p>When you use chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent, through HighPal's server, to Sarvam AI. HighPal does not store them.</p>
-          <p>The first time you use chat, voice or Translate in a visit, Cloudflare Turnstile checks that you're a person and not a bot, so HighPal's AI can't be misused. If you pass, your browser keeps a security-only pass for 30 minutes. It isn't used for tracking, and Turnstile never sees your PDFs.</p>
+          <p>The first time you use chat, voice or Translate in a visit, Cloudflare Turnstile checks that you're a person and not a bot, so HighPal's AI can't be misused. To do this, Cloudflare sees technical details such as your internet address and browser. If you pass, your browser keeps a security-only pass for 30 minutes. It isn't used for tracking, and Turnstile never sees your PDFs or questions.</p>
           <p>There are no accounts. You stay in control of the original file and the edited copy you download.</p>
           <p>To see how many people visit and which pages they use, HighPal uses Cloudflare Web Analytics. It counts visits without cookies and does not track you across other sites. It never sees your PDFs or anything you type.</p>
         </main>
@@ -43,7 +43,7 @@ export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
           <p>Your PDFs stay yours. HighPal opens, edits and saves them in your browser, on your device; we don’t upload or store them. Saved files live only in that browser. Clearing browser data, using a private window, or losing your device can remove them, so keep your own copies of anything important.</p>
 
           <h2>4. AI features (Ask, voice, Conversation, Translate)</h2>
-          <p>These are powered by Sarvam AI. When you use them, your question, your voice recording, and the PDF text needed to answer or translate are sent through HighPal’s server to Sarvam AI (see our <a href={siteHref('/privacy')}>Privacy page</a>). AI answers and translations can be wrong or incomplete. They are general help, not legal, medical, financial or other professional advice, so check anything important against the original document or a qualified person. To keep things fair for everyone, we limit how often the AI features can be used and may change those limits.</p>
+          <p>These are powered by Sarvam AI. When you use them, your question, your voice recording, and the PDF text needed to answer or translate are sent through HighPal’s server to Sarvam AI (see our <a href={siteHref('/privacy')}>Privacy page</a>). AI answers and translations can be wrong or incomplete. They are general help, not legal, medical, financial or other professional advice, so check anything important against the original document or a qualified person. To keep things fair for everyone, we limit how often the AI features can be used and may change those limits. Before you use them, a quick automatic check (Cloudflare Turnstile) may confirm you’re a person and not a bot. If the check can’t confirm this, the AI features may be unavailable, but editing and the PDF tools keep working.</p>
 
           <h2>5. Using HighPal responsibly</h2>
           <p>You must not use HighPal to:</p>

@@ -20,7 +20,9 @@ describe('Privacy page', () => {
     // The human check in front of the AI features, and its pass cookie.
     expect(page).toContain('Cloudflare Turnstile checks that you\'re a person');
     expect(page).toContain('security-only pass for 30 minutes');
-    expect(page).toContain('Turnstile never sees your PDFs');
+    expect(page).toContain('Turnstile never sees your PDFs or questions');
+    // Cloudflare's Turnstile dashboard shows visitors' internet addresses, so the page says so.
+    expect(page).toContain('Cloudflare sees technical details such as your internet address and browser');
   });
 });
 
@@ -39,6 +41,8 @@ describe('Terms page', () => {
     // The clauses that matter most for a PDF editor with AI features.
     expect(page).toContain('forge, falsify or alter documents');
     expect(page).toContain('AI answers and translations can be wrong');
+    expect(page).toContain('a quick automatic check (Cloudflare Turnstile) may confirm you’re a person');
+    expect(page).toContain('editing and the PDF tools keep working');
     expect(page).toContain('nothing will be charged without your agreement');
     expect(page).toContain('courts at Alwar, Rajasthan');
     expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(13);
