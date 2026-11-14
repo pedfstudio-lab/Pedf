@@ -2,8 +2,8 @@
 export const HIGHPAL_TURNSTILE_SITE_KEY = '0x4AAAAAAGAwaK-1YDGjmFPR';
 
 /**
- * Cloudflare's official test keys, for the local dev server (the real key only works on
- * highpal.ai). Try each case with ?turnstile=pass | interactive | fail in the address bar.
+ * Cloudflare's official test keys, for this computer (the real key only works on highpal.ai).
+ * Try each case with ?turnstile=pass | interactive | fail in the address bar.
  * https://developers.cloudflare.com/turnstile/troubleshooting/testing/
  */
 export const TEST_SITE_KEYS = {
@@ -26,6 +26,18 @@ function testMode(): TestMode {
   }
 }
 
+/** Where the real key works (the widget's hostnames in Cloudflare). */
+const LIVE_HOSTNAMES = new Set(['highpal.ai', 'www.highpal.ai']);
+
+/**
+ * The real key on highpal.ai; Cloudflare's test keys anywhere else (the dev server, or the
+ * finished build previewed on this computer), because the real key refuses other addresses.
+ * Test tokens are useless against the live site: its secret rejects them.
+ */
+export function siteKeyFor(hostname: string, mode: TestMode): string {
+  return LIVE_HOSTNAMES.has(hostname) ? HIGHPAL_TURNSTILE_SITE_KEY : TEST_SITE_KEYS[mode];
+}
+
 export function turnstileSiteKey(): string {
-  return import.meta.env.DEV ? TEST_SITE_KEYS[testMode()] : HIGHPAL_TURNSTILE_SITE_KEY;
+  return siteKeyFor(window.location.hostname, testMode());
 }

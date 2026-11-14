@@ -1,5 +1,6 @@
 import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
 import type { AudioChunkHandler, SpeakInput, SpeakResult } from '@/lib/providers/types';
+import { devInfo } from '@/lib/util/devLog';
 import { playSpeechBlob, prepareSpeechStream, speakWithBrowser } from './speakAnswer';
 import type { PreparedSpeechStream, StartSpeechStream, StopSpeech } from './speakAnswer';
 
@@ -128,7 +129,7 @@ export function createSpeechQueue(options: SpeechQueueOptions = {}): SpeechQueue
   const prepareStream = options.prepareStream ?? prepareSpeechStream;
   const speakBrowser = options.speakBrowser ?? speakWithBrowser;
   const now = options.now ?? (() => globalThis.performance?.now() ?? Date.now());
-  const logTiming = options.logTiming ?? ((message) => console.info(message));
+  const logTiming = options.logTiming ?? ((message) => devInfo(message));
   const onError = options.onError ?? (() => undefined);
 
   let generation = 0;

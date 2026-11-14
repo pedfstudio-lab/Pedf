@@ -129,6 +129,26 @@ describe('Opening a password-protected PDF', () => {
     expect(mocks.lockPdf).toHaveBeenCalledWith(new Uint8Array([7, 7]), '1234', expect.any(AbortSignal), undefined, { existingPassword: true });
   });
 
+  it('refuses a PDF over 200 MB with a clear message instead of crashing the tab', async () => {
+    const huge = new File(['%PDF-1.7'], 'Huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(huge, 'size', { value: 201 * 1024 * 1024 });
+    setPendingFile(huge);
+    render(<App />);
+    expect(await screen.findByText(/larger than 200 MB/)).toBeTruthy();
+    expect(mocks.loadDocument).not.toHaveBeenCalled();
+  });
+
+  it('shows plain words, not a library error, when Download fails', async () => {
+    mocks.loadDocument.mockResolvedValue(loaded());
+    mocks.exportPdf.mockRejectedValue(new Error('Expected instance of PDFDict, but got instance of undefined'));
+    setPendingFile(new File(['%PDF-1.7'], 'Plain.pdf', { type: 'application/pdf' }));
+    render(<App />);
+    await screen.findByText('Plain.pdf');
+    fireEvent.click(screen.getByRole('button', { name: /Download PDF/ }));
+    expect(await screen.findByText(/Your PDF couldn't be saved this time/)).toBeTruthy();
+    expect(screen.queryByText(/PDFDict/)).toBeNull();
+  });
+
   it('says so, instead of downloading without the password, when it cannot be put back', async () => {
     mocks.loadDocument.mockImplementation(async (_source: unknown, options?: { password?: string }) => {
       if (!options?.password) throw new PdfPasswordError('needed');

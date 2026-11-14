@@ -7,6 +7,9 @@ import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/provider
 import { fingerprintDocumentText, recentChatHistory } from '@/lib/providers/chatHistory';
 import { NOT_IN_DOCUMENT_MARKER } from '@/lib/providers/discussPrompt';
 import {
+  CONVERSATION_CLOSE_FAILED_MESSAGE, friendlyAiError, PLAYBACK_FAILED_MESSAGE, VOICE_FAILED_MESSAGE,
+} from '@/lib/providers/friendlyErrors';
+import {
   MAX_BRIDGING_FILLERS,
   preloadAcknowledgments,
   preloadBridgingAcknowledgments,
@@ -31,6 +34,7 @@ import type {
   ConversationTranscriptionFactory,
 } from '@/lib/speech/conversationSession';
 import { startRecording } from '@/lib/speech/recordQuestion';
+import { devInfo } from '@/lib/util/devLog';
 import type { Recording } from '@/lib/speech/recordQuestion';
 import {
   chunkSentences,
@@ -84,6 +88,9 @@ interface VoicePlaybackState {
 const ACKNOWLEDGMENT_PLAYBACK_ID = -1;
 export const ENDPOINT_SILENCE_MS = 1_500;
 
+/** A question is sent to Sarvam with the PDF text; a huge paste would only burn credits. */
+const MAX_QUESTION_CHARS = 2000;
+
 function readableError(error: unknown): string {
   if (error instanceof AggregateError) {
     const cause = error.errors.find((item): item is Error => item instanceof Error);
@@ -105,7 +112,7 @@ function microphoneError(error: unknown): string {
   if (/empty (recording|transcript)|didn.t catch/i.test(message)) {
     return "Didn't catch that — try again.";
   }
-  return message;
+  return friendlyAiError(error, VOICE_FAILED_MESSAGE);
 }
 
 export function PdfChat({ open, doc, onClose }: PdfChatProps) {
@@ -125,7 +132,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   if (!speechQueue.current) {
     speechQueue.current = createSpeechQueue({
       onError: (caught) => {
-        setError(`Speech playback is unavailable: ${readableError(caught)}`);
+        setError(friendlyAiError(caught, PLAYBACK_FAILED_MESSAGE));
       },
     });
   }
@@ -187,7 +194,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
       await activeSession.stop();
     } catch (caught) {
       if (conversationRequest.current === request) {
-        setError(`Could not close conversation mode: ${readableError(caught)}`);
+        setError(friendlyAiError(caught, CONVERSATION_CLOSE_FAILED_MESSAGE));
       }
     }
   }, [stopPlayback, updateConversationPhase]);
@@ -393,7 +400,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   };
 
   const ask = async (questionText: string, options: AskOptions) => {
-    const nextQuestion = questionText.trim();
+    const nextQuestion = questionText.trim().slice(0, MAX_QUESTION_CHARS);
     if (!doc || !nextQuestion || thinking) return;
     if (!options.spoken) stopPlayback();
     const request = askRequest.current + 1;
@@ -464,7 +471,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
           if (spokenText === '') continue;
           sentenceCount += 1;
           if (sentenceCount === 1) {
-            console.info(
+            devInfo(
               `[voice timing] request ${streamingVoiceState.voiceRequest} LLM first sentence: ${Math.round(performance.now() - llmStartedAt)} ms`,
             );
           }
@@ -482,7 +489,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
           ? (delta) => {
             if (firstTextDeltaAt === null) {
               firstTextDeltaAt = performance.now();
-              console.info(
+              devInfo(
                 `[voice timing] request ${options.voiceRequest ?? 'unknown'} LLM first token: ${Math.round(firstTextDeltaAt - llmStartedAt)} ms`,
               );
             }
@@ -495,7 +502,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
         enqueueSpeechChunks(speechChunkAccumulator.flush());
       }
       if (options.spoken) {
-        console.info(
+        devInfo(
           `[voice timing] request ${options.voiceRequest ?? 'unknown'} LLM: ${Math.round(performance.now() - llmStartedAt)} ms`,
         );
       }
@@ -536,7 +543,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
     } catch (caught) {
       if (askRequest.current === request) {
         if (options.spoken) stopPlayback();
-        setError(readableError(caught));
+        setError(friendlyAiError(caught));
         options.onVoiceComplete?.();
       }
     } finally {
@@ -593,14 +600,14 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
       if (micRequest.current !== request) return;
       let transcript = recorded.streamingTranscript?.trim() ?? '';
       if (transcript !== '') {
-        console.info(
+        devInfo(
           `[voice timing] request ${request} realtime STT final after stop: ${Math.round(performance.now() - stoppedAt)} ms`,
         );
       } else {
         const sttStartedAt = performance.now();
         const result = await defaultProviders().transcribe({ audio: recorded.audio });
         transcript = result.text.trim();
-        console.info(
+        devInfo(
           `[voice timing] request ${request} batch STT fallback: ${Math.round(performance.now() - sttStartedAt)} ms`,
         );
       }
@@ -960,6 +967,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
               <textarea
                 id="pdf-chat-question"
                 rows={2}
+                maxLength={MAX_QUESTION_CHARS}
                 value={conversationActive ? liveTranscript : question}
                 onChange={(event) => {
                   if (!conversationActive) setQuestion(event.target.value);

@@ -92,7 +92,9 @@ describe('landing PDF handoff to the editor', () => {
     const broken = new File(['%PDF-1.7 broken'], 'broken.pdf', { type: 'application/pdf' });
 
     fireEvent.change(input, { target: { files: [broken] } });
-    expect(await screen.findByText('Failed to load PDF document.')).toBeTruthy();
+    // Plain words, never the PDF library's technical message.
+    expect(await screen.findByText("This file couldn't be opened. It may be damaged or not a real PDF.")).toBeTruthy();
+    expect(screen.queryByText('Failed to load PDF document.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Try Repair PDF' }));
 
     expect(window.location.pathname).toBe('/tools/repair');

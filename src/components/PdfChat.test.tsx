@@ -141,6 +141,16 @@ function expectHiddenNotes() {
   expect(document.body.textContent).not.toContain(EDITED_DOCUMENT_RULE);
 }
 
+describe('PdfChat question length', () => {
+  it('limits a question to 2,000 characters, so a huge paste cannot burn Sarvam credits', async () => {
+    mount();
+    const box = screen.getByRole('textbox', { name: 'Ask a question about this PDF' }) as HTMLTextAreaElement;
+    expect(box.maxLength).toBe(2000);
+    await typeQuestion('x'.repeat(5000));
+    expect((mocks.discuss.mock.calls[0]?.[0] as DiscussInput).question).toHaveLength(2000);
+  });
+});
+
 describe('PdfChat current context', () => {
   it('sends committed edits, then the original after Undo, without reopening chat', async () => {
     mount();

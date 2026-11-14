@@ -9,12 +9,25 @@ const CSS_FAMILIES = {
   mono: '"Courier New", Courier, monospace',
 } as const;
 
+/**
+ * A font name from a PDF can contain anything, including characters that would end a CSS rule
+ * and start another (`;`, `{`, `(` …), so a crafted PDF could add its own styles. Keep only what
+ * a font-family list needs.
+ */
+export function safeCssFontList(name: string): string {
+  return name.replace(/[;{}()<>\\"'`\r\n]/g, '').replace(/\s+/g, ' ').trim() || 'sans-serif';
+}
+
+/** A value inside a CSS "…" string: escape what could close it. */
+export function cssStringContent(value: string): string {
+  return value.replace(/[\r\n]/g, '').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+}
+
 export function textFontFamily(style: TextStyle, text?: string): string {
   const fallback = CSS_FAMILIES[classifyFontFamily(style.fontName)];
   const matched = `"${matchedCssFamily(style)}", ${fallback}`;
   if (!style.fontRef || (text !== undefined && !canUseSourceWord(text, style))) return matched;
-  const embedded = style.fontRef.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  return `"${embedded}", ${matched}`;
+  return `"${cssStringContent(style.fontRef)}", ${matched}`;
 }
 
 export function textStyleToCanvasFont(style: TextStyle, text?: string): string {

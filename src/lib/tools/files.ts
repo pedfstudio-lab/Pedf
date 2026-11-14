@@ -1,4 +1,5 @@
 import { isPdf } from '@/lib/site/pdfFile';
+import { MAX_PDF_BYTES, PDF_TOO_LARGE_MESSAGE } from '@/lib/userMessages';
 import type { ToolDefinition } from './types';
 
 export const HEIC_GUIDANCE = 'Convert HEIC to JPG on your phone first.';
@@ -22,6 +23,7 @@ export function acceptAttribute(accepts: ToolDefinition['accepts']): string {
 
 export function validateFiles(files: File[], tool: Pick<ToolDefinition, 'accepts' | 'multiple'>): string | undefined {
   if (!tool.multiple && files.length > 1) return 'Choose one file at a time.';
+  if (files.some((file) => isPdf(file) && file.size > MAX_PDF_BYTES)) return PDF_TOO_LARGE_MESSAGE;
   if (tool.accepts !== 'pdf' && files.some(isHeicFile)) return HEIC_GUIDANCE;
   const valid = files.every((file) => tool.accepts === 'pdf' ? isPdf(file)
     : tool.accepts === 'image' ? isImage(file) : isPdf(file) || isImage(file));

@@ -10,6 +10,8 @@ import { SignatureModal } from './components/sign/SignatureModal';
 import { loadDocument } from './lib/pdf/loadDocument';
 import type { LoadedDocument } from './lib/pdf/loadDocument';
 import { PdfPasswordError } from './lib/pdf/passwordError';
+import { isUserFacingError, ToolError } from './lib/tools/errors';
+import { EXPORT_FAILED_MESSAGE, MAX_PDF_BYTES, OPEN_FAILED_MESSAGE, PDF_TOO_LARGE_MESSAGE } from './lib/userMessages';
 import { UnlockPdfError } from './lib/unlockPdf/protocol';
 import { pdfToViewport } from './lib/export/coordinates';
 import { exportPdf } from './lib/export/exportPdf';
@@ -161,7 +163,7 @@ async function relockWithPassword(bytes: Uint8Array, password: string): Promise<
   try {
     return await lockPdf(bytes, password, new AbortController().signal, undefined, { existingPassword: true });
   } catch {
-    throw new Error('Couldn\'t put the password back on this PDF. Untick "Keep the password" to download it without one.');
+    throw new ToolError('Couldn\'t put the password back on this PDF. Untick "Keep the password" to download it without one.');
   }
 }
 
@@ -552,6 +554,11 @@ function EditorApp() {
   const open = useCallback(async (source: File | ArrayBuffer, name: string, password?: string): Promise<boolean> => {
     setError(null);
     setRepairFile(null);
+    if ((source instanceof File ? source.size : source.byteLength) > MAX_PDF_BYTES) {
+      setPasswordPrompt(null);
+      setError(PDF_TOO_LARGE_MESSAGE);
+      return false;
+    }
     let loaded: LoadedDocument;
     try {
       loaded = password ? await loadDocument(source, { password }) : await loadDocument(source);
@@ -568,7 +575,7 @@ function EditorApp() {
         return false;
       }
       setPasswordPrompt(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof UnlockPdfError ? e.message : OPEN_FAILED_MESSAGE);
       // Repair can't help a file that only failed to unlock.
       if (source instanceof File && !(e instanceof UnlockPdfError)) setRepairFile(source);
       return false;
@@ -673,7 +680,7 @@ function EditorApp() {
       setDownloadReady({ url, name: downloadName });
       setWarnings(result.warnings);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(isUserFacingError(caught) ? caught.message : EXPORT_FAILED_MESSAGE);
     } finally {
       setExporting(false);
     }

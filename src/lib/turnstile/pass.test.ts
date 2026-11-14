@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TurnstileApi } from './pass';
-import { TEST_SITE_KEYS } from './siteKey';
+import { HIGHPAL_TURNSTILE_SITE_KEY, siteKeyFor, TEST_SITE_KEYS } from './siteKey';
 
 type Options = Parameters<TurnstileApi['render']>[1];
 
@@ -120,6 +120,14 @@ describe('the human check before Ask, voice and Translate', () => {
     script!.dispatchEvent(new Event('load'));
     (await widget()).callback('token');
     await checking;
+  });
+
+  it('uses the real key only on highpal.ai, and Cloudflare\'s test keys anywhere else', () => {
+    expect(siteKeyFor('highpal.ai', 'fail')).toBe(HIGHPAL_TURNSTILE_SITE_KEY);
+    expect(siteKeyFor('www.highpal.ai', 'interactive')).toBe(HIGHPAL_TURNSTILE_SITE_KEY);
+    expect(siteKeyFor('127.0.0.1', 'pass')).toBe(TEST_SITE_KEYS.pass);
+    expect(siteKeyFor('localhost', 'fail')).toBe(TEST_SITE_KEYS.fail);
+    expect(siteKeyFor('copycat.example', 'pass')).toBe(TEST_SITE_KEYS.pass);
   });
 
   it('uses the tick-box and bot test keys when asked to on the dev server', async () => {

@@ -1,4 +1,5 @@
 import { imageMimeType } from '@/lib/images/imageFile';
+import { ToolError } from '@/lib/tools/errors';
 import type { ImageEdit } from '../types';
 import type { EditHandler } from '../registry';
 
@@ -6,7 +7,7 @@ import type { EditHandler } from '../registry';
 export const drawImage: EditHandler<ImageEdit> = async (edit, context) => {
   const mime = imageMimeType(edit.bytes);
   if (!mime) {
-    throw new Error('Unsupported image format. Choose a PNG or JPEG file.');
+    throw new ToolError('Unsupported image format. Choose a PNG or JPEG file.');
   }
   const embedded = mime === 'image/png'
     ? await context.pdf.embedPng(edit.bytes)

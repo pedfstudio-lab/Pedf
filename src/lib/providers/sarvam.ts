@@ -45,10 +45,12 @@ export const TRANSLATION_FILTER_MESSAGE = "Sarvam's safety filter wouldn't trans
  * requests from this visitor (its rate limit or Sarvam's), or no service (route not set up,
  * credits used up, request refused). Other failures keep their technical detail.
  */
+export const RATE_LIMITED_MESSAGE = 'Too many requests right now. Wait a minute and try again.';
+export const SERVICE_UNAVAILABLE_MESSAGE = "This isn't available right now. Please try again later.";
 export function sarvamUnavailableMessage(status: number): string | undefined {
-  if (status === 429) return 'Too many requests right now. Wait a minute and try again.';
+  if (status === 429) return RATE_LIMITED_MESSAGE;
   // 404/405: the route is missing (e.g. the live site before it was deployed), never a raw code.
-  if ([401, 402, 403, 404, 405, 503].includes(status)) return "This isn't available right now. Please try again later.";
+  if ([401, 402, 403, 404, 405, 503].includes(status)) return SERVICE_UNAVAILABLE_MESSAGE;
   return undefined;
 }
 const CHAT_MAX_TOKENS = 600;

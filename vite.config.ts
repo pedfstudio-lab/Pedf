@@ -55,43 +55,62 @@ function nodeRoute(prefix: string, handle: (request: Request) => Promise<Respons
  * Cloudflare's test keys (live connections, /…/ws, are not checked locally).
  */
 function localSarvamRoute(): Plugin {
+  const mountRoutes = (middlewares: { use(path: string, handler: (request: IncomingMessage, response: ServerResponse) => void): unknown }) => {
+    middlewares.use('/api/pass', nodeRoute('/api/pass', (request) => handlePassRequest(request, {
+      secret: localTurnstileSecret(),
+      clientIp,
+      secureCookie: false,
+    })));
+    middlewares.use('/api/sarvam/', nodeRoute('/api/sarvam', async (request) => {
+      if (!await hasValidPass(request, localTurnstileSecret())) return passRequired();
+      return handleSarvamProxy(request, { apiKey: localSarvamKey() });
+    }));
+  };
   return {
     name: 'pedf-local-sarvam-route',
-    configureServer(server) {
-      server.middlewares.use('/api/pass', nodeRoute('/api/pass', (request) => handlePassRequest(request, {
-        secret: localTurnstileSecret(),
-        clientIp,
-        secureCookie: false,
-      })));
-      server.middlewares.use('/api/sarvam/', nodeRoute('/api/sarvam', async (request) => {
-        if (!await hasValidPass(request, localTurnstileSecret())) return passRequired();
-        return handleSarvamProxy(request, { apiKey: localSarvamKey() });
-      }));
-    },
+    configureServer: (server) => mountRoutes(server.middlewares),
+    // `vite preview` serves the finished build, so the live site's safety rules can be tried here.
+    configurePreviewServer: (server) => mountRoutes(server.middlewares),
   };
 }
+
+/** The live site's safety rules (public/_headers), so `vite preview` behaves like highpal.ai. */
+function liveSiteHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  try {
+    const file = readFileSync(new URL('./public/_headers', import.meta.url), 'utf8');
+    for (const line of file.split(/\r?\n/)) {
+      const match = line.match(/^\s+([A-Za-z-]+):\s*(.+)$/);
+      if (match) headers[match[1]!] = match[2]!.trim();
+    }
+  } catch {
+    // No rules file: preview without them.
+  }
+  return headers;
+}
+
+// Live connections (Conversation, spoken answers): the local server adds the key from
+// .dev.vars in a header, like the live site's route. The browser never holds it.
+const liveConnections = {
+  '^/api/sarvam/(?:text-to-speech|speech-to-text-realtime)/ws': {
+    target: 'wss://api.sarvam.ai',
+    ws: true,
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/api\/sarvam/, ''),
+    configure: (proxy: { on(event: 'proxyReqWs', listener: (request: { setHeader(name: string, value: string): void; removeHeader(name: string): void }) => void): void }) => {
+      proxy.on('proxyReqWs', (proxyRequest) => {
+        proxyRequest.setHeader('api-subscription-key', localSarvamKey());
+        proxyRequest.removeHeader('origin');
+      });
+    },
+  },
+};
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), localSarvamRoute()],
-  server: {
-    proxy: {
-      // Live connections (Conversation, spoken answers): the dev server adds the key from
-      // .dev.vars in a header, like the live site's route. The browser never holds it.
-      '^/api/sarvam/(?:text-to-speech|speech-to-text-realtime)/ws': {
-        target: 'wss://api.sarvam.ai',
-        ws: true,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/sarvam/, ''),
-        configure: (proxy) => {
-          proxy.on('proxyReqWs', (proxyRequest) => {
-            proxyRequest.setHeader('api-subscription-key', localSarvamKey());
-            proxyRequest.removeHeader('origin');
-          });
-        },
-      },
-    },
-  },
+  server: { proxy: liveConnections },
+  preview: { proxy: liveConnections, headers: liveSiteHeaders() },
   // Root-domain hosting: keep asset URLs absolute for deep links such as /app/.
   base: '/',
   resolve: {

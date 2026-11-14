@@ -1,4 +1,5 @@
 import type { TranscribeStreamSession } from '@/lib/providers/types';
+import { devInfo } from '@/lib/util/devLog';
 
 export interface RecordedQuestion {
   /** Browser-encoded audio retained for the batch STT fallback. */
@@ -242,7 +243,7 @@ export async function startRecording(options: RecordingOptions = {}): Promise<Re
     } catch (error) {
       realtimeSession?.close();
       realtimeSession = undefined;
-      console.info('[voice timing] realtime STT unavailable; retaining batch fallback.', error);
+      devInfo('[voice timing] realtime STT unavailable; retaining batch fallback.', error);
     }
   }
 
@@ -284,7 +285,7 @@ export async function startRecording(options: RecordingOptions = {}): Promise<Re
       return result.text.trim() || undefined;
     } catch (error) {
       realtimeSession.close();
-      console.info('[voice timing] realtime STT failed; using batch fallback.', error);
+      devInfo('[voice timing] realtime STT failed; using batch fallback.', error);
       return undefined;
     }
   };

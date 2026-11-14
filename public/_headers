@@ -1,0 +1,16 @@
+# Browser safety rules for every page and file of highpal.ai (Cloudflare reads this file;
+# it is not served). Checked by src/securityHeaders.test.ts.
+#
+# Content-Security-Policy: only HighPal's own code may run, plus Cloudflare's human check
+# (challenges.cloudflare.com) and visitor counter (static.cloudflareinsights.com). Nothing may
+# be sent anywhere except HighPal itself and those two. 'wasm-unsafe-eval' lets the PDF lock and
+# unlock engine (WebAssembly) run; plain JavaScript eval stays blocked. frame-ancestors 'none':
+# no other website may show HighPal inside itself (clickjacking).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob: https://challenges.cloudflare.com https://cloudflareinsights.com wss://highpal.ai wss://www.highpal.ai; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=(), bluetooth=(), magnetometer=(), gyroscope=(), accelerometer=()
+  Cross-Origin-Opener-Policy: same-origin

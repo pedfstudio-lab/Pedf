@@ -3,7 +3,7 @@ import {
   alignParagraphLayouts, breakStartsLine, continuationParagraph, hasRootParagraphText, readParagraphLayout, ZERO_PARAGRAPH,
 } from './paragraphDom';
 import type { TextBlock, TextRun } from '@/lib/pdf/textContent';
-import { textFontFamily } from './textStyleCss';
+import { cssStringContent, safeCssFontList, textFontFamily } from './textStyleCss';
 import { canUseSourceWord } from '@/lib/fonts/fontMatch';
 import { fallbackWordRanges, locateFragments, overlapsFallback } from '@/lib/fonts/wordFonts';
 
@@ -415,8 +415,8 @@ function escapeAttribute(text: string): string {
 function cssFontFamily(span: TextSpan, baseStyle: TextStyle): string | undefined {
   if (baseStyle.fontIdentity || span.fontIdentity) return textFontFamily(effectiveTextSpanStyle(baseStyle, span), span.text);
   if (!span.fontName && !span.fontRef) return undefined;
-  const family = span.fontName ?? baseStyle.fontName;
-  return span.fontRef ? `"${span.fontRef.replace(/"/g, '\\"')}", ${family}` : family;
+  const family = safeCssFontList(span.fontName ?? baseStyle.fontName);
+  return span.fontRef ? `"${cssStringContent(span.fontRef)}", ${family}` : family;
 }
 
 function colorCss(color: Rgb): string {

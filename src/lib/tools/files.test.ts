@@ -16,6 +16,12 @@ describe('tool input validation', () => {
     expect(validateFiles([pdf, pdf], { accepts: 'pdf', multiple: false })).toBe('Choose one file at a time.');
   });
 
+  it('refuses PDFs over 200 MB before trying to read them', () => {
+    const huge = new File(['pdf'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(huge, 'size', { value: 201 * 1024 * 1024 });
+    expect(validateFiles([pdf, huge], { accepts: 'pdf', multiple: true })).toMatch(/larger than 200 MB/);
+  });
+
   it('gives HEIC users conversion guidance', () => {
     const heic = new File(['heic'], 'phone-photo.HEIC', { type: 'image/heic' });
     expect(validateFiles([heic], { accepts: 'image', multiple: true })).toBe(HEIC_GUIDANCE);
