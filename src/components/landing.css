@@ -629,6 +629,34 @@
   font-size: 0.93rem;
 }
 
+.site-static h2 {
+  margin: 44px 0 12px;
+  color: var(--color-site-ink);
+  font-size: 1.3rem;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.site-static > ul {
+  margin: 0 0 22px;
+  padding-left: 1.4rem;
+  list-style: disc;
+  color: var(--color-site-body);
+  font-size: 1.1rem;
+  line-height: 1.75;
+}
+
+.site-static > ul li + li {
+  margin-top: 6px;
+}
+
+.site-static > p a {
+  color: var(--color-site-brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 
 @media (max-width: 1000px) {
   .site-nav__links {
