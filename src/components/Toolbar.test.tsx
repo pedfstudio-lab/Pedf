@@ -12,7 +12,7 @@ describe('Toolbar signature action', () => {
     const props = {
       onOpen: vi.fn(), editMode: false, textAddMode: false, imageMode: false, hasEdits: false, exporting: false,
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(), onEditModeChange: vi.fn(),
-      onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(), onOpenSign: openSign, onOpenChat: vi.fn(),
+      onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(), onOpenSign: openSign, onOpenTalk: vi.fn(), onOpenChat: vi.fn(),
       onOpenSettings: vi.fn(), onPeekChange: vi.fn(), onExport: vi.fn(),
       saveStatus: 'idle' as const, savedAt: undefined, onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
@@ -34,7 +34,7 @@ describe('Toolbar signature action', () => {
           savedFilesOpen onToggleSavedFiles={vi.fn()}
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
-          onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
+          onOpenSign={vi.fn()} onOpenTalk={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
           onPeekChange={vi.fn()} onExport={vi.fn()} onSave={onSave} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
@@ -54,7 +54,7 @@ describe('Toolbar signature action', () => {
       imageMode: false, hasEdits: false, exporting: false, saveStatus: 'saved' as const,
       savedAt: Date.now(), zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
-      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenTalk: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
       onExport: vi.fn(), onSave, onSaveAndClose, onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
     };
@@ -82,7 +82,7 @@ describe('Toolbar signature action', () => {
           savedFilesOpen onToggleSavedFiles={vi.fn()}
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
-          onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
+          onOpenSign={vi.fn()} onOpenTalk={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
           onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
@@ -99,7 +99,7 @@ describe('Toolbar signature action', () => {
           savedFilesOpen onToggleSavedFiles={vi.fn()}
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
-          onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
+          onOpenSign={vi.fn()} onOpenTalk={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
           onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
@@ -119,7 +119,7 @@ describe('Toolbar signature action', () => {
           savedFilesOpen onToggleSavedFiles={vi.fn()}
           zoom={1} zoomIn={vi.fn()} zoomOut={vi.fn()} zoomReset={vi.fn()}
           onEditModeChange={vi.fn()} onTextAddModeChange={vi.fn()} onImageModeChange={vi.fn()}
-          onOpenSign={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
+          onOpenSign={vi.fn()} onOpenTalk={vi.fn()} onOpenChat={vi.fn()} onOpenSettings={vi.fn()}
           onPeekChange={vi.fn()} onExport={vi.fn()} onSave={vi.fn()} onSaveAndClose={vi.fn()} onHome={vi.fn()}
         />
       </EditsStoreProvider>,
@@ -134,7 +134,7 @@ describe('Toolbar signature action', () => {
       imageMode: false, hasEdits: false, exporting: false, saveStatus: 'idle' as const,
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
-      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenTalk: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
       onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: true, onToggleSavedFiles,
     };
@@ -158,7 +158,7 @@ describe('Toolbar signature action', () => {
       imageMode: false, hasEdits: true, exporting: false, saveStatus: 'saved' as const, savedAt: Date.now() - 3 * 60_000,
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
-      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenTalk: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
       onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: false, onToggleSavedFiles: vi.fn(),
     });
@@ -170,6 +170,23 @@ describe('Toolbar signature action', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
       expect(click).toHaveBeenCalledOnce();
       expect(input.tabIndex).toBe(-1);
+    });
+
+    it('puts marigold Talk and Chat just left of Translate, with no emoji anywhere', () => {
+      const p = props();
+      const { container } = render(<EditsStoreProvider><Toolbar {...p} /></EditsStoreProvider>);
+      const talk = screen.getByRole('button', { name: 'Talk' });
+      const chat = screen.getByRole('button', { name: 'Chat' });
+      // Translate (shown when the app supplies translation) is rendered right after them in the same group.
+      expect([...talk.parentElement!.children]).toEqual([talk, chat]);
+      expect(talk.parentElement!.className).toContain('ml-auto');
+      for (const button of [talk, chat]) expect(button.className).toContain('bg-accent');
+      fireEvent.click(talk);
+      fireEvent.click(chat);
+      expect(p.onOpenTalk).toHaveBeenCalledOnce();
+      expect(p.onOpenChat).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('button', { name: /Ask/ })).toBeNull();
+      expect(container.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
     it('names the download "Download PDF"', () => {
@@ -201,14 +218,14 @@ describe('Toolbar signature action', () => {
       imageMode: false, hasEdits: true, exporting: false, saveStatus: 'idle' as const,
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
-      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenTalk: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
       onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose: vi.fn(), onHome: vi.fn(),
       savedFilesOpen: false, onToggleSavedFiles: vi.fn(), phoneLayout: true,
     });
 
-    it('shows one row: the logo, Ask, Download PDF and a ☰ for everything else', () => {
+    it('shows one row: the logo, Talk, Chat, Download PDF and a ☰ for everything else', () => {
       render(<EditsStoreProvider><Toolbar {...phoneProps()} /></EditsStoreProvider>);
-      for (const name of ['HighPal', '💬 Ask', 'Download PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
+      for (const name of ['HighPal', 'Talk', 'Chat', 'Download PDF']) expect(screen.getByRole('button', { name })).toBeTruthy();
       const more = screen.getByRole('button', { name: 'More tools' });
       expect(more.getAttribute('aria-expanded')).toBe('false');
       expect(screen.queryByRole('button', { name: 'Edit text' })).toBeNull();
@@ -262,7 +279,7 @@ describe('Toolbar signature action', () => {
       imageMode: false, hasEdits: true, exporting: false, saveStatus: 'saved' as const,
       zoom: 1, zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn(),
       onEditModeChange: vi.fn(), onTextAddModeChange: vi.fn(), onImageModeChange: vi.fn(),
-      onOpenSign: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
+      onOpenSign: vi.fn(), onOpenTalk: vi.fn(), onOpenChat: vi.fn(), onOpenSettings: vi.fn(), onPeekChange: vi.fn(),
       onExport: vi.fn(), onSave: vi.fn(), onSaveAndClose, onHome,
       savedFilesOpen: true, onToggleSavedFiles: vi.fn(),
     };

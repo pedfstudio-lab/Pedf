@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { acceptAttribute } from '@/lib/tools/files';
 import type { ToolDefinition } from '@/lib/tools/types';
+import { ToolIcon } from './ToolIcon';
 
 export function ToolDropZone({ tool, onFiles, disabled }: {
   tool: ToolDefinition;
@@ -25,7 +26,7 @@ export function ToolDropZone({ tool, onFiles, disabled }: {
         setDragging(false);
         if (!disabled) onFiles(Array.from(event.dataTransfer.files));
       }}>
-      <span className="tool-icon" aria-hidden="true">↑</span>
+      <span className="tool-icon" aria-hidden="true"><ToolIcon name="upload" /></span>
       <strong>Drop {tool.multiple ? `${kind} files` : `a ${kind} file`} here</strong>
       <span>or click to choose {tool.multiple ? 'files' : 'a file'}</span>
     </button>

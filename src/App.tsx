@@ -3,6 +3,8 @@ import type { RefObject } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { PdfChat } from './components/PdfChat';
+import type { PdfChatMode } from './components/PdfChat';
+import { LockIcon } from './components/LineIcons';
 import { PdfViewer } from './components/PdfViewer';
 import { PdfDropZone } from './components/PdfDropZone';
 import { PdfPasswordDialog } from './components/PdfPasswordDialog';
@@ -295,6 +297,7 @@ function EditorApp() {
   const [exporting, setExporting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatMode, setChatMode] = useState<PdfChatMode>('chat');
   const [signOpen, setSignOpen] = useState(false);
   const [signPage, setSignPage] = useState(0);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -887,8 +890,14 @@ function EditorApp() {
           }
         }}
         onOpenSign={openSign}
+        onOpenTalk={() => {
+          setSettingsOpen(false);
+          setChatMode('talk');
+          setChatOpen(true);
+        }}
         onOpenChat={() => {
           setSettingsOpen(false);
+          setChatMode('chat');
           setChatOpen(true);
         }}
         onTranslate={() => { setEditMode(false); setTextAddMode(false); setImageMode(false); }}
@@ -906,7 +915,7 @@ function EditorApp() {
       <TranslationPrivacyNote />
       {openedWithPassword && (
         <aside className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-brand-100 bg-brand-50 px-3 py-1.5 text-xs text-brand-950">
-          <span><span aria-hidden="true">🔒 </span>This PDF was opened with its password.</span>
+          <span className="inline-flex items-center gap-1.5"><LockIcon className="h-3.5 w-3.5 shrink-0" />This PDF was opened with its password.</span>
           <label className="flex items-center gap-1.5 font-medium">
             <input type="checkbox" checked={keepPassword} onChange={(event) => setKeepPasswordFor(event.target.checked ? document?.loaded ?? null : null)} />
             Keep the password on the downloaded PDF
@@ -935,6 +944,7 @@ function EditorApp() {
       <SignatureModal open={signOpen} pageCount={pagePlan.length} currentPage={signPage} onClose={closeSign} onDone={addSignature} />
       <PdfChat
         open={chatOpen}
+        mode={chatMode}
         doc={document?.loaded.doc ?? null}
         onClose={() => setChatOpen(false)}
       />

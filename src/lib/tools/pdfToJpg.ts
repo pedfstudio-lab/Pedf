@@ -159,5 +159,5 @@ export const pdfToJpgTool: ToolDefinition = {
   slug: 'pdf-to-jpg', title: 'PDF to JPG',
   description: 'Turn every page, or the pages you choose, into JPG or PNG images.',
   accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_PDF_TO_JPG_OPTIONS,
-  Options: PdfToJpgOptions, icon: '▣', run,
+  Options: PdfToJpgOptions, run,
 };

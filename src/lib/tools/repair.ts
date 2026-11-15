@@ -392,7 +392,6 @@ export const repairTool: ToolDefinition = {
   multiple: false,
   defaultOptions: DEFAULT_REPAIR_OPTIONS,
   Options: RepairOptions,
-  icon: '✚',
   previewFailureText: 'No preview. See the file check below.',
   canRun: (options, inputs) => repairProblem(options, inputs),
   run,

@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType } from 'react';
 
 export interface ToolOutput {
   name: string;
@@ -37,7 +37,6 @@ export interface ToolDefinition {
   defaultOptions: ToolOptions;
   /** Clear secrets from UI options as soon as processing starts; never persist them. */
   sensitiveOptions?: boolean;
-  icon?: ReactNode;
   /**
    * Shown in the file card when its thumbnail cannot be drawn (default: the reading error, in red). Repair uses a
    * calm hint instead, because damaged files are expected there and its own file check explains them.

@@ -168,6 +168,5 @@ export const watermarkTool: ToolDefinition = {
   defaultOptions: DEFAULT_WATERMARK_OPTIONS,
   canRun: (options) => watermarkProblem(options),
   Options: WatermarkOptions,
-  icon: '◈',
   run,
 };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DOCUMENT_PASSWORD_FIELD } from '../lib/util/documentPasswordField';
+import { LockIcon } from './LineIcons';
 
 interface PdfPasswordDialogProps {
   fileName: string;
@@ -39,7 +40,7 @@ export function PdfPasswordDialog({ fileName, incorrect, busy, onSubmit, onCance
         className="w-full max-w-md rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl"
       >
         <h2 id="pdf-password-title" className="flex items-center gap-2 text-lg font-semibold text-neutral-900">
-          <span aria-hidden="true">🔒</span> This PDF is password-protected
+          <LockIcon className="h-5 w-5 shrink-0 text-brand-800" /> This PDF is password-protected
         </h2>
         <p className="mt-2 break-words text-sm text-neutral-600">
           Type the password for <em>{fileName}</em> to open it.

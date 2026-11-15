@@ -26,5 +26,5 @@ export async function run(inputs: File[], _options: ToolOptions, ctx: ToolContex
 export const unlockTool: ToolDefinition = {
   slug: 'unlock', title: 'Unlock PDF',
   description: 'Remove the password from a PDF you can open, so it opens without one. You need to know the password.',
-  accepts: 'pdf', multiple: false, defaultOptions: {}, icon: '🔓', run,
+  accepts: 'pdf', multiple: false, defaultOptions: {}, run,
 };

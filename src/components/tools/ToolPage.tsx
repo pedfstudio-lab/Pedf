@@ -11,6 +11,7 @@ import { formatBytes, friendlyError } from '@/lib/tools/pdfIo';
 import type { ToolDefinition, ToolOptions, ToolOutput } from '@/lib/tools/types';
 import { UnlockPdfError } from '@/lib/unlockPdf/protocol';
 import { DOCUMENT_PASSWORD_FIELD } from '@/lib/util/documentPasswordField';
+import { LockIcon } from '../LineIcons';
 import { ToolDropZone } from './ToolDropZone';
 import { ToolFilePreview } from './ToolFilePreview';
 import { useToolMetadata } from './useToolMetadata';
@@ -25,7 +26,7 @@ function LockedFileForm({ fileName, error, busy, onUnlock }: { fileName: string;
   const [password, setPassword] = useState('');
   const unlock = () => { if (password && !busy) onUnlock(password); };
   return <div className="tool-file-password">
-    <label className="lock-field"><span><span aria-hidden="true">🔒 </span>Password for this PDF</span>
+    <label className="lock-field"><span className="lock-field-title"><LockIcon width={16} height={16} />Password for this PDF</span>
       <input {...DOCUMENT_PASSWORD_FIELD} type="password" value={password}
         aria-label={`Password for ${fileName}`} aria-invalid={Boolean(error)} disabled={busy} autoFocus={Boolean(error)}
         onKeyDown={(event) => { if (event.key === 'Enter') unlock(); }}
@@ -221,7 +222,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
               if (from >= 0) reorder(from, index);
               dragged.current = null;
             }}>
-            {locked ? <div className="tool-file-preview"><span className="tool-file-placeholder" aria-hidden="true">🔒</span><span>Locked</span></div>
+            {locked ? <div className="tool-file-preview"><span className="tool-file-placeholder" aria-hidden="true"><LockIcon width={28} height={28} /></span><span>Locked</span></div>
               : <ToolFilePreview file={file} failureText={tool.previewFailureText} />}
             <div className="tool-file-name"><strong title={file.name}>{file.name}</strong><span>{formatBytes(file.size)}</span>
               {locked && <LockedFileForm key={locked.attempt} fileName={file.name} error={locked.error} busy={locked.busy}

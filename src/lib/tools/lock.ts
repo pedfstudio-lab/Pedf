@@ -32,6 +32,6 @@ export async function run(inputs: File[], options: ToolOptions, ctx: ToolContext
 
 export const lockTool: ToolDefinition = {
   slug: 'lock', title: 'Lock PDF', description: 'Set a password so only people you share it with can open your PDF.',
-  accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_LOCK_OPTIONS, Options: LockOptions, icon: '🔒',
+  accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_LOCK_OPTIONS, Options: LockOptions,
   sensitiveOptions: true, canRun: lockProblem, run,
 };

@@ -9,7 +9,9 @@ import type { DiscussInput } from '@/lib/providers/types';
 import type { ConversationCallbacks } from '@/lib/speech/conversationSession';
 import { EditsStoreProvider, useEdits } from '@/state/editsStore';
 import { PrefsStoreProvider } from '@/state/prefsStore';
+import { startConversationSession } from '@/lib/speech/conversationSession';
 import { PdfChat } from './PdfChat';
+import type { PdfChatMode } from './PdfChat';
 import { buildDiscussMessages, EDITED_DOCUMENT_RULE, OUTDATED_ANSWER_NOTE } from '@/lib/providers/discussPrompt';
 
 const mocks = vi.hoisted(() => ({
@@ -79,10 +81,13 @@ const source: TextRun = {
   style: { fontName: 'Helvetica', fontSizePt: 12, bold: false, italic: false, color: { r: 0, g: 0, b: 0 } },
 };
 
-function Harness({ doc }: { readonly doc: PDFDocumentProxy }) {
+function Harness({ doc, initialMode }: { readonly doc: PDFDocumentProxy; readonly initialMode: PdfChatMode }) {
   const { addEdits, updateEdit, resetDocument, undo } = useEdits();
   const [currentDoc, setCurrentDoc] = useState(doc);
+  const [mode, setMode] = useState(initialMode);
   return <>
+    <button onClick={() => setMode('talk')}>Switch to Talk</button>
+    <button onClick={() => setMode('chat')}>Switch to Chat</button>
     <button onClick={() => resetDocument([{ id: 'page', kind: 'source', sourceIndex: 0 }])}>Open test PDF</button>
     <button onClick={() => addEdits([
       { id: 'cover', kind: 'cover', pageIndex: 0, rect: source.rect, z: 1, sampleBackground: true, replaces: [{ text: source.text, rect: source.rect }] },
@@ -97,13 +102,13 @@ function Harness({ doc }: { readonly doc: PDFDocumentProxy }) {
       setCurrentDoc({ numPages: doc.numPages, getPage: doc.getPage } as unknown as PDFDocumentProxy);
     }}>Open another PDF</button>
     <button onClick={undo}>Undo test edit</button>
-    <PdfChat open doc={currentDoc} onClose={() => undefined} />
+    <PdfChat open mode={mode} doc={currentDoc} onClose={() => undefined} />
   </>;
 }
 
-function mount() {
+function mount(initialMode: PdfChatMode = 'chat') {
   const doc = { numPages: 1, getPage: vi.fn(async () => ({})) } as unknown as PDFDocumentProxy;
-  render(<EditsStoreProvider><PrefsStoreProvider><Harness doc={doc} /></PrefsStoreProvider></EditsStoreProvider>);
+  render(<EditsStoreProvider><PrefsStoreProvider><Harness doc={doc} initialMode={initialMode} /></PrefsStoreProvider></EditsStoreProvider>);
   fireEvent.click(screen.getByRole('button', { name: 'Open test PDF' }));
 }
 
@@ -175,13 +180,16 @@ describe('PdfChat current context', () => {
     expect(mocks.extractTextRuns).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])('push-to-talk sends current text (streaming transcript: %s)', async streaming => {
+  it.each([true, false])('Talk without live speech: tap, speak, tap to send current text (streaming transcript: %s)', async streaming => {
     if (!streaming) mocks.startRecording.mockResolvedValue({ stop: async () => ({ audio: new Blob(['test']) }), cancel: vi.fn() });
+    vi.mocked(startConversationSession).mockRejectedValueOnce(new Error('Live speech is unavailable.'));
     mount();
     await typeQuestion();
     fireEvent.click(screen.getByRole('button', { name: 'Commit price edit' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ask by voice' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop recording question' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Talk' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Tap the mic, speak, then tap again to send.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start talking' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send what I said' }));
     await waitFor(() => expect(mocks.discuss).toHaveBeenCalledTimes(2));
     expect(mocks.discuss.mock.calls[1]?.[0]).toMatchObject({ documentText: '[Page 1]\nFee: Rs. 7,500', language: 'hi-IN', spoken: true,
       history: [{ role: 'user', content: 'What is the fee?' }, { role: 'assistant', content: 'hi-IN: 5,000 [Page 1]', outOfDate: true }] });
@@ -190,11 +198,12 @@ describe('PdfChat current context', () => {
     expectHiddenNotes();
   });
 
-  it('hands-free reads edits made while it is listening, and restarts with the chosen language', async () => {
+  it('Talk reads edits made while it is listening, and restarts in a newly chosen language', async () => {
     mount();
     await typeQuestion();
-    fireEvent.click(screen.getByRole('button', { name: 'Start conversation mode' }));
-    await screen.findByRole('button', { name: 'Open chat' });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Talk' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Listening…'));
+    expect(screen.getByText('What is the fee?').textContent).toBe('You: What is the fee?');
     fireEvent.click(screen.getByRole('button', { name: 'Commit price edit' }));
     await act(async () => {
       mocks.callbacks?.onPartial?.('What is the fee?');
@@ -204,11 +213,12 @@ describe('PdfChat current context', () => {
     expect(mocks.discuss.mock.calls[1]?.[0]).toMatchObject({ documentText: '[Page 1]\nFee: Rs. 7,500', spoken: true, language: 'hi-IN' });
     expect(promptForCall(1)[2]?.content).toContain(OUTDATED_ANSWER_NOTE);
     expect(promptForCall(1).at(-1)?.content).toContain(EDITED_DOCUMENT_RULE);
-    fireEvent.click(screen.getByRole('button', { name: 'Open chat' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Chat answer language' }), { target: { value: 'en-IN' } });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Listening…'));
+    expect(screen.getByText('hi-IN: 7,500 [Page 1]').textContent).toBe('HighPal: hi-IN: 7,500 [Page 1]');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Talk language' }), { target: { value: 'en-IN' } });
     await waitFor(() => expect(mocks.stopConversation).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Start conversation mode' }));
-    await screen.findByRole('button', { name: 'Open chat' });
+    await waitFor(() => expect(startConversationSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Listening…'));
     await act(async () => {
       mocks.callbacks?.onPartial?.('What is the fee?');
       mocks.callbacks?.onSpeechEnd?.();
@@ -218,6 +228,25 @@ describe('PdfChat current context', () => {
     expect(mocks.discuss.mock.calls[2]?.[0].history[3]).not.toHaveProperty('outOfDate');
     expect(mocks.enqueueSpeech.mock.calls.at(-1)?.[1]).toBe('en-IN');
     expectHiddenNotes();
+  });
+
+  it('Talk starts listening when it opens; the mic pauses and resumes; switching to Chat ends the voice', async () => {
+    mount('talk');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Listening…'));
+    expect(startConversationSession).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause talking' }));
+    await waitFor(() => expect(mocks.stopConversation).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('status').textContent).toContain('Paused');
+    fireEvent.click(screen.getByRole('button', { name: 'Start talking' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Listening…'));
+    expect(startConversationSession).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Chat' }));
+    await waitFor(() => expect(mocks.stopConversation).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('dialog', { name: 'Chat with this PDF' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Ask a question about this PDF' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /voice|conversation|record/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 
   it('marks all old answers after each edit, but not the latest-context answer or unchanged repeat', async () => {

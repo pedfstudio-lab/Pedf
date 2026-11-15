@@ -12,6 +12,7 @@
 .tool-card p { color: var(--color-site-body); line-height: 1.6; flex: 1; margin: 0; }
 .tool-card-action { color: var(--color-site-brand-strong); font-weight: 650; margin-top: 10px; }
 .tool-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--color-site-band); color: var(--color-site-brand-strong); font-size: 1.65rem; }
+.tool-icon svg { width: 26px; height: 26px; }
 .tool-drop-zone { width: 100%; min-height: 200px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; background: var(--color-site-surface); border: 2px dashed color-mix(in srgb, var(--color-site-brand) 45%, transparent); border-radius: 22px; padding: 24px; cursor: pointer; }
 .tool-drop-zone strong { font-size: 1.2rem; }
 .tool-drop-zone > span:last-child { color: var(--color-site-body); }
@@ -31,6 +32,8 @@
 .tool-file-password { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 6px; }
 .tool-file-password .lock-field { flex: 1 1 220px; }
 .tool-file-password .lock-field span { font-size: .875rem; color: var(--color-site-ink); }
+.lock-field-title { display: inline-flex; align-items: center; gap: 6px; }
+.tool-file-placeholder svg { color: var(--color-site-brand-strong); }
 .tool-file-password .tool-file-error { flex-basis: 100%; margin: 0; font-size: .875rem; }
 .tool-result-note { margin: 5px 0 0; font-size: .9rem; line-height: 1.5; }
 .tool-result-note-ok { color: var(--color-site-success); }

@@ -203,7 +203,7 @@ describe('Watermark PDF', () => {
     await expect(run([file], invalid, context())).rejects.toThrow('Type the watermark text first.');
     expect(read).not.toHaveBeenCalled();
     expect(watermarkTool.canRun?.(invalid, [file])).toBe('Type the watermark text first.');
-    expect(watermarkTool).toMatchObject({ slug: 'watermark', accepts: 'pdf', multiple: false, icon: '◈' });
+    expect(watermarkTool).toMatchObject({ slug: 'watermark', accepts: 'pdf', multiple: false });
   });
 
   it('stops before reading an input when already aborted', async () => {

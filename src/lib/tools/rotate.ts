@@ -48,5 +48,5 @@ export const rotateTool: ToolDefinition = {
   description: 'Turn pages 90° or 180° — all of them, or only the ones you choose.',
   accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_ROTATE_OPTIONS,
   canRun: (options) => parseRotateOptions(options).turns === 0 ? NO_TURN_ERROR : undefined,
-  Options: RotateOptions, icon: '⟳', run,
+  Options: RotateOptions, run,
 };

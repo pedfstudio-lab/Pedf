@@ -231,5 +231,5 @@ export const jpgToPdfTool: ToolDefinition = {
   slug: 'jpg-to-pdf', title: 'JPG to PDF',
   description: 'Turn JPG, PNG, or WebP images into one PDF, in the order you choose.',
   accepts: 'image', multiple: true, defaultOptions: DEFAULT_JPG_TO_PDF_OPTIONS,
-  Options: JpgToPdfOptions, icon: '▧', run,
+  Options: JpgToPdfOptions, run,
 };

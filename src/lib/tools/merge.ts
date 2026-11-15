@@ -45,5 +45,5 @@ export async function run(inputs: File[], _options: ToolOptions, ctx: ToolContex
 export const mergeTool: ToolDefinition = {
   slug: 'merge', title: 'Merge PDF',
   description: 'Combine two or more PDFs into one, in the order you choose.',
-  accepts: 'pdf', multiple: true, minInputs: 2, defaultOptions: {}, icon: '⊕', run,
+  accepts: 'pdf', multiple: true, minInputs: 2, defaultOptions: {}, run,
 };

@@ -102,6 +102,5 @@ export const signTool: ToolDefinition = {
   defaultOptions: DEFAULT_SIGN_OPTIONS,
   canRun: (options) => signProblem(options),
   Options: SignOptions,
-  icon: '✍',
   run,
 };

@@ -10,6 +10,13 @@
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial,
     "Nirmala UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  /* Talk: a soft glow that grows and shrinks around the mic while HighPal speaks. */
+  --animate-talk-breathe: talk-breathe 1.6s ease-in-out infinite;
+  @keyframes talk-breathe {
+    0%, 100% { transform: scale(0.92); opacity: 0.55; }
+    50% { transform: scale(1.12); opacity: 0.9; }
+  }
 }
 
 /*

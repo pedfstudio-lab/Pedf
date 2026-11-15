@@ -82,5 +82,5 @@ export async function run(inputs: File[], options: ToolOptions, ctx: ToolContext
 export const splitTool: ToolDefinition = {
   slug: 'split', title: 'Split PDF',
   description: 'Extract page ranges or turn each page into a separate PDF.',
-  accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_SPLIT_OPTIONS, Options: SplitOptions, icon: '✂', run,
+  accepts: 'pdf', multiple: false, defaultOptions: DEFAULT_SPLIT_OPTIONS, Options: SplitOptions, run,
 };

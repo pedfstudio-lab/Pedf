@@ -206,9 +206,9 @@ export function OrganizeOptions({ options, onChange, inputs, disabled }: ToolOpt
           </div>
           <div className="organize-actions">
             <button type="button" aria-label={`Move page ${pageNumber} left`} disabled={position === 0}
-              onClick={() => update((plan) => movePage(plan, position, position - 1))}>◀</button>
+              onClick={() => update((plan) => movePage(plan, position, position - 1))}>←</button>
             <button type="button" aria-label={`Move page ${pageNumber} right`} disabled={position === value.plan.length - 1}
-              onClick={() => update((plan) => movePage(plan, position, position + 1))}>▶</button>
+              onClick={() => update((plan) => movePage(plan, position, position + 1))}>→</button>
             <button type="button" aria-label={`Rotate page ${pageNumber} left`}
               onClick={() => update((plan) => rotatePage(plan, position, 'left'))}>↺</button>
             <button type="button" aria-label={`Rotate page ${pageNumber} right`}

@@ -123,5 +123,5 @@ export const organizeTool: ToolDefinition = {
   slug: 'organize', title: 'Organize PDF',
   description: 'Reorder, rotate, delete, duplicate, and add pages — from one PDF or several.',
   accepts: 'pdf', multiple: true, minInputs: 1, defaultOptions: DEFAULT_ORGANIZE_OPTIONS,
-  Options: OrganizeOptions, icon: '⋮⋮', canRun, run,
+  Options: OrganizeOptions, canRun, run,
 };

@@ -7,6 +7,7 @@ import type { SaveStatus } from '@/lib/projects/useProjectAutosave';
 import { savedAgo } from '@/lib/projects/savedTime';
 import { TranslationControls } from './TranslationControls';
 import { HighPalMark } from './HighPalMark';
+import { ChatIcon, MicIcon } from './LineIcons';
 
 interface ToolbarProps {
   onOpen: (file: File) => void;
@@ -21,7 +22,7 @@ interface ToolbarProps {
   savedFilesOpen: boolean;
   /** Brief Ctrl/Cmd+S result shown in place of the quiet autosave status. */
   saveNotice?: 'saved' | 'no-changes';
-  /** A phone-sized screen: one row (logo, Ask, Download PDF) and a ☰ panel with the rest. */
+  /** A phone-sized screen: one row (logo, Talk, Chat, Download PDF) and a ☰ panel with the rest. */
   phoneLayout?: boolean;
   zoom: number;
   zoomIn(): void;
@@ -31,6 +32,9 @@ interface ToolbarProps {
   onTextAddModeChange(enabled: boolean): void;
   onImageModeChange(enabled: boolean): void;
   onOpenSign(): void;
+  /** Talk: a voice conversation with the PDF. */
+  onOpenTalk(): void;
+  /** Chat: type questions about the PDF. */
   onOpenChat(): void;
   onTranslate?(): void;
   onOpenSettings(): void;
@@ -51,6 +55,8 @@ const PLAIN_BUTTON = 'whitespace-nowrap rounded-md border border-neutral-300 bg-
 /** A switched-on mode. Each mode adds its colour, darker on hover so the white text stays readable. */
 const PRESSED_BUTTON = 'whitespace-nowrap rounded-md border border-transparent px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40';
 const ICON_BUTTON = 'w-8 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-base font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40';
+/** Talk and Chat: marigold with forest text (never white on marigold). */
+const AI_BUTTON = 'inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-accent py-1.5 text-sm font-semibold text-brand-900 hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40';
 const MORE_PANEL_ID = 'toolbar-more-tools';
 
 function Divider() {
@@ -88,6 +94,7 @@ export function Toolbar({
   onTextAddModeChange,
   onImageModeChange,
   onOpenSign,
+  onOpenTalk,
   onOpenChat,
   onTranslate,
   onOpenSettings,
@@ -170,7 +177,8 @@ export function Toolbar({
       className={`inline-flex min-w-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded font-semibold tracking-tight text-neutral-900 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${phoneLayout ? 'text-base' : 'shrink-0 text-lg'}`}
     >
       <HighPalMark className={`shrink-0 text-brand-900 ${phoneLayout ? 'h-5 w-5' : 'h-6 w-6'}`} />
-      <span className="truncate">HighPal</span>
+      {/* On a phone the row is full (Talk, Chat, Download PDF): the logo alone, the name for screen readers. */}
+      <span className={phoneLayout ? 'sr-only' : 'truncate'}>HighPal</span>
     </button>
   );
   const fileLabel = fileName && (
@@ -201,8 +209,8 @@ export function Toolbar({
     </div>
   );
   const settingsButton = (
-    <button type="button" onClick={onOpenSettings} aria-label="Settings" className={PLAIN_BUTTON}>
-      ⚙ Settings
+    <button type="button" onClick={onOpenSettings} className={PLAIN_BUTTON}>
+      Settings
     </button>
   );
   const saveAndCloseButton = (
@@ -335,9 +343,19 @@ export function Toolbar({
     </button>
   );
   const peekButton = <HoldToPeek disabled={!hasEdits} onPeekChange={onPeekChange} />;
-  const askButton = (
-    <button type="button" onClick={onOpenChat} disabled={!fileName} className={`shrink-0 ${PLAIN_BUTTON}`}>
-      💬 Ask
+  // Talk and Chat: the two ways to ask the PDF, in marigold so people find them.
+  // Narrower on a phone, so the logo keeps its room in the one-row bar.
+  const aiButtonClass = `${AI_BUTTON} ${phoneLayout ? 'gap-1 px-2' : 'gap-1.5 px-3'}`;
+  const talkButton = (
+    <button type="button" onClick={onOpenTalk} disabled={!fileName} title="Talk with this PDF by voice" className={aiButtonClass}>
+      <MicIcon className="h-4 w-4" />
+      Talk
+    </button>
+  );
+  const chatButton = (
+    <button type="button" onClick={onOpenChat} disabled={!fileName} title="Type questions about this PDF" className={aiButtonClass}>
+      <ChatIcon className="h-4 w-4" />
+      Chat
     </button>
   );
 
@@ -353,7 +371,8 @@ export function Toolbar({
         <div className="flex h-12 items-center gap-1.5 px-3">
           {brand}
           <div className="ml-auto flex items-center gap-1.5">
-            {askButton}
+            {talkButton}
+            {chatButton}
             {exportButton}
             <button
               type="button"
@@ -443,7 +462,8 @@ export function Toolbar({
         {signButton}
         {peekButton}
         <div className="ml-auto flex items-center gap-1.5">
-          {askButton}
+          {talkButton}
+          {chatButton}
           <TranslationControls disabled={!fileName} onTranslate={onTranslate} />
         </div>
       </div>

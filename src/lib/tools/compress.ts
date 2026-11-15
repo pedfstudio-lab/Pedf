@@ -85,7 +85,6 @@ export const compressTool: ToolDefinition = {
   multiple: false,
   defaultOptions: DEFAULT_COMPRESS_OPTIONS,
   Options: CompressOptions,
-  icon: '🗜',
   canRun: (options, inputs) => compressProblem(options, inputs),
   run,
 };

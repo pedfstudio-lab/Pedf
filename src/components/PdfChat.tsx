@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { HandsFreeVoiceOverlay } from '@/components/HandsFreeVoiceOverlay';
+import { TalkMode } from '@/components/TalkMode';
+import type { TalkStatus } from '@/components/TalkMode';
 import { getEditedDocumentText } from '@/lib/pdf/editedDocumentText';
 import { defaultProviders, providerConfig, SarvamProvider } from '@/lib/providers';
 import { fingerprintDocumentText, recentChatHistory } from '@/lib/providers/chatHistory';
@@ -53,8 +54,12 @@ import {
 import type { SupportedLanguageCode } from '@/state/prefsStore';
 import { useEdits } from '@/state/editsStore';
 
+export type PdfChatMode = 'chat' | 'talk';
+
 interface PdfChatProps {
   readonly open: boolean;
+  /** Chat: a typing panel. Talk: a voice conversation with a big mic, the PDF still visible. */
+  readonly mode?: PdfChatMode;
   readonly doc: PDFDocumentProxy | null;
   onClose(): void;
 }
@@ -115,7 +120,7 @@ function microphoneError(error: unknown): string {
   return friendlyAiError(error, VOICE_FAILED_MESSAGE);
 }
 
-export function PdfChat({ open, doc, onClose }: PdfChatProps) {
+export function PdfChat({ open, mode = 'chat', doc, onClose }: PdfChatProps) {
   const { preferredLanguage, setPreferredLanguage } = usePrefs();
   const { edits, pagePlan } = useEdits();
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -127,7 +132,8 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   const [conversationPhase, setConversationPhase] = useState<ConversationPhase>('idle');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [conversationUnavailable, setConversationUnavailable] = useState(false);
-  const [handsFree, setHandsFree] = useState(false);
+  /** The conversation's microphone and live speech are connected (not still starting). */
+  const [conversationLive, setConversationLive] = useState(false);
   const speechQueue = useRef<SpeechQueue | null>(null);
   if (!speechQueue.current) {
     speechQueue.current = createSpeechQueue({
@@ -152,6 +158,9 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   const conversationUserSpeaking = useRef(false);
   const finalizeConversationTurnRef = useRef<() => void>(() => undefined);
   const handleConversationFinalRef = useRef<(text: string) => void>(() => undefined);
+  const beginConversationRef = useRef<() => Promise<void>>(async () => undefined);
+  const talkOpen = useRef(false);
+  talkOpen.current = open && mode === 'talk';
 
   const updateConversationPhase = useCallback((phase: ConversationPhase) => {
     conversationPhaseRef.current = phase;
@@ -186,7 +195,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
     micRequest.current += 1;
     stopPlayback();
     updateConversationPhase('idle');
-    setHandsFree(false);
+    setConversationLive(false);
     setLiveTranscript('');
     setThinking(false);
     if (!activeSession) return;
@@ -219,17 +228,35 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
     }
   }, [cancelRecording, open, stopConversation, stopPlayback]);
 
+  // A new language needs a new live-speech connection: Talk restarts in it straight away.
   useEffect(() => {
     setConversationUnavailable(false);
     if (conversationPhaseRef.current !== 'idle' || conversationSession.current) {
       void stopConversation();
+      if (talkOpen.current) void beginConversationRef.current();
     }
   }, [preferredLanguage, stopConversation]);
 
+  // Chat only reads an answer aloud when asked; switching between Talk and Chat ends any voice.
   useEffect(() => {
-    if (!open) return;
+    stopPlayback();
+    cancelRecording();
+    setError(null);
+    if (conversationPhaseRef.current !== 'idle' || conversationSession.current) {
+      void stopConversation();
+    }
+  }, [cancelRecording, mode, stopConversation, stopPlayback]);
+
+  // Opening Talk starts listening at once (the click on Talk is the person's go-ahead).
+  useEffect(() => {
+    if (!open || mode !== 'talk' || !doc) return;
+    void beginConversationRef.current();
+  }, [doc, mode, open]);
+
+  useEffect(() => {
+    if (!open || mode !== 'talk') return;
     void preloadAcknowledgments(preferredLanguage);
-  }, [open, preferredLanguage]);
+  }, [mode, open, preferredLanguage]);
 
   useEffect(() => () => {
     askRequest.current += 1;
@@ -554,7 +581,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const nextQuestion = question.trim();
-    if (!doc || !nextQuestion || thinking || micState !== 'idle') return;
+    if (!doc || !nextQuestion || thinking) return;
     setQuestion('');
     void ask(nextQuestion, { spoken: false });
   };
@@ -805,7 +832,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
         return;
       }
       conversationSession.current = activeConversation;
-      setHandsFree(true);
+      setConversationLive(true);
     } catch (caught) {
       if (conversationRequest.current !== request) return;
       conversationRequest.current += 1;
@@ -821,20 +848,67 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
     }
   };
 
-  const conversationActive = conversationPhase !== 'idle';
-  const latestAssistantAnswer = [...entries]
-    .reverse()
-    .find((entry) => entry.role === 'assistant')?.text;
+  beginConversationRef.current = beginConversation;
 
-  if (handsFree && conversationActive) {
+  const conversationActive = conversationPhase !== 'idle';
+
+  if (mode === 'talk') {
+    const talkStatus: TalkStatus = conversationActive
+      ? !conversationLive
+        ? 'starting'
+        : conversationPhase === 'listening'
+          ? 'listening'
+          : conversationPhase === 'thinking' || thinking
+            ? 'thinking'
+            : 'speaking'
+      : micState === 'requesting'
+        ? 'starting'
+        : micState === 'recording'
+          ? 'recording'
+          : micState === 'transcribing' || thinking
+            ? 'thinking'
+            : playingId !== null
+              ? 'speaking'
+              : 'paused';
+    // The caption shows the latest question and, once it has arrived, its answer.
+    // While the person speaks, their words as they come replace both.
+    const lastQuestion = [...entries].reverse().find((entry) => entry.role === 'user');
+    const reply = entries.find((entry) => entry.role === 'assistant' && (!lastQuestion || entry.id > lastQuestion.id));
+    const speakingNow = talkStatus === 'listening' && liveTranscript.trim() !== '';
+    const tapMic = () => {
+      if (conversationActive) {
+        void stopConversation();
+        return;
+      }
+      if (micState === 'recording') {
+        void finishRecording();
+        return;
+      }
+      if (micState === 'requesting') {
+        cancelRecording();
+        return;
+      }
+      if (micState === 'transcribing' || thinking || playingId !== null) {
+        askRequest.current += 1;
+        setThinking(false);
+        stopVoicePlayback();
+        return;
+      }
+      if (conversationUnavailable) void beginRecording();
+      else void beginConversation();
+    };
     return (
-      <HandsFreeVoiceOverlay
-        phase={conversationPhase}
-        answer={latestAssistantAnswer}
-        onOpenChat={() => setHandsFree(false)}
-        onStop={() => {
-          void stopConversation();
-        }}
+      <TalkMode
+        status={talkStatus}
+        heard={speakingNow ? liveTranscript : lastQuestion?.text}
+        answer={speakingNow ? undefined : reply?.text}
+        answerIsGeneral={reply?.grounded === false}
+        error={error}
+        handsFree={!conversationUnavailable}
+        language={preferredLanguage}
+        onLanguageChange={setPreferredLanguage}
+        onMicTap={tapMic}
+        onEnd={onClose}
       />
     );
   }
@@ -855,9 +929,9 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
         <header className="border-b border-neutral-200 px-5 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 id="pdf-chat-title" className="text-lg font-semibold text-neutral-900">Ask this PDF</h2>
+              <h2 id="pdf-chat-title" className="text-lg font-semibold text-neutral-900">Chat with this PDF</h2>
               <p className="mt-1 text-xs text-neutral-500">Answers come from this PDF; general knowledge is clearly labeled.</p>
-              <p className="mt-1 text-xs text-neutral-500">Your question, your voice and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.</p>
+              <p className="mt-1 text-xs text-neutral-500">Your question and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.</p>
             </div>
             <button
               type="button"
@@ -884,7 +958,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
         </header>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5" aria-live="polite">
-          {entries.length === 0 && !thinking && micState === 'idle' && !conversationActive && (
+          {entries.length === 0 && !thinking && (
             <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4 text-sm text-neutral-600">
               Ask about dates, accommodation, activities, or any other information written in the PDF.
             </div>
@@ -903,8 +977,7 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
                     aria-label={playingId === entry.id ? 'Stop reading answer aloud' : 'Read answer aloud'}
                     className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-neutral-700 hover:border-brand-400 hover:text-brand-700"
                   >
-                    <span aria-hidden="true">{playingId === entry.id ? '⏹' : '▶'}</span>
-                    {playingId === entry.id ? 'Stop' : 'Read aloud'}
+                    {playingId === entry.id ? 'Stop reading' : 'Read aloud'}
                   </button>
                   {entry.grounded === false && (
                     <span className="inline-flex rounded-full bg-warning-100 px-2 py-0.5 text-[11px] font-semibold text-warning-900">
@@ -919,39 +992,6 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
             <div role="status" className="inline-flex rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-500">
               Reading the document…
             </div>
-          )}
-          {micState !== 'idle' && (
-            <div role="status" className="inline-flex rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-              {micState === 'requesting' && 'Opening the microphone…'}
-              {micState === 'recording' && 'Listening… tap Stop when you finish.'}
-              {micState === 'transcribing' && 'Transcribing your question…'}
-            </div>
-          )}
-          {conversationActive && (
-            <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
-              <p className="font-semibold">
-                {conversationPhase === 'listening' && 'Conversation mode is listening.'}
-                {conversationPhase === 'thinking' && 'Finishing your question…'}
-                {conversationPhase === 'speaking' && 'Answering aloud…'}
-              </p>
-              <p className="mt-1 text-xs text-success-800">
-                {conversationPhase === 'listening'
-                  ? 'Pause briefly when you finish. Earphones are recommended.'
-                  : conversationPhase === 'speaking'
-                    ? 'You can interrupt by speaking. Earphones are most reliable; speakers use echo cancellation.'
-                    : 'The microphone stays open; the next listening turn starts automatically.'}
-              </p>
-            </div>
-          )}
-          {playingId === ACKNOWLEDGMENT_PLAYBACK_ID && (
-            <button
-              type="button"
-              onClick={stopVoicePlayback}
-              className="inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-danger-400 hover:text-danger-700"
-            >
-              <span aria-hidden="true">⏹</span>
-              Stop voice
-            </button>
           )}
           {error && (
             <div role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
@@ -968,63 +1008,21 @@ export function PdfChat({ open, doc, onClose }: PdfChatProps) {
                 id="pdf-chat-question"
                 rows={2}
                 maxLength={MAX_QUESTION_CHARS}
-                value={conversationActive ? liveTranscript : question}
-                onChange={(event) => {
-                  if (!conversationActive) setQuestion(event.target.value);
-                }}
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     event.currentTarget.form?.requestSubmit();
                   }
                 }}
-                placeholder={conversationActive ? 'Listening continuously…' : 'Ask a question about this PDF…'}
-                disabled={!doc || thinking || micState !== 'idle' || conversationActive}
+                placeholder="Ask a question about this PDF…"
+                disabled={!doc || thinking}
                 className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200 disabled:bg-neutral-100"
               />
               <button
-                type="button"
-                onClick={() => {
-                  if (micState === 'recording') void finishRecording();
-                  else void beginRecording();
-                }}
-                disabled={!doc || thinking || conversationActive || micState === 'requesting' || micState === 'transcribing'}
-                aria-label={micState === 'recording' ? 'Stop recording question' : 'Ask by voice'}
-                aria-pressed={micState === 'recording'}
-                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${micState === 'recording' ? 'bg-danger-600 hover:bg-danger-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
-              >
-                {micState === 'requesting' && '…'}
-                {micState === 'recording' && '⏹'}
-                {micState === 'transcribing' && '…'}
-                {micState === 'idle' && '🎤'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (conversationActive) void stopConversation();
-                  else void beginConversation();
-                }}
-                disabled={!conversationActive && (!doc || thinking || micState !== 'idle' || conversationUnavailable)}
-                aria-label={conversationActive
-                  ? 'Stop conversation mode'
-                  : conversationUnavailable
-                    ? 'Conversation mode unavailable'
-                    : 'Start conversation mode'}
-                aria-pressed={conversationActive}
-                title={conversationUnavailable
-                  ? 'Realtime speech is unavailable; click-to-talk remains available.'
-                  : 'Conversation mode keeps the microphone open. You can interrupt spoken answers; earphones improve reliability.'}
-                className={`rounded-md px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${conversationActive ? 'bg-success-700 hover:bg-success-600' : 'bg-voice-700 hover:bg-voice-600'}`}
-              >
-                {conversationActive
-                  ? 'Stop conversation'
-                  : conversationUnavailable
-                    ? 'Unavailable'
-                    : 'Conversation'}
-              </button>
-              <button
                 type="submit"
-                disabled={!doc || thinking || micState !== 'idle' || conversationActive || question.trim() === ''}
+                disabled={!doc || thinking || question.trim() === ''}
                 className="rounded-md bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Send

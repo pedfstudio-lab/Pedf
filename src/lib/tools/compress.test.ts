@@ -105,7 +105,7 @@ describe('Compress PDF tool', () => {
 
   it('exposes the requested public definition', () => {
     expect(compressTool).toMatchObject({
-      slug: 'compress', title: 'Compress PDF', accepts: 'pdf', multiple: false, icon: '🗜',
+      slug: 'compress', title: 'Compress PDF', accepts: 'pdf', multiple: false,
       description: 'Make a PDF smaller by shrinking the photos inside. Text stays sharp.',
     });
   });
