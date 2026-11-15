@@ -20,11 +20,15 @@ describe('buildDiscussMessages', () => {
     expect(messages[0]).toMatchObject({ role: 'system' });
     expect(messages[0]?.content).toContain('cite the relevant [Page N]');
     expect(messages[0]?.content).toContain('general knowledge');
-    expect(messages[0]?.content).toContain('Answer concisely in Hindi');
+    expect(messages[0]?.content).toContain('Keep replies short, in Hindi: usually 1–3 sentences');
     expect(messages[0]?.content).toContain('warm, easygoing companion');
     expect(messages[0]?.content).toContain('never clinical or robotic');
-    expect(messages[0]?.content).toContain('say so honestly and warmly');
+    // Greetings stay short, and "I'm an AI" / "I can't do X" come up only when asked.
+    expect(messages[0]?.content).toContain('one short, friendly sentence (under 20 words)');
+    expect(messages[0]?.content).toContain('Only if the user asks whether you are an AI');
+    expect(messages[0]?.content).toContain('never bring it up yourself');
     expect(messages[0]?.content).toContain('cannot access accounts or history');
+    expect(messages[0]?.content).toContain('Mention this only when the user asks you to do such a thing, never as a disclaimer');
     expect(messages[0]?.content).toContain('qualified professional');
     expect(messages[0]?.content).toContain(NOT_IN_DOCUMENT_MARKER);
     expect(messages[0]?.content).toContain('[Page 1]\nCheck-in is at 3 PM.');

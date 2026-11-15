@@ -237,7 +237,7 @@ describe('SarvamProvider.discuss', () => {
       temperature: 0.2,
       max_tokens: 600,
     });
-    expect(request.messages[0]?.content).toContain('Answer concisely in Hindi');
+    expect(request.messages[0]?.content).toContain('Keep replies short, in Hindi');
     expect(request.messages[0]?.content).toContain(input.documentText);
     expect(request.messages[1]).toMatchObject({ role: 'user' });
     expect(request.messages[1]?.content).toContain(input.question);
