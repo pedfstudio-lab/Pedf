@@ -1,5 +1,9 @@
 import type { TranscribeStreamSession } from '@/lib/providers/types';
 import { devInfo } from '@/lib/util/devLog';
+// A file HighPal serves itself: the site's safety rules block scripts made at run time (blob:)
+// and scripts written into a data: address. `no-inline` stops Vite turning this small file
+// into a data: address, so it is always a real file.
+import pcmCaptureWorkletUrl from './pcmCaptureWorklet.js?url&no-inline';
 
 export interface RecordedQuestion {
   /** Browser-encoded audio retained for the batch STT fallback. */
@@ -31,17 +35,8 @@ const PREFERRED_MIME_TYPE = 'audio/webm;codecs=opus';
 const FALLBACK_MIME_TYPE = 'audio/webm';
 const REALTIME_SAMPLE_RATE = 16_000;
 const REALTIME_CHUNK_BYTES = 3_200; // 100 ms of 16 kHz, mono, signed 16-bit PCM.
+/** Registered by pcmCaptureWorklet.js. */
 const WORKLET_NAME = 'desipdf-pcm-capture';
-const WORKLET_SOURCE = `
-class DesiPdfPcmCapture extends AudioWorkletProcessor {
-  process(inputs) {
-    const channel = inputs[0] && inputs[0][0];
-    if (channel && channel.length > 0) this.port.postMessage(channel.slice());
-    return true;
-  }
-}
-registerProcessor('${WORKLET_NAME}', DesiPdfPcmCapture);
-`;
 
 /** Return the base container MIME type accepted by speech-to-text APIs. */
 export function baseMimeType(rawType: string): string {
@@ -125,7 +120,6 @@ export const createRealtimePcmCapture: PcmCaptureFactory = async (stream, onAudi
   let source: MediaStreamAudioSourceNode | undefined;
   let worklet: AudioWorkletNode | undefined;
   let mute: GainNode | undefined;
-  let moduleUrl: string | undefined;
   let stopped = false;
   const encoder = createPcmEncoder(context.sampleRate, REALTIME_SAMPLE_RATE);
   let pending = new Uint8Array(new ArrayBuffer(0));
@@ -151,8 +145,7 @@ export const createRealtimePcmCapture: PcmCaptureFactory = async (stream, onAudi
   };
 
   try {
-    moduleUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' }));
-    await context.audioWorklet.addModule(moduleUrl);
+    await context.audioWorklet.addModule(pcmCaptureWorkletUrl);
     source = context.createMediaStreamSource(stream);
     worklet = new AudioWorkletNode(context, WORKLET_NAME, {
       numberOfInputs: 1,
@@ -172,8 +165,6 @@ export const createRealtimePcmCapture: PcmCaptureFactory = async (stream, onAudi
   } catch (error) {
     await closeContext();
     throw error;
-  } finally {
-    if (moduleUrl) URL.revokeObjectURL(moduleUrl);
   }
 
   return {

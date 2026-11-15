@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseMimeType, floatSamplesToPcm16, startRecording } from './recordQuestion';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { baseMimeType, createRealtimePcmCapture, floatSamplesToPcm16, startRecording } from './recordQuestion';
 
 type FakeRecorderEvent = { readonly data?: Blob };
 type FakeRecorderListener = (event: FakeRecorderEvent) => void;
@@ -227,5 +229,55 @@ describe('startRecording', () => {
 
     await expect(startRecording()).rejects.toMatchObject({ name: 'NotAllowedError' });
     expect(FakeMediaRecorder.instances).toEqual([]);
+  });
+});
+
+describe('createRealtimePcmCapture', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // highpal.ai's safety rules (public/_headers) only let HighPal's own files run as scripts.
+  // A helper built at run time (a blob: address) is blocked there, and live voice fails.
+  it('loads the microphone helper from HighPal\'s own file, never from a blob: address', async () => {
+    const addModule = vi.fn<(url: string) => Promise<void>>(async () => undefined);
+    const node = () => ({ connect: vi.fn(), disconnect: vi.fn() });
+    class FakeAudioContext {
+      readonly sampleRate = 16_000;
+      state = 'running';
+      readonly destination = {};
+      readonly audioWorklet = { addModule };
+      createMediaStreamSource = node;
+      createGain = () => ({ ...node(), gain: { value: 1 } });
+      resume = vi.fn(async () => undefined);
+      close = vi.fn(async () => { this.state = 'closed'; });
+    }
+    class FakeWorkletNode { readonly port = { onmessage: null }; connect = vi.fn(); disconnect = vi.fn(); }
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    vi.stubGlobal('AudioWorkletNode', FakeWorkletNode);
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL');
+
+    const capture = await createRealtimePcmCapture({} as MediaStream, vi.fn());
+
+    expect(addModule).toHaveBeenCalledOnce();
+    const helperUrl = addModule.mock.calls[0]![0];
+    expect(helperUrl).not.toMatch(/^(blob|data):/);
+    expect(helperUrl).toContain('pcmCaptureWorklet');
+    expect(createObjectURL).not.toHaveBeenCalled();
+    await capture.stop();
+  });
+
+  it('is imported so the build keeps it a real file (small files are otherwise inlined as data: addresses)', () => {
+    const page = readFileSync(resolve('src/lib/speech/recordQuestion.ts'), 'utf8');
+    expect(page).toContain("from './pcmCaptureWorklet.js?url&no-inline'");
+  });
+
+  it('keeps the helper and the page using the same name', () => {
+    const helper = readFileSync(resolve('src/lib/speech/pcmCaptureWorklet.js'), 'utf8');
+    const page = readFileSync(resolve('src/lib/speech/recordQuestion.ts'), 'utf8');
+    const name = helper.match(/registerProcessor\('([^']+)'/)?.[1];
+    expect(name).toBeTruthy();
+    expect(page).toContain(`WORKLET_NAME = '${name}'`);
   });
 });
