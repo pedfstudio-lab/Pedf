@@ -9,7 +9,9 @@ describe('resolveRoute', () => {
     ['/privacy', '', 'privacy'],
     ['/terms', '', 'terms'],
     ['/support', '', 'support'],
-    ['/nope', '', 'landing'],
+    ['/index.html', '', 'landing'],
+    ['/nope', '', 'notFound'],
+    ['/compres', '', 'notFound'],
     ['/', '#verify', 'verify'],
   ] as const)('maps %s %s to %s', (pathname, hash, expected) => {
     expect(resolveRoute(pathname, hash)).toBe(expected);
@@ -23,7 +25,7 @@ describe('resolveRoute', () => {
     expect(resolveRoute(path, '')).toEqual({ kind: 'tool', slug: 'copy' });
   });
 
-  it.each(['/tools/nested/path', '/tools/%2e%2e'])('sends malformed tool paths to the index', (path) => {
-    expect(resolveRoute(path, '')).toEqual({ kind: 'tools' });
+  it.each(['/tools/nested/path', '/tools/%2e%2e', '/tools/Merge'])('treats malformed tool paths as not a page', (path) => {
+    expect(resolveRoute(path, '')).toBe('notFound');
   });
 });

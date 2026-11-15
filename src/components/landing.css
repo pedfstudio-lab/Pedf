@@ -651,6 +651,28 @@
   margin-top: 6px;
 }
 
+/* Page not found: the editor button first, then plain links. */
+.site-static > ul.site-static__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 28px;
+  margin-top: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.site-static > ul.site-static__links li + li {
+  margin-top: 0;
+}
+
+.site-static__links a:not(.site-button) {
+  color: var(--color-site-brand);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .site-static > p a {
   color: var(--color-site-brand);
   text-decoration: underline;

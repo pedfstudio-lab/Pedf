@@ -7,7 +7,9 @@
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // Every page is a ready-made file (dist/tools/merge.html is served at /tools/merge). Any other
+    // address gets dist/404.html with a "not found" status, instead of quietly showing the home page.
+    "not_found_handling": "404-page",
     "run_worker_first": ["/api/*"]
   },
   // Sites allowed to use the Sarvam route: highpal.ai only (the old workers.dev address is off).

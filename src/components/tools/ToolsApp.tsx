@@ -13,10 +13,12 @@ import { compressTool } from '@/lib/tools/compress';
 import { lockTool } from '@/lib/tools/lock';
 import { unlockTool } from '@/lib/tools/unlock';
 import { getTool, listTools, registerTool } from '@/lib/tools/registry';
+import { NOT_FOUND_META, TOOLS_META } from '@/lib/site/pageMeta';
+import { usePageMeta } from '@/lib/site/usePageMeta';
+import { NotFoundPage } from '../NotFoundPage';
 import { SiteFooter, SiteHeader } from '../SiteChrome';
 import { ToolIcon } from './ToolIcon';
 import { ToolPage } from './ToolPage';
-import { useToolMetadata } from './useToolMetadata';
 import '../landing.css';
 import './tools.css';
 
@@ -35,9 +37,15 @@ if (!getTool('compress')) registerTool(compressTool);
 if (!getTool('lock')) registerTool(lockTool);
 if (!getTool('unlock')) registerTool(unlockTool);
 
+/** An address like /tools/compres (a typo or a tool that doesn't exist). */
+function ToolNotFound() {
+  usePageMeta(NOT_FOUND_META);
+  return <NotFoundPage />;
+}
+
 function ToolsIndex() {
   const tools = listTools();
-  useToolMetadata('PDF tools', 'Work with PDFs locally in your browser. Your files are never uploaded.');
+  usePageMeta(TOOLS_META);
   return <main id="main-content" className="site-shell tool-main">
     <header className="tool-heading"><h1>PDF tools</h1><p>Work with your PDFs, right on your computer.</p></header>
     <p className="tool-local-note">No uploads. No account. Your files stay with you.</p>
@@ -54,6 +62,7 @@ function ToolsIndex() {
 
 export default function ToolsApp({ slug }: { slug?: string }) {
   const tool = slug ? getTool(slug) : undefined;
+  if (slug && !tool) return <ToolNotFound />;
   return <div className="site-page tools-page"><SiteHeader />
     {tool ? <ToolPage key={tool.slug} tool={tool} /> : <ToolsIndex />}
     <SiteFooter />

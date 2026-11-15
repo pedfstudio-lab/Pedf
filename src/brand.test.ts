@@ -21,7 +21,7 @@ function sources(folder: string): string[] {
 
 describe('HighPal brand', () => {
   it('names the site HighPal in the page head, with its official address', () => {
-    expect(html).toContain('<title>HighPal — Read it. Ask it. Edit it.</title>');
+    expect(html).toContain('<title>HighPal — Professional PDF Editor | Read it. Ask it. Edit it.</title>');
     expect(html).toContain(`<link rel="canonical" href="${SITE}/" />`);
     expect(html).toContain(`<meta property="og:url" content="${SITE}/" />`);
   });

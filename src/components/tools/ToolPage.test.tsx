@@ -130,19 +130,15 @@ describe('ToolPage', () => {
     expect(note.classList.contains('tool-result-note-ok')).toBe(true);
   });
 
-  it('renders a registered tool and sets/restores page metadata', () => {
-    document.title = 'Original title';
-    const meta = document.createElement('meta');
-    meta.name = 'description'; meta.content = 'Original description'; document.head.append(meta);
-    const { unmount } = show();
+  // Each page sets its own name card when it opens (see routes.test.tsx), so nothing is restored on leaving.
+  it('renders a registered tool and sets its title, description and real address', () => {
+    show();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(dummy.title);
     expect((screen.getByRole('button', { name: dummy.title }) as HTMLButtonElement).disabled).toBe(true);
-    expect(document.title).toBe('Test PDF tool — HighPal');
-    expect(meta.content).toBe(dummy.description);
-    unmount();
-    expect(document.title).toBe('Original title');
-    expect(meta.content).toBe('Original description');
-    meta.remove();
+    expect(document.title).toBe('Test PDF tool — Free, No Upload | HighPal');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content'))
+      .toBe('A local processing test. Free, and your file never leaves your device.');
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://highpal.ai/tools/dummy');
   });
 
   it('takes pending files only once under StrictMode', async () => {

@@ -46,4 +46,30 @@ describe('Root navigation', () => {
       expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Your PDF stays yours.');
     });
   });
+
+  it('keeps each page\'s title and real address right while moving around the site', () => {
+    render(<StrictMode><Root /></StrictMode>);
+    expect(document.title).toBe('HighPal — Professional PDF Editor | Read it. Ask it. Edit it.');
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://highpal.ai/');
+
+    act(() => navigate('/terms'));
+    expect(document.title).toBe('Terms of Use — HighPal');
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://highpal.ai/terms');
+    expect(document.head.querySelector('meta[property="og:url"]')?.getAttribute('content')).toBe('https://highpal.ai/terms');
+  });
+
+  it('shows "page not found" for an old link or a typo, kept out of search', () => {
+    window.history.replaceState({}, '', '/compres');
+    render(<StrictMode><Root /></StrictMode>);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('We couldn’t find that page.');
+    expect(screen.getByRole('link', { name: 'Open the PDF editor' }).getAttribute('href')).toBe('/app');
+    expect(document.title).toBe('Page not found — HighPal');
+    expect(document.head.querySelector('link[rel="canonical"]')).toBeNull();
+    expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex');
+
+    act(() => navigate('/'));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Read it. Ask it. Edit it.');
+    expect(document.head.querySelector('meta[name="robots"]')).toBeNull();
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://highpal.ai/');
+  });
 });

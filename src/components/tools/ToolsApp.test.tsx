@@ -28,9 +28,22 @@ describe('ToolsApp index and lookup', () => {
     expect(document.querySelectorAll('.tool-card')).toHaveLength(14);
   });
 
-  it('falls back to the tools index for an unknown slug', () => {
+  it('says "page not found" for an unknown tool (a typo like /tools/compres), kept out of search', () => {
     render(<ToolsApp slug="does-not-exist" />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('PDF tools');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('We couldn’t find that page.');
+    expect(screen.getByRole('link', { name: 'Free PDF tools' }).getAttribute('href')).toBe('/tools');
+    expect(document.title).toBe('Page not found — HighPal');
+    expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex');
+  });
+
+  it('gives a tool page its own title, description and real address', () => {
+    render(<ToolsApp slug="merge" />);
+    expect(document.title).toBe('Merge PDF — Free, No Upload | HighPal');
+    expect(document.head.querySelector('meta[name="description"]')?.getAttribute('content'))
+      .toBe('Combine two or more PDFs into one, in the order you choose. Free, and your file never leaves your device.');
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://highpal.ai/tools/merge');
+    expect(document.head.querySelector('meta[property="og:url"]')?.getAttribute('content')).toBe('https://highpal.ai/tools/merge');
+    expect(document.head.querySelector('meta[name="robots"]')).toBeNull();
   });
 
   it('keeps the hidden Copy PDF page reachable for verification', () => {

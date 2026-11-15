@@ -1,4 +1,4 @@
-export type SiteRoute = 'landing' | 'app' | 'privacy' | 'terms' | 'support' | 'verify'
+export type SiteRoute = 'landing' | 'app' | 'privacy' | 'terms' | 'support' | 'verify' | 'notFound'
   | { kind: 'tools' } | { kind: 'tool'; slug: string };
 
 function normalizePath(pathname: string): string {
@@ -14,10 +14,15 @@ export function resolveRoute(pathname: string, hash: string): SiteRoute {
   if (path === '/tools') return { kind: 'tools' };
   if (path.startsWith('/tools/')) {
     const slug = path.slice('/tools/'.length);
-    return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? { kind: 'tool', slug } : { kind: 'tools' };
+    // Any well-formed name is looked up by the tools page, which shows "page not found" for an
+    // unknown tool; anything else (nested or strange paths) is not a page.
+    return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? { kind: 'tool', slug } : 'notFound';
   }
 
   switch (path) {
+    case '/':
+    case '/index.html':
+      return 'landing';
     case '/app':
       return 'app';
     case '/privacy':
@@ -29,6 +34,7 @@ export function resolveRoute(pathname: string, hash: string): SiteRoute {
     case '/verify':
       return 'verify';
     default:
-      return 'landing';
+      // An old link or a typo: say so, instead of quietly showing the home page.
+      return 'notFound';
   }
 }

@@ -14,7 +14,8 @@ import { DOCUMENT_PASSWORD_FIELD } from '@/lib/util/documentPasswordField';
 import { LockIcon } from '../LineIcons';
 import { ToolDropZone } from './ToolDropZone';
 import { ToolFilePreview } from './ToolFilePreview';
-import { useToolMetadata } from './useToolMetadata';
+import { toolPageMeta } from '@/lib/site/pageMeta';
+import { usePageMeta } from '@/lib/site/usePageMeta';
 
 /** `locked`: the PDF needs its password before the tool can use it. `attempt` resets the field after a wrong try. */
 interface InputFile { id: number; file: File; locked?: { error?: string; busy?: boolean; attempt: number } }
@@ -57,7 +58,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   const canRunReason = tool.canRun?.(options, inputFiles);
   const runDisabled = files.length < minimumInputs || !!canRunReason || lockedCount > 0;
   const Options = tool.Options;
-  useToolMetadata(tool.title, tool.description);
+  usePageMeta(toolPageMeta(tool));
 
   /**
    * Locked and restricted PDFs are unlocked on the device as soon as they're added, so every
