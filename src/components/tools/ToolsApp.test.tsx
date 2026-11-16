@@ -36,6 +36,14 @@ describe('ToolsApp index and lookup', () => {
     expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex');
   });
 
+  it.each(['merge', 'compress', 'copy'])('makes "Skip to content" jump to the %s tool (keyboard and screen-reader users)', (slug) => {
+    render(<ToolsApp slug={slug} />);
+    expect(screen.getByRole('link', { name: 'Skip to content' }).getAttribute('href')).toBe('#main-content');
+    expect(document.querySelectorAll('#main-content')).toHaveLength(1);
+    expect(document.getElementById('main-content')?.tagName).toBe('MAIN');
+    expect(document.getElementById('main-content')?.querySelector('h1')).toBeTruthy();
+  });
+
   it('gives a tool page its own title, description and real address', () => {
     render(<ToolsApp slug="merge" />);
     expect(document.title).toBe('Merge PDF — Free, No Upload | HighPal');

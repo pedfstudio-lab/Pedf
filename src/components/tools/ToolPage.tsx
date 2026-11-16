@@ -196,7 +196,8 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
     try { action(); } catch { setError('The download could not be prepared. Please try again.'); }
   }
 
-  return <main className="site-shell tool-main">
+  // id: where the header's "Skip to content" link jumps (keyboard and screen-reader users).
+  return <main id="main-content" className="site-shell tool-main">
     <a className="tool-back" href={siteHref('/tools')}>← All tools</a>
     <header className="tool-heading"><h1>{tool.title}</h1><p>{tool.description}</p></header>
     <p className="tool-local-note">Processed in your browser. Your files are not uploaded.</p>

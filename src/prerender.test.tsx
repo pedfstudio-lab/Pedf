@@ -62,6 +62,14 @@ describe('ready-made pages (readable without JavaScript)', () => {
     }
   });
 
+  it('gives every page with a "Skip to content" link exactly one place to jump to', () => {
+    for (const { file, html } of site) {
+      if (!html.includes('href="#main-content"')) continue;
+      expect(html.match(/id="main-content"/g), file).toHaveLength(1);
+    }
+    expect(page('tools/merge.html')).toContain('id="main-content"');
+  });
+
   it('keeps the page shell otherwise unchanged (styles, scripts, icons)', () => {
     for (const { html } of site) {
       expect(html).toContain('<script type="module" src="/src/main.tsx"></script>');
