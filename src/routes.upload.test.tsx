@@ -140,7 +140,7 @@ describe('landing PDF handoff to the editor', () => {
       const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
       fireEvent.change(input, { target: { files: [file] } });
     } else {
-      fireEvent.drop(screen.getByRole('button', { name: 'Drop your PDF here' }), {
+      fireEvent.drop(screen.getByRole('button', { name: /^Drop your PDF here/ }), {
         dataTransfer: { files: [file] },
       });
     }

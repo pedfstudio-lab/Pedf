@@ -52,7 +52,7 @@ describe('Landing', () => {
     const file = new File(['%PDF-1.7'], 'dropped-test.pdf', { type: 'application/pdf' });
     render(<Landing />);
 
-    fireEvent.drop(screen.getByRole('button', { name: 'Drop your PDF here' }), {
+    fireEvent.drop(screen.getByRole('button', { name: /^Drop your PDF here/ }), {
       dataTransfer: { files: [file] },
     });
 
@@ -145,7 +145,7 @@ describe('Landing', () => {
   it('opens on the Drop-first screen: headline, wide drop area, privacy line, then Read · Ask · Edit', () => {
     const { container } = render(<Landing />);
     const hero = container.querySelector('.hero')!;
-    const drop = screen.getByRole('button', { name: 'Drop your PDF here' });
+    const drop = screen.getByRole('button', { name: /^Drop your PDF here/ });
     expect(drop.textContent).toContain('Choose your PDF');
     expect(hero.querySelector('.hero__privacy')?.textContent).toContain('Your PDF never leaves your device.');
     expect(hero.querySelector('.hero__privacy')?.textContent).toContain('Only Ask, voice and Translate send text out');

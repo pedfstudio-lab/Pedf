@@ -46,6 +46,10 @@ export function PdfDropZone({
   const id = useId();
   const helpId = `${id}-help`;
   const errorId = `${id}-error`;
+  const chooseText = touch ? 'Tap to choose your PDF' : 'Choose your PDF';
+  // Touch-screen laptops (wide screens) can still drop a file, so there the line says so; phones
+  // keep "It stays on your device." PdfDropZone.css shows one or the other by screen width.
+  const touchLaptopLine = 'Drop your PDF here';
 
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
@@ -65,7 +69,8 @@ export function PdfDropZone({
         type="button"
         className={`drop-zone${wide ? ' drop-zone--wide' : ''}${wide && touch ? ' drop-zone--touch' : ''}${dragging ? ' drop-zone--active' : ''}`}
         // The whole area is the one button; the marigold "Choose your PDF" inside is its look.
-        {...(wide ? { 'aria-label': label } : {})}
+        // Its spoken name is the words visible inside it (hidden ones drop out by themselves), so
+        // screen readers read each once and voice control ("click Choose your PDF") works.
         onClick={() => inputRef.current?.click()}
         onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
         onDragOver={(event) => {
@@ -81,15 +86,21 @@ export function PdfDropZone({
           setDragging(false);
           acceptFile(event.dataTransfer.files[0]);
         }}
-        aria-describedby={`${helpId}${error && !onError ? ` ${errorId}` : ''}`}
+        // The line under the heading is already part of the name, so only an error is added here.
+        aria-describedby={error && !onError ? errorId : undefined}
       >
         <span className="drop-zone__icon" aria-hidden="true">
           <svg viewBox="0 0 48 56" fill="none"><path d="M9 3h21l9 9v41H9z" fill="white"/><path d="M30 3v10h9" style={{ stroke: 'var(--color-accent)' }} strokeWidth="3"/><path d="M24 39V22m-7 7 7-7 7 7" style={{ stroke: 'var(--color-site-brand)' }} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </span>
-        <span className="drop-zone__text"><strong>{label}</strong><small id={helpId}>{sublabel}</small></span>
+        {/* The {' '} spaces keep words apart for tools that read the text (layout ignores them). */}
+        <span className="drop-zone__text"><strong>{label}</strong>{' '}<small id={helpId}>
+          {wide && touch
+            ? <><span className="drop-zone__line-wide">{touchLaptopLine}</span><span className="drop-zone__line-narrow">{sublabel}</span></>
+            : sublabel}
+        </small></span>
         {wide && <>
-          <span className="drop-zone__or" aria-hidden="true">or</span>
-          <span className="drop-zone__choose" aria-hidden="true">{touch ? 'Tap to choose your PDF' : 'Choose your PDF'}</span>
+          {' '}<span className="drop-zone__or">or</span>
+          {' '}<span className="drop-zone__choose">{chooseText}</span>
         </>}
       </button>
       <input

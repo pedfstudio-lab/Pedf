@@ -158,10 +158,18 @@
   display: none;
 }
 
-/* Touch screens can't drag a file in: no "Drop your PDF here", no "or"; the button says Tap. */
+/* Touch screens: no heading line, no "or"; the button says Tap. */
 .drop-zone--touch .drop-zone__text strong,
 .drop-zone--touch .drop-zone__or { display: none; }
 .drop-zone--touch .drop-zone__choose { margin-left: auto; }
+
+/* Touch-screen laptops can still drop a file in, so their line says "Drop your PDF here";
+   phones (760 px and narrower) keep "It stays on your device." */
+.drop-zone__line-wide { display: none; }
+@media (min-width: 761px) {
+  .drop-zone--touch .drop-zone__line-wide { display: inline; }
+  .drop-zone--touch .drop-zone__line-narrow { display: none; }
+}
 
 /* Phones and narrow windows: one big button, then "It stays on your device." */
 @media (max-width: 760px) {

@@ -66,16 +66,17 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
             </p>
             <ul className="hero__cards" aria-label="What you can do">
               <li>
-                <img src={siteHref('landing/hero-doc.webp')} width="62" height="62" alt="" />
+                {/* Small "-card" copies (shown at 62 px): these load first, so they're kept light. */}
+                <img src={siteHref('landing/hero-doc-card.webp')} width="62" height="62" alt="" decoding="async" />
                 {/* Phones show the shorter wording, so the first card fits the first screen. */}
                 <div><strong>Read it</strong><span>See any page in <span lang="hi">हिन्दी</span>, <span lang="ta">தமிழ்</span><span className="hero__long">, <span lang="bn">বাংলা</span> and more</span><span className="hero__short">…</span></span></div>
               </li>
               <li>
-                <img src={siteHref('landing/cube-bot.webp')} width="62" height="62" alt="" />
+                <img src={siteHref('landing/cube-bot-card.webp')} width="62" height="62" alt="" decoding="async" />
                 <div><strong>Ask it</strong><span>Type or talk<span className="hero__long">, and get answers from your PDF</span><span className="hero__short">, get answers</span></span></div>
               </li>
               <li>
-                <img src={siteHref('landing/cube-text.webp')} width="62" height="62" alt="" />
+                <img src={siteHref('landing/cube-text-card.webp')} width="62" height="62" alt="" decoding="async" />
                 <div><strong>Edit it</strong><span>Click any word and change it</span></div>
               </li>
             </ul>
@@ -88,7 +89,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
           <div className="features__grid">
             {features.map((feature) => (
               <a className="feature" key={feature.title} href={siteHref(feature.href)}>
-                <img src={siteHref(`landing/${feature.image}`)} width="350" height="539" alt="" loading="lazy" decoding="async" />
+                <img src={siteHref(`landing/${feature.image}`)} width="247" height="380" alt="" loading="lazy" decoding="async" />
                 <h3>{feature.title}</h3>
               </a>
             ))}
