@@ -18,6 +18,7 @@ No proprietary PDF font has been copied into these assets. No Caladea is shipped
 | sourcesanspro | adobe-fonts/source-sans, 2.045R-ro/1.095R-it (Source Sans Pro) |
 | bricolagegrotesque | ateliertriay/bricolage |
 | oswald | googlefonts/OswaldFont (static TTFs; no italics, slanted when needed) |
+| poppins | Google Fonts Poppins 4.004 (itfoundry/Poppins): all 9 weights, upright and italic |
 | liberation | Liberation 2.1.5: Sans, Serif and Mono |
 | r1width | Renamed horizontal-width derivatives of Liberation 2.1.5 |
 

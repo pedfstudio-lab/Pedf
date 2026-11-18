@@ -81,6 +81,43 @@ describe('Task 78 font identity and local assets', () => {
     expect(canUseSourceWord('ab', s)).toBe(true); expect(canUseSourceWord('abQ', s)).toBe(false);
     expect(fallbackWordRanges('abQ ab', [{ start:0, text:'ab', style:s },{ start:2,text:'Q ab',style:s }], canUseSourceWord)).toEqual([{start:0,end:3}]);
   });
+  // Canva PDFs often use Poppins (stored as a CID font). Edited Poppins text must stay real Poppins,
+  // in the same weight, not an Arial look-alike stretched to Poppins' widths (which looks lighter).
+  it.each([
+    ['ANZBEO+Poppins-Bold', true, false, 'poppins/Poppins-Bold.ttf'],
+    ['ABCDEF+Poppins-Regular', false, false, 'poppins/Poppins-Regular.ttf'],
+    ['ABCDEF+Poppins-SemiBold', true, false, 'poppins/Poppins-SemiBold.ttf'],
+    ['ABCDEF+Poppins-Medium', false, false, 'poppins/Poppins-Medium.ttf'],
+    ['ABCDEF+Poppins-ExtraBold', true, false, 'poppins/Poppins-ExtraBold.ttf'],
+    ['ABCDEF+Poppins-Black', true, false, 'poppins/Poppins-Black.ttf'],
+    ['ABCDEF+Poppins-Light', false, false, 'poppins/Poppins-Light.ttf'],
+    ['ABCDEF+Poppins-ExtraLight', false, false, 'poppins/Poppins-ExtraLight.ttf'],
+    ['ABCDEF+Poppins-Thin', false, false, 'poppins/Poppins-Thin.ttf'],
+    ['ABCDEF+Poppins-Italic', false, true, 'poppins/Poppins-Italic.ttf'],
+    ['ABCDEF+Poppins-BoldItalic', true, true, 'poppins/Poppins-BoldItalic.ttf'],
+    ['ABCDEF+Poppins-SemiBoldItalic', true, true, 'poppins/Poppins-SemiBoldItalic.ttf'],
+  ])('uses real Poppins for %s (bold %s, italic %s)', (name, bold, italic, file) => {
+    const match = matchFont({ ...style(name), bold, italic });
+    expect(match).toMatchObject({ family: 'Poppins', file, exact: true, scale: 1 });
+  });
+  it('drops to Poppins Regular when someone switches bold off on a SemiBold line', () => {
+    expect(matchFont({ ...style('ABCDEF+Poppins-SemiBold'), bold: false, sourceBold: true }).file).toBe('poppins/Poppins-Regular.ttf');
+  });
+  it('ships all 18 Poppins files it can ask for, each recorded with its source, size, fingerprint and licence', async () => {
+    const { createHash } = await import('node:crypto');
+    const sources = JSON.parse(await readFile('public/fonts/SOURCES.json', 'utf8')) as { file: string; bytes: number; sha256: string; licence: string; source: string }[];
+    const weights = ['Thin', 'ExtraLight', 'Light', 'Regular', 'Medium', 'SemiBold', 'Bold', 'ExtraBold', 'Black'];
+    const files = weights.flatMap((weight) => [`poppins/Poppins-${weight}.ttf`, `poppins/Poppins-${weight === 'Regular' ? '' : weight}Italic.ttf`]);
+    for (const file of files) {
+      const entry = sources.find((item) => item.file === file);
+      const data = await readFile(`public/fonts/${file}`);
+      expect(entry, file).toMatchObject({ licence: 'poppins/OFL.txt', bytes: data.length });
+      expect(entry?.source).toMatch(/^https:\/\/raw\.githubusercontent\.com\/google\/fonts\/[0-9a-f]{40}\/ofl\/poppins\//);
+      expect(createHash('sha256').update(data).digest('hex')).toBe(entry?.sha256);
+      expect(sfntMetrics(new Uint8Array(data)).width('Q')).toBeGreaterThan(0);
+    }
+    expect(await readFile('public/fonts/poppins/OFL.txt', 'utf8')).toContain('SIL Open Font License, Version 1.1');
+  });
   it('ships every selected regular/B/I asset, plus its OFL notice', async () => {
     for (const name of ['Calibri','Arial','Times New Roman','Courier New','Lato','Open Sans','IBM Plex Sans','League Spartan','Noto Sans','Source Sans Pro','Bricolage Grotesque','Allura']) {
       for (const bold of [false,true]) for (const italic of [false,true]) {

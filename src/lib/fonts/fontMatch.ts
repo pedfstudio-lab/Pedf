@@ -9,6 +9,7 @@ const families = [
   ['sourcesanspro', 'SourceSansPro', /sourcesans(?:pro|3)/],
   ['bricolagegrotesque', 'BricolageGrotesque', /bricolagegrotesque/], ['allura', 'Allura', /allura/],
   ['oswald', 'Oswald', /^oswald/],
+  ['poppins', 'Poppins', /^poppins/],
   ['liberation', 'LiberationMono', /courier|liberationmono/],
   ['liberation', 'LiberationSerif', /times|liberationserif/],
   ['liberation', 'LiberationSans', /^(?:arial|arialmt|helvetica|helveticaneue|liberationsans)(?:regular|bold|italic|oblique|bolditalic|boldoblique)?$/],
@@ -30,6 +31,8 @@ const specialWeights: Record<string, readonly string[]> = {
   IBMPlexSans: ['Light','Medium','SemiBold'], NotoSans: ['Light','Medium','SemiBold','Black','ExtraBold'],
   SourceSansPro: ['Semibold'], BricolageGrotesque: ['SemiBold','ExtraBold'], LeagueSpartan: ['Light','Medium','SemiBold','ExtraBold'],
   Oswald: ['ExtraLight','Light','Medium','SemiBold'],
+  // Longer names first, so "ExtraLight" isn't read as "Light". Plain Bold/Regular come from the bold flag.
+  Poppins: ['ExtraLight','ExtraBold','SemiBold','Thin','Light','Medium','Black'],
 };
 export function matchFont(style: TextStyle): FontMatch {
   const name = style.fontIdentity ?? fontSources.get(style.fontRef ?? '')?.name ?? style.fontName;
