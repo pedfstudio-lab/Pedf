@@ -10,6 +10,7 @@ const families = [
   ['bricolagegrotesque', 'BricolageGrotesque', /bricolagegrotesque/], ['allura', 'Allura', /allura/],
   ['oswald', 'Oswald', /^oswald/],
   ['poppins', 'Poppins', /^poppins/],
+  ['fraunces', 'Fraunces', /^fraunces/], ['caveat', 'Caveat', /^caveat/], ['geistmono', 'GeistMono', /^geistmono/],
   ['liberation', 'LiberationMono', /courier|liberationmono/],
   ['liberation', 'LiberationSerif', /times|liberationserif/],
   ['liberation', 'LiberationSans', /^(?:arial|arialmt|helvetica|helveticaneue|liberationsans)(?:regular|bold|italic|oblique|bolditalic|boldoblique)?$/],
@@ -21,7 +22,7 @@ export function normalizeFontName(name: string): string {
 // Serif families recognisable by name. A sans stand-in for a serif font is wider and has taller
 // lowercase letters, so edited text grows. The PDF's own serif flag is not used: LaTeX marks
 // Latin Modern Sans as serif, and Word leaves Times New Roman unmarked.
-const SERIF_NAMES = /times|georgia|cambria|(?<!sans)serif|termes|pagella|bonum|schola|lmroman|^cm(?:r|bx|ti|sl|csc|b|mi)\d|nimbusrom|garamond|palatino|bookantiqua|bookman|century(?!gothic)|schoolbook|minion|baskerville|caslon|didot|bodoni|charter|utopia|constantia|sabon|merriweather(?!sans)|^lora|playfair|spectral|crimson|cormorant|tinos|stix|frankruhl/;
+const SERIF_NAMES = /times|georgia|cambria|(?<!sans)serif|termes|pagella|bonum|schola|lmroman|^cm(?:r|bx|ti|sl|csc|b|mi)\d|nimbusrom|garamond|palatino|bookantiqua|bookman|century(?!gothic)|schoolbook|minion|baskerville|caslon|didot|bodoni|charter|utopia|constantia|sabon|merriweather(?!sans)|^lora|playfair|spectral|crimson|cormorant|tinos|stix|frankruhl|fraunces/;
 export function genericFont(name: string): 'Sans' | 'Serif' | 'Mono' {
   if (/courier|mono|consolas/i.test(name)) return 'Mono';
   return SERIF_NAMES.test(normalizeFontName(name)) ? 'Serif' : 'Sans';
@@ -33,15 +34,27 @@ const specialWeights: Record<string, readonly string[]> = {
   Oswald: ['ExtraLight','Light','Medium','SemiBold'],
   // Longer names first, so "ExtraLight" isn't read as "Light". Plain Bold/Regular come from the bold flag.
   Poppins: ['ExtraLight','ExtraBold','SemiBold','Thin','Light','Medium','Black'],
+  Fraunces: ['Black'],
 };
+/** Families shipped with only the styles a corpus PDF used. Any other style keeps the generic stand-in. */
+const shippedStyles: Record<string, readonly string[]> = { Fraunces: ['Black', 'BlackItalic'], Caveat: ['Bold'], GeistMono: ['Regular'] };
+// A variable-font instance can carry its optical size and default style in the family name:
+// "BricolageGrotesque96ptExtraBold-Bold" is Bold, and "Fraunces9pt-Black" is Black. That tag is not the weight.
+const SIZE_TAG = /\d+pt(?:thin|extralight|ultralight|light|regular|book|medium|semibold|demibold|extrabold|ultrabold|bold|black|heavy)?(?=-)/i;
 export function matchFont(style: TextStyle): FontMatch {
   const name = style.fontIdentity ?? fontSources.get(style.fontRef ?? '')?.name ?? style.fontName;
   const normalized = normalizeFontName(name);
-  const known = families.find(([, , regex]) => regex.test(normalized));
+  const found = families.find(([, , regex]) => regex.test(normalized));
+  const { match, variant } = styledMatch(style, name, found);
+  const shipped = found && shippedStyles[found[1]];
+  return shipped && !shipped.includes(variant) ? styledMatch(style, name, undefined).match : match;
+}
+function styledMatch(style: TextStyle, name: string, known: (typeof families)[number] | undefined): { match: FontMatch; variant: string } {
   const [directory, family] = known ?? ['liberation', `Liberation${genericFont(name)}`];
+  const weightName = normalizeFontName(name.replace(SIZE_TAG, ''));
   let weight = style.bold ? 'Bold' : 'Regular';
   if (style.bold === (style.sourceBold ?? style.bold)) {
-    weight = specialWeights[family]?.find(value => normalized.includes(value.toLowerCase())) ?? weight;
+    weight = specialWeights[family]?.find(value => weightName.includes(value.toLowerCase())) ?? weight;
   }
   let italic = style.italic;
   const syntheticItalic = italic && ['Allura','LeagueSpartan','BricolageGrotesque','Oswald'].includes(family);
@@ -52,8 +65,8 @@ export function matchFont(style: TextStyle): FontMatch {
   if (family === 'SourceSansPro' && italic) variant = weight === 'Regular' ? 'It' : `${weight}It`;
   const ratio = known ? 1 : style.fontWidthScale ?? fontSources.get(style.fontRef ?? '')?.scale ?? 1;
   const legacySpartan = family === 'LeagueSpartan' && style.bold && /#legacy-v011$/i.test(name);
-  return { family, file: legacySpartan ? 'leaguespartan-legacy/LeagueSpartan-Bold.ttf' : `${directory}/${family}-${variant}.ttf`, exact: !!known,
-    scale: Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 2 ? ratio : 1, syntheticBold, syntheticItalic };
+  return { variant, match: { family, file: legacySpartan ? 'leaguespartan-legacy/LeagueSpartan-Bold.ttf' : `${directory}/${family}-${variant}.ttf`, exact: !!known,
+    scale: Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 2 ? ratio : 1, syntheticBold, syntheticItalic } };
 }
 
 interface FontSource { name: string; widths: ReadonlyMap<string, number>; peerWidths?: ReadonlyMap<string, number>; reusable: boolean; scale?: number }

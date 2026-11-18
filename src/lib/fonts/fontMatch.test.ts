@@ -118,6 +118,50 @@ describe('Task 78 font identity and local assets', () => {
     }
     expect(await readFile('public/fonts/poppins/OFL.txt', 'utf8')).toContain('SIL Open Font License, Version 1.1');
   });
+  // A web page saved as PDF (TESTING FILE 2) uses Fraunces, Caveat and Geist Mono. Only the styles it used ship.
+  it.each([
+    ['BAAAAA+Fraunces-Black', true, false, 'fraunces/Fraunces-Black.ttf'],
+    ['AAAAAA+Fraunces-BlackItalic', true, true, 'fraunces/Fraunces-BlackItalic.ttf'],
+    // HighPal's own download embeds the file under its internal name; re-editing must still find it.
+    ['Fraunces9pt-Black-8450', true, false, 'fraunces/Fraunces-Black.ttf'],
+    ['AAAAAA+Caveat-Bold', true, false, 'caveat/Caveat-Bold.ttf'],
+    ['JAAAAA+GeistMono-Regular', false, false, 'geistmono/GeistMono-Regular.ttf'],
+  ])('uses the real, free font for %s', (name, bold, italic, file) => {
+    expect(matchFont({ ...style(name), bold, italic })).toMatchObject({ file, exact: true, scale: 1 });
+  });
+  it.each([
+    ['Fraunces-Regular', false, false, 'liberation/LiberationSerif-Regular.ttf'],
+    ['Fraunces-Bold', true, false, 'liberation/LiberationSerif-Bold.ttf'],
+    ['Caveat-Regular', false, false, 'liberation/LiberationSans-Regular.ttf'],
+    ['Caveat-Bold', true, true, 'liberation/LiberationSans-BoldItalic.ttf'],
+    ['GeistMono-Bold', true, false, 'liberation/LiberationMono-Bold.ttf'],
+  ])('keeps the generic stand-in for %s (bold %s, italic %s), a style that is not shipped', (name, bold, italic, file) => {
+    expect(matchFont({ ...style(name), bold, italic })).toMatchObject({ file, exact: false });
+  });
+  it('keeps the generic stand-in when bold is switched off on a Fraunces Black line', () => {
+    expect(matchFont({ ...style('Fraunces-Black'), bold: false, sourceBold: true })).toMatchObject({ file: 'liberation/LiberationSerif-Regular.ttf', exact: false });
+  });
+  it.each([
+    ['DAAAAA+BricolageGrotesque96ptExtraBold-Bold', 'bricolagegrotesque/BricolageGrotesque-Bold.ttf'],
+    ['FAAAAA+BricolageGrotesque96ptExtraBold-ExtraBold', 'bricolagegrotesque/BricolageGrotesque-ExtraBold.ttf'],
+  ])('reads the weight of %s after its optical-size tag, not from the tag', (name, file) => {
+    expect(matchFont({ ...style(name), bold: true }).file).toBe(file);
+  });
+  it('never asks for a missing file in a partly shipped family, and records every shipped one with its licence', async () => {
+    const { createHash } = await import('node:crypto');
+    const sources = JSON.parse(await readFile('public/fonts/SOURCES.json', 'utf8')) as { file: string; bytes: number; sha256: string; licence: string; source: string }[];
+    const weights = ['Thin', 'ExtraLight', 'Light', 'Regular', 'Medium', 'SemiBold', 'Bold', 'ExtraBold', 'Black'];
+    for (const family of ['Fraunces', 'Caveat', 'GeistMono']) for (const weight of weights) for (const italic of [false, true]) for (const bold of [false, true]) {
+      const match = matchFont({ ...style(`${family}-${weight}${italic ? 'Italic' : ''}`), bold, italic });
+      const data = await readFile(`public/fonts/${match.file}`);
+      if (!match.exact) continue;
+      const entry = sources.find((item) => item.file === match.file);
+      expect(entry, match.file).toMatchObject({ bytes: data.length, licence: `${match.file.split('/')[0]}/OFL.txt` });
+      expect(entry?.source).toMatch(/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{40}\//);
+      expect(createHash('sha256').update(data).digest('hex')).toBe(entry?.sha256);
+      expect(await readFile(`public/fonts/${entry!.licence}`, 'utf8')).toContain('SIL Open Font License, Version 1.1');
+    }
+  });
   it('ships every selected regular/B/I asset, plus its OFL notice', async () => {
     for (const name of ['Calibri','Arial','Times New Roman','Courier New','Lato','Open Sans','IBM Plex Sans','League Spartan','Noto Sans','Source Sans Pro','Bricolage Grotesque','Allura']) {
       for (const bold of [false,true]) for (const italic of [false,true]) {

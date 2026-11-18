@@ -19,8 +19,15 @@ No proprietary PDF font has been copied into these assets. No Caladea is shipped
 | bricolagegrotesque | ateliertriay/bricolage |
 | oswald | googlefonts/OswaldFont (static TTFs; no italics, slanted when needed) |
 | poppins | Google Fonts Poppins 4.004 (itfoundry/Poppins): all 9 weights, upright and italic |
+| fraunces | undercasetype/Fraunces at the commit Google Fonts ships: Black and Black Italic only, the 9pt optical size (`Fraunces9pt-Black.ttf` saved as `Fraunces-Black.ttf`; it matched a corpus PDF's widths) |
+| caveat | googlefonts/caveat at the commit Google Fonts ships: Bold only |
+| geistmono | vercel/geist-font at the commit Google Fonts ships: Geist Mono Regular only |
 | liberation | Liberation 2.1.5: Sans, Serif and Mono |
 | r1width | Renamed horizontal-width derivatives of Liberation 2.1.5 |
+
+Fraunces, Caveat and Geist Mono ship only the styles a corpus PDF used. Any other
+style of those families keeps the generic Liberation stand-in rather than asking
+for a file that is not here (see `shippedStyles` in `src/lib/fonts/fontMatch.ts`).
 
 The `r1width` fonts are rebuilt with `scripts/task78-width-fonts.py` (fontTools).
 They are named **R1WidthSans**, **R1WidthSerif**, **R1WidthMono**, not a reserved

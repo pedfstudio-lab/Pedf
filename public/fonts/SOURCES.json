@@ -970,5 +970,37 @@
     "sha256": "46df80ac970f5e84829b868d283878b4d97e289c7b1245541d8bbf66b5d670a8",
     "source": "https://raw.githubusercontent.com/google/fonts/b7c8331cf620346575487ef8db0e2c729f014675/ofl/poppins/Poppins-ThinItalic.ttf",
     "licence": "poppins/OFL.txt"
+  },
+  {
+    "family": "Fraunces",
+    "file": "fraunces/Fraunces-Black.ttf",
+    "bytes": 65956,
+    "sha256": "af0e6185643ff6898920181140d4c568492accd76a73abddcac8db4041b31b95",
+    "source": "https://raw.githubusercontent.com/undercasetype/Fraunces/d6d385783609ceb11ac0f220f3abd9f1631c8a36/fonts/static/ttf/Fraunces9pt-Black.ttf",
+    "licence": "fraunces/OFL.txt"
+  },
+  {
+    "family": "Fraunces",
+    "file": "fraunces/Fraunces-BlackItalic.ttf",
+    "bytes": 76900,
+    "sha256": "c008c052296f09cd1d3d2fbd9ce2600cf23834c97dea34e52f8db9de2486a3f3",
+    "source": "https://raw.githubusercontent.com/undercasetype/Fraunces/d6d385783609ceb11ac0f220f3abd9f1631c8a36/fonts/static/ttf/Fraunces9pt-BlackItalic.ttf",
+    "licence": "fraunces/OFL.txt"
+  },
+  {
+    "family": "Caveat",
+    "file": "caveat/Caveat-Bold.ttf",
+    "bytes": 303088,
+    "sha256": "29e5cf4177d79af56c256c24f687fd6a74c3d04c3c4660ccca87b0a6d1fa3452",
+    "source": "https://raw.githubusercontent.com/googlefonts/caveat/59745e818ef7973e11e70cb1358d0e902b56c5fc/fonts/ttf/Caveat-Bold.ttf",
+    "licence": "caveat/OFL.txt"
+  },
+  {
+    "family": "GeistMono",
+    "file": "geistmono/GeistMono-Regular.ttf",
+    "bytes": 149284,
+    "sha256": "5a0de4b3d54ab272f76a1d8c84b7fb24c67bbec6591d5300e61c7bc10094b6c8",
+    "source": "https://raw.githubusercontent.com/vercel/geist-font/77f0563c03009d6c15c6342183fa53b352255b22/fonts/GeistMono/ttf/GeistMono-Regular.ttf",
+    "licence": "geistmono/OFL.txt"
   }
 ]
