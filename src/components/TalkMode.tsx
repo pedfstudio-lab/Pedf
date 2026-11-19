@@ -108,7 +108,7 @@ export function TalkMode({
         )}
         <p aria-hidden="true" className="mt-2 text-xs font-medium text-neutral-600">{statusHint(status, handsFree)}</p>
         <p className="mt-0.5 text-[11px] leading-snug text-neutral-500">
-          Your voice and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.
+          Your voice and this PDF’s text are sent to Sarvam AI to answer. HighPal doesn’t store them.
         </p>
       </div>
 

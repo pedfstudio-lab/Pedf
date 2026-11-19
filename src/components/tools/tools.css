@@ -3,6 +3,7 @@
 .tool-heading { margin: 22px 0 14px; }
 .tool-heading h1 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; letter-spacing: -.04em; line-height: 1.15; margin: 0 0 12px; }
 .tool-heading p { font-size: 1.125rem; color: var(--color-site-body); line-height: 1.6; margin: 0; }
+.tool-heading .tool-rights-note { margin-top: 10px; font-size: .9375rem; font-weight: 600; color: var(--color-site-brand-ink); }
 .tool-back { color: var(--color-site-brand-strong); font-weight: 650; text-decoration: none; }
 .tool-local-note { width: fit-content; padding: 9px 14px; background: var(--color-site-band); color: var(--color-site-brand-ink); border-radius: 10px; font-size: .875rem; margin-bottom: 28px; }
 .tools-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 28px; }
@@ -29,6 +30,7 @@
 .tool-file-name { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
 .tool-file-name strong { overflow-wrap: anywhere; }
 .tool-file-name span { font-size: .875rem; color: var(--color-site-body); }
+.tool-file-name .tool-file-unprotected { overflow-wrap: anywhere; line-height: 1.45; }
 .tool-file-password { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 6px; }
 .tool-file-password .lock-field { flex: 1 1 220px; }
 .tool-file-password .lock-field span { font-size: .875rem; color: var(--color-site-ink); }

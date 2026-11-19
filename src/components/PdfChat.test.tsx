@@ -154,6 +154,11 @@ describe('PdfChat question length', () => {
     await typeQuestion('x'.repeat(5000));
     expect((mocks.discuss.mock.calls[0]?.[0] as DiscussInput).question).toHaveLength(2000);
   });
+  it('promises only what HighPal controls about storage', () => {
+    mount();
+    expect(document.body.textContent).toContain('Your question and this PDF’s text are sent to Sarvam AI to answer. HighPal doesn’t store them.');
+    expect(document.body.textContent).not.toContain('Nothing is stored');
+  });
 });
 
 describe('PdfChat current context', () => {

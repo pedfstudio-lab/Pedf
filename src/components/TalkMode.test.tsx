@@ -77,7 +77,9 @@ describe('TalkMode', () => {
   it('says that voice and the PDF text go to Sarvam AI, and uses no emoji', () => {
     renderTalk();
     const shell = screen.getByRole('region', { name: 'Talk with this PDF' });
-    expect(shell.textContent).toContain('Your voice and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.');
+    // Only promise what HighPal controls: Sarvam's own retention follows its terms.
+    expect(shell.textContent).toContain('Your voice and this PDF’s text are sent to Sarvam AI to answer. HighPal doesn’t store them.');
+    expect(shell.textContent).not.toContain('Nothing is stored');
     expect(shell.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 });

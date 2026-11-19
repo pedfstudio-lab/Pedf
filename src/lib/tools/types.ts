@@ -28,6 +28,8 @@ export interface ToolDefinition {
   slug: string;
   title: string;
   description: string;
+  /** Shown under the description: whose files this tool may be used on (e.g. Unlock). */
+  rightsNote?: string;
   accepts: 'pdf' | 'image' | 'pdf-or-image';
   multiple: boolean;
   minInputs?: number;

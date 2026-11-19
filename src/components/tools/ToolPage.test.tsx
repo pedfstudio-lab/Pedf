@@ -11,6 +11,7 @@ import { PDF_ERRORS } from '@/lib/tools/pdfIo';
 import { previewPdf } from '@/lib/tools/preview';
 import { getTool, registerTool } from '@/lib/tools/registry';
 import type { ToolContext, ToolDefinition, ToolOutput } from '@/lib/tools/types';
+import { UNLOCK_RIGHTS_NOTE, UNPROTECTED_FILE_NOTE, unlockTool } from '@/lib/tools/unlock';
 import { ToolPage } from './ToolPage';
 
 const protection = vi.hoisted(() => ({ unlockPdfFile: vi.fn() }));
@@ -319,6 +320,26 @@ describe('ToolPage', () => {
       await screen.findByRole('region', { name: 'Results' });
       expect(run.mock.calls[0]![0][0]).toBe(unlocked);
       expect(screen.queryByLabelText(/Password for/)).toBeNull();
+    });
+
+    it('reminds whose PDFs may be unlocked: on the Unlock page, and on any file whose protection was removed', async () => {
+      // An ordinary PDF gets no reminder.
+      show(); pick(file('plain.pdf'));
+      await waitFor(() => expect(protection.unlockPdfFile).toHaveBeenCalled());
+      expect(screen.queryByText(UNPROTECTED_FILE_NOTE)).toBeNull();
+      cleanup();
+
+      // A restricted PDF, unlocked on the device as it's added, carries the reminder on its card.
+      protection.unlockPdfFile.mockImplementation(async (input: File) => ({ file: input, protection: 'restricted' }));
+      show(); pick(file('restricted.pdf'));
+      expect(await screen.findByText(UNPROTECTED_FILE_NOTE)).toBeTruthy();
+      cleanup();
+
+      // The Unlock tool says it once, under its description, instead of on the card.
+      show(unlockTool); pick(file('restricted.pdf'));
+      expect(screen.getByText(UNLOCK_RIGHTS_NOTE)).toBeTruthy();
+      await waitFor(() => expect(protection.unlockPdfFile).toHaveBeenCalledTimes(3));
+      expect(screen.queryByText(UNPROTECTED_FILE_NOTE)).toBeNull();
     });
   });
 });

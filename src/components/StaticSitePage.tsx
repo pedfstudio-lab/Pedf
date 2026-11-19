@@ -7,19 +7,65 @@ type StaticPageKind = 'privacy' | 'terms' | 'support';
 /** Who the terms are an agreement with. Before paid plans, add a refund policy and complaints contact too. */
 const OWNER_NAME = 'Utkarsh Taneja';
 const TERMS_UPDATED = '14 November 2026';
+/** Change this whenever the privacy page changes what it says about data. */
+const PRIVACY_UPDATED = '20 November 2026';
+const SARVAM_PRIVACY_URL = 'https://www.sarvam.ai/privacy-policy';
+const CLOUDFLARE_PRIVACY_URL = 'https://www.cloudflare.com/privacypolicy/';
 
 export function StaticSitePage({ kind }: { readonly kind: StaticPageKind }) {
   if (kind === 'privacy') {
+    const email = <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>;
+    const sarvamPolicy = <a href={SARVAM_PRIVACY_URL} rel="noopener noreferrer">Sarvam AI’s privacy policy</a>;
+    const cloudflarePolicy = <a href={CLOUDFLARE_PRIVACY_URL} rel="noopener noreferrer">its privacy policy</a>;
     return (
       <StaticPageShell>
         <main id="main-content" className="site-static site-shell">
           <p className="site-eyebrow">Privacy</p>
           <h1>Your PDF stays yours.</h1>
-          <p>HighPal processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
-          <p>When you use chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent, through HighPal's server, to Sarvam AI. HighPal does not store them.</p>
-          <p>The first time you use chat, voice or Translate in a visit, Cloudflare Turnstile checks that you're a person and not a bot, so HighPal's AI can't be misused. To do this, Cloudflare sees technical details such as your internet address and browser. If you pass, your browser keeps a security-only pass for 30 minutes. It isn't used for tracking, and Turnstile never sees your PDFs or questions.</p>
+          <p className="site-static__note">Last updated: {PRIVACY_UPDATED}</p>
+          <p>This page covers highpal.ai. HighPal processes and saves your edits locally in your browser. Your PDF is not uploaded, stored, or associated with an account.</p>
+
+          <h2>1. Who is responsible</h2>
+          <p>HighPal is run by {OWNER_NAME}, an individual based in Alwar, Rajasthan, India. For any privacy question or request, email {email}. This is also our grievance contact under India’s data protection law.</p>
+          <p>If you email us, we use your email address and message only to reply, and keep them only as long as we need to sort out your request.</p>
+
+          <h2>2. What stays on your device</h2>
+          <p>Your PDFs, your edits, the files you save in HighPal and the signatures you save are kept only in this browser, on your device. The PDF tools (merge, compress and the rest) work in your browser too.</p>
+          <p>To do this, HighPal uses your browser’s own storage: IndexedDB for saved files, and localStorage for saved signatures and settings such as your language. The only cookie HighPal sets is the 30-minute security pass described below. None of this is used for ads or tracking.</p>
+          <p>You can delete a saved file from your Saved files, delete a saved signature in the Sign window, or remove everything by clearing this site’s data in your browser.</p>
           <p>There are no accounts. You stay in control of the original file and the edited copy you download.</p>
+
+          <h2>3. What leaves your device, and when</h2>
+          <p>When you choose chat, voice or Translate, only your question, your audio, and the document text needed to answer or translate are sent, through HighPal's server, to Sarvam AI. By choosing one of these features, you agree to this. HighPal does not store them. See {sarvamPolicy}.</p>
+          <p>Your microphone is only used while Talk or voice input is switched on. The audio goes straight to Sarvam AI to be turned into text; HighPal doesn’t record or keep it.</p>
+          <p>The first time you use chat, voice or Translate in a visit, Cloudflare Turnstile checks that you're a person and not a bot, so HighPal's AI can't be misused. To do this, Cloudflare sees technical details such as your internet address and browser. If you pass, your browser keeps a security-only pass for 30 minutes. It isn't used for tracking, and Turnstile never sees your PDFs or questions.</p>
+          <p>To keep the AI features fair for everyone, HighPal’s server briefly uses your internet address to limit how often they can be used. HighPal does not save it.</p>
           <p>To see how many people visit and which pages they use, HighPal uses Cloudflare Web Analytics. It counts visits without cookies and does not track you across other sites. It never sees your PDFs or anything you type.</p>
+          <p>HighPal is hosted on Cloudflare. HighPal keeps no server logs; Cloudflare may keep short security logs under {cloudflarePolicy}.</p>
+
+          <h2>4. Why we use it, and on what basis</h2>
+          <ul>
+            <li><strong>Sending your question, audio or document text to Sarvam AI:</strong> your consent, given when you choose chat, voice or Translate.</li>
+            <li><strong>The human check and usage limits:</strong> keeping HighPal secure and fair to everyone (legitimate interests).</li>
+            <li><strong>Counting visits:</strong> understanding how many people use HighPal (legitimate interests).</li>
+            <li><strong>Hosting, and replying to your emails:</strong> running the site and answering you (legitimate interests).</li>
+          </ul>
+          <p>We don’t sell your data, show ads, or build a profile about you.</p>
+
+          <h2>5. Where it is handled</h2>
+          <p>Sarvam AI is based in India. Cloudflare is a US company with servers around the world; for data from Europe it relies on the EU–US Data Privacy Framework and the European Commission’s standard contractual clauses. If you’re outside India, using chat, voice or Translate sends your question and the document text to India.</p>
+
+          <h2>6. How long it is kept</h2>
+          {/* Sarvam support confirmed (19 Nov 2026) its Model APIs keep data for 45 days by default. Change this if that changes. */}
+          <p>HighPal itself keeps none of this. Sarvam AI currently keeps it for up to 45 days, then deletes it. The Turnstile pass expires after 30 minutes. Cloudflare keeps visitor counts as totals, and any security logs as its privacy policy says. Emails you send us are kept only until your request is sorted out. Files and signatures you save stay in your browser until you delete them.</p>
+
+          <h2>7. Your rights</h2>
+          <p>You can withdraw your consent at any time, as easily as you gave it: just stop using chat, voice or Translate. Editing and the PDF tools keep working.</p>
+          <p>HighPal can’t see or delete your files: they’re in your browser, and you control them. If you’ve emailed us, you can ask to see, correct or delete what you sent. We reply to every request within 24–48 hours at {email}.</p>
+          <p>If you’re not happy with our reply, you can complain to a data protection authority: in India, the Data Protection Board of India; in the European Union, the authority in your country.</p>
+
+          <h2>8. Children</h2>
+          <p>HighPal is meant for people aged 18 or over. If you’re under 18, use it only with a parent’s or guardian’s permission.</p>
         </main>
       </StaticPageShell>
     );

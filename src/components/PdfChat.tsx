@@ -931,7 +931,7 @@ export function PdfChat({ open, mode = 'chat', doc, onClose }: PdfChatProps) {
             <div>
               <h2 id="pdf-chat-title" className="text-lg font-semibold text-neutral-900">Chat with this PDF</h2>
               <p className="mt-1 text-xs text-neutral-500">Answers come from this PDF; general knowledge is clearly labeled.</p>
-              <p className="mt-1 text-xs text-neutral-500">Your question and this PDF’s text are sent to Sarvam AI to answer. Nothing is stored.</p>
+              <p className="mt-1 text-xs text-neutral-500">Your question and this PDF’s text are sent to Sarvam AI to answer. HighPal doesn’t store them.</p>
             </div>
             <button
               type="button"

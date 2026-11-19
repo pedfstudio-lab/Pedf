@@ -117,7 +117,7 @@ export function Landing({ projectStore }: { readonly projectStore?: ProjectStore
               <p className="site-eyebrow">Private by design</p>
               <h2 id="privacy-title">Runs on your computer.{' '}<span>Stays on your computer.</span></h2>
               <p>Everything is processed in your browser. Your PDF never leaves your device.</p>
-              <p className="privacy-band__detail">Chat, voice and Translate send only your question, your audio, and the document’s text to Sarvam AI to get an answer or a translation. Nothing is stored.</p>
+              <p className="privacy-band__detail">Chat, voice and Translate send only your question, your audio, and the document’s text to Sarvam AI to get an answer or a translation. HighPal doesn’t store them.</p>
               <a href={siteHref('/privacy')}>Read our privacy notes <span aria-hidden="true">→</span></a>
             </div>
           </div>

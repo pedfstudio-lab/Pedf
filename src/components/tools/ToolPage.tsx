@@ -10,6 +10,7 @@ import { validateFiles } from '@/lib/tools/files';
 import { formatBytes, friendlyError } from '@/lib/tools/pdfIo';
 import type { ToolDefinition, ToolOptions, ToolOutput } from '@/lib/tools/types';
 import { UnlockPdfError } from '@/lib/unlockPdf/protocol';
+import { UNPROTECTED_FILE_NOTE } from '@/lib/tools/unlock';
 import { DOCUMENT_PASSWORD_FIELD } from '@/lib/util/documentPasswordField';
 import { LockIcon } from '../LineIcons';
 import { ToolDropZone } from './ToolDropZone';
@@ -17,8 +18,12 @@ import { ToolFilePreview } from './ToolFilePreview';
 import { toolPageMeta } from '@/lib/site/pageMeta';
 import { usePageMeta } from '@/lib/site/usePageMeta';
 
-/** `locked`: the PDF needs its password before the tool can use it. `attempt` resets the field after a wrong try. */
-interface InputFile { id: number; file: File; locked?: { error?: string; busy?: boolean; attempt: number } }
+/**
+ * `locked`: the PDF needs its password before the tool can use it. `attempt` resets the field after a wrong try.
+ * `unprotected`: its password or restrictions were removed on this device, so the card reminds whose files
+ * that's allowed for.
+ */
+interface InputFile { id: number; file: File; locked?: { error?: string; busy?: boolean; attempt: number }; unprotected?: boolean }
 
 /** Resolves to the file the tool should use (unlocked if it was protected), or null while it still needs a password. */
 type FileCheck = Promise<File | null>;
@@ -69,7 +74,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
       ? { ...entry, locked: { error, attempt: (entry.locked?.attempt ?? 0) + (error ? 1 : 0) } } : entry));
     const check = unlockPdfFile(file, password).then(({ file: ready, protection }) => {
       if (protection !== 'none' || password) {
-        setFiles((current) => current.map((entry) => entry.id === id ? { id, file: ready } : entry));
+        setFiles((current) => current.map((entry) => entry.id === id ? { id, file: ready, unprotected: protection !== 'none' } : entry));
       }
       return ready;
     }, (reason: unknown) => {
@@ -199,7 +204,8 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
   // id: where the header's "Skip to content" link jumps (keyboard and screen-reader users).
   return <main id="main-content" className="site-shell tool-main">
     <a className="tool-back" href={siteHref('/tools')}>← All tools</a>
-    <header className="tool-heading"><h1>{tool.title}</h1><p>{tool.description}</p></header>
+    <header className="tool-heading"><h1>{tool.title}</h1><p>{tool.description}</p>
+      {tool.rightsNote && <p className="tool-rights-note">{tool.rightsNote}</p>}</header>
     <p className="tool-local-note">Processed in your browser. Your files are not uploaded.</p>
     {error && <div className="tool-error" role="alert">{error}</div>}
     {warnings.length > 0 && <div className="tool-warning" role="status"><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
@@ -209,7 +215,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
         <h2>{files.length} {files.length === 1 ? 'file' : 'files'} selected</h2>
         {tool.multiple && files.length > 1 && <p className="tool-hint">Drag files to change their order, or use the arrow buttons.</p>}
         <ol className="tool-files">
-          {files.map(({ file, id, locked }, index) => <li key={id} draggable={tool.multiple && !running && !locked}
+          {files.map(({ file, id, locked, unprotected }, index) => <li key={id} draggable={tool.multiple && !running && !locked}
             onDragStart={(event) => {
               dragged.current = id;
               event.dataTransfer.effectAllowed = 'move';
@@ -229,6 +235,7 @@ export function ToolPage({ tool }: { tool: ToolDefinition }) {
             <div className="tool-file-name"><strong title={file.name}>{file.name}</strong><span>{formatBytes(file.size)}</span>
               {locked && <LockedFileForm key={locked.attempt} fileName={file.name} error={locked.error} busy={locked.busy}
                 onUnlock={(password) => unlockWithPassword(id, password)} />}
+              {unprotected && !tool.rightsNote && <span className="tool-file-unprotected">{UNPROTECTED_FILE_NOTE}</span>}
             </div>
             <div className="tool-file-actions">
               {tool.multiple && <>
